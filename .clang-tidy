@@ -1,0 +1,64 @@
+# Sunspots Clang-Tidy Configuration
+# Matches: docs/standards/code.md
+#
+# Enforces:
+# - Banned unsafe functions (gets, sprintf, strcpy, etc.)
+# - Best practices for C code
+# - Naming conventions
+
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  bugprone-unsafe-functions,
+  cert-*,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  cert-err33-c,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-valist.Uninitialized,
+  cppcoreguidelines-pro-type-vararg,
+  misc-*,
+  -misc-no-recursion,
+  -misc-include-cleaner,
+  performance-*,
+  portability-*,
+  readability-*,
+  -readability-braces-around-statements,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-identifier-length,
+  readability-identifier-naming,
+
+WarningsAsErrors: '*'
+
+HeaderFilterRegex: 'src/(compute|config|core|database|fetch|transform|utils)/.*|include/.*'
+# Note: src/libs is intentionally excluded from the regex above to avoid linting vendored code.
+
+CheckOptions:
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+  - key: readability-identifier-naming.StructCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumCase
+    value: lower_case
+  - key: readability-function-cognitive-complexity.Threshold
+    value: 60
+
+# Key checks that catch banned functions:
+# - bugprone-unsafe-functions: gets(), etc.
+# - clang-analyzer-security.insecureAPI.gets: gets()
+# - clang-analyzer-security.insecureAPI.strcpy: strcpy()
+# - cert-msc30-c: rand()
