@@ -1,0 +1,12 @@
+#ifndef TRANSFORM_H
+#define TRANSFORM_H
+
+typedef enum {
+    TRANSFORM_OK = 0,
+    TRANSFORM_INVALID_INPUT,
+    TRANSFORM_MISSING_FIELD,
+    TRANSFORM_BAD_FORMAT,
+    TRANSFORM_UNSUPPORTED
+} transform_status_t;
+
+#endif
