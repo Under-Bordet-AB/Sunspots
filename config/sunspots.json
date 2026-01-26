@@ -1,0 +1,15 @@
+{
+  "system": {
+    "version": "1.0",
+    "name": "Sunspots",
+    "debug": true
+  },
+  "modules": {
+    "core": {},
+    "server": {},
+    "database": {},
+    "compute": {},
+    "fetch": {},
+    "transform": {}
+  }
+}

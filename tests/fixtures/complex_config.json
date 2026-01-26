@@ -1,0 +1,87 @@
+{
+    "application": {
+        "name": "TestApp",
+        "version": "1.2.3",
+        "environment": "development",
+        "debug": true
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "ssl": {
+            "enabled": true,
+            "cert_path": "/etc/ssl/certs/server.crt",
+            "key_path": "/etc/ssl/private/server.key",
+            "protocols": [
+                "TLSv1.2",
+                "TLSv1.3"
+            ]
+        },
+        "timeouts": {
+            "read": 30,
+            "write": 30,
+            "idle": 120
+        }
+    },
+    "database": {
+        "primary": {
+            "type": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "name": "main_db",
+            "user": "admin",
+            "password": "secret123",
+            "pool": {
+                "min_connections": 5,
+                "max_connections": 20,
+                "connection_timeout": 5000
+            }
+        },
+        "cache": {
+            "type": "redis",
+            "host": "cache.example.com",
+            "port": 6379,
+            "ttl": 3600,
+            "max_memory": "2gb"
+        }
+    },
+    "logging": {
+        "level": "info",
+        "format": "json",
+        "outputs": [
+            {
+                "type": "file",
+                "path": "/var/log/app/application.log",
+                "max_size": "100MB",
+                "max_backups": 5,
+                "compress": true
+            },
+            {
+                "type": "console",
+                "colorize": true
+            }
+        ],
+        "modules": {
+            "auth": "debug",
+            "api": "info",
+            "database": "warn"
+        }
+    },
+    "monitoring": {
+        "enabled": true,
+        "metrics": {
+            "port": 9090,
+            "path": "/metrics",
+            "interval": 15
+        },
+        "health_check": {
+            "enabled": true,
+            "path": "/health",
+            "checks": [
+                "database",
+                "cache",
+                "disk"
+            ]
+        }
+    }
+}
