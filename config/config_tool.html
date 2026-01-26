@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Config Manager - Linear Edition</title>
+    <!-- Engines & Styles -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+
+        body {
+            background-color: #050505;
+            margin: 0;
+            overflow: hidden;
+            height: 100vh;
+            font-family: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Professional Hard Scrollbars */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #050505;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #18181b;
+            border-radius: 0px;
+            border: 2px solid #050505;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #27272a;
+        }
+
+        pre::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        pre::-webkit-scrollbar-thumb {
+            background: #09090b;
+            border-radius: 10px;
+        }
+
+        input[type='number']::-webkit-inner-spin-button,
+        input[type='number']::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        select {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+        }
+
+        .page-container {
+            width: 100%;
+            max-width: 580px;
+            min-height: 700px;
+            background-color: #09090b;
+            border: 1px solid #18181b;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.9);
+            transition: box-shadow 0.2s ease;
+        }
+
+        .book-spread-container {
+            position: relative;
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        .book-spread-container::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 80px;
+            transform: translateX(-50%);
+            background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.6) 48%, rgba(0, 0, 0, 0.6) 52%, transparent);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .config-label {
+            font-size: 10px;
+            color: #71717a;
+            width: 144px;
+            flex-shrink: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-transform: uppercase;
+        }
+
+        /* Loading States */
+        .parsing-error {
+            color: #ef4444;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useCallback, useRef, useEffect, Fragment } = React;
+
+        // --- INLINE SVG ICONS ---
+        const Icon = ({ name, size = 14, className = "" }) => {
+            const icons = {
+                ChevronRight: <path d="m9 18 6-6-6-6" />,
+                ChevronDown: <path d="m6 9 6 6 6-6" />,
+                Search: <Fragment><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></Fragment>,
+                Minimize: <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" />,
+                Maximize: <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            };
+            return (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                    {icons[name] || null}
+                </svg>
+            );
+        };
+
+        const cn = (...classes) => classes.filter(Boolean).join(' ');
+
+        // --- PARSER UTILITY (Handles JSON with Comments) ---
+        const parseJsonWithComments = (text) => {
+            const cleanText = text.replace(/\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g, (m, g) => g ? "" : m);
+            return JSON.parse(cleanText);
+        };
+
+        // --- APP COMPONENTS ---
+
+        const Button = ({ children, onClick, variant = 'primary', size = 'sm', className = '', title = '' }) => {
+            const variants = {
+                primary: 'bg-zinc-100 text-zinc-950 hover:bg-zinc-200 border border-white/20',
+                secondary: 'bg-zinc-900 text-zinc-100 border border-zinc-800 hover:bg-zinc-800',
+                ghost: 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50',
+                outline: 'border border-zinc-800 bg-transparent hover:bg-zinc-900 text-zinc-300 shadow-sm'
+            };
+            const sizes = {
+                xs: 'px-2 py-1 text-[9px]',
+                sm: 'px-3 py-1.5 text-[10px]',
+                md: 'px-4 py-2 text-xs',
+                icon: 'p-2'
+            };
+            return (
+                <button onClick={onClick} title={title} className={cn("inline-flex items-center justify-center gap-2 font-bold rounded-md transition-all active:scale-[0.97] uppercase tracking-widest whitespace-nowrap", variants[variant], sizes[size], className)}>
+                    {children}
+                </button>
+            );
+        };
+
+        const Switch = ({ checked, onCheckedChange }) => (
+            <button onClick={() => onCheckedChange(!checked)} className={cn("relative inline-flex h-[20px] w-[36px] items-center rounded-full transition-all duration-300 shadow-inner", checked ? "bg-emerald-500" : "bg-zinc-800")}>
+                <span className={cn("block h-3.5 w-3.5 rounded-full bg-white transition-transform duration-300 shadow-md", checked ? "translate-x-[18px]" : "translate-x-1")} />
+            </button>
+        );
+
+        const Input = ({ value, onChange, type = "text", colorClass = "text-emerald-400" }) => (
+            <input type={type} value={value} onChange={onChange} className={cn("flex h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs font-mono transition-all focus:ring-1 focus:ring-zinc-700 outline-none", colorClass)} />
+        );
+
+        // --- MAIN APP ---
+
+        const App = () => {
+            const [config, setConfig] = useState({});
+            const [expandedPaths, setExpandedPaths] = useState(new Set(['root']));
+            const [searchTerm, setSearchTerm] = useState('');
+            const [isDragging, setIsDragging] = useState(false);
+            const [isCopied, setIsCopied] = useState(false);
+            const [isDirty, setIsDirty] = useState(false);
+            const [error, setError] = useState(null);
+            const fileInputRef = useRef(null);
+
+            const getModulePaths = (obj) => ['root', ...Object.keys(obj).map(k => `root.${k}`)];
+            const getAllPaths = (obj, parentPath) => {
+                let paths = [parentPath];
+                if (typeof obj === 'object' && obj !== null) {
+                    Object.entries(obj).forEach(([key, value]) => {
+                        if (typeof value === 'object' && value !== null) {
+                            paths = [...paths, ...getAllPaths(value, `${parentPath}.${key}`)];
+                        }
+                    });
+                }
+                return paths;
+            };
+
+            const modulesExpanded = useMemo(() => {
+                const headKeys = Object.keys(config).map(k => `root.${k}`);
+                if (headKeys.length === 0) return false;
+                return headKeys.every(k => expandedPaths.has(k));
+            }, [config, expandedPaths]);
+
+            const allExpanded = useMemo(() => {
+                const all = getAllPaths(config, 'root');
+                if (all.length <= 1) return false;
+                return all.every(k => expandedPaths.has(k));
+            }, [config, expandedPaths]);
+
+            const toggleModules = () => {
+                if (modulesExpanded) setExpandedPaths(new Set(['root']));
+                else setExpandedPaths(new Set(getModulePaths(config)));
+            };
+
+            const toggleAll = () => {
+                if (allExpanded) setExpandedPaths(new Set(getModulePaths(config)));
+                else setExpandedPaths(new Set(getAllPaths(config, 'root')));
+            };
+
+            const updateValue = (path, value) => {
+                const newConfig = { ...config };
+                const keys = path.replace('root.', '').split('.');
+                let current = newConfig;
+                for (let i = 0; i < keys.length - 1; i++) current = current[keys[i]];
+                current[keys[keys.length - 1]] = value;
+                setConfig({ ...newConfig });
+                setIsDirty(true);
+            };
+
+            const toggleExpand = (path) => {
+                const next = new Set(expandedPaths);
+                if (next.has(path)) next.delete(path); else next.add(path);
+                setExpandedPaths(next);
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const json = parseJsonWithComments(ev.target.result);
+                        setConfig(json);
+                        setExpandedPaths(new Set(getModulePaths(json)));
+                        setIsDirty(false);
+                        setError(null);
+                    } catch (err) {
+                        setError("Failed to parse JSON: " + err.message);
+                        setTimeout(() => setError(null), 5000);
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+            };
+
+            const download = () => {
+                const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'config.json'; a.click();
+                setIsDirty(false);
+            };
+
+            const copy = () => {
+                const el = document.createElement('textarea');
+                el.value = JSON.stringify(config, null, 2);
+                document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+                setIsCopied(true); setTimeout(() => setIsCopied(false), 2000);
+            };
+
+            // REFACTORED: Comprehensive highlighting including nested array elements
+            const renderHighlightedJson = (obj, path = 'root', indent = 0) => {
+                if (indent > 20) return "...";
+                const spacing = '  '.repeat(indent);
+
+                // Helper to highlight any raw value type
+                const highlightValue = (val, p, ind) => {
+                    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+                        return "{\n" + renderHighlightedJson(val, p, ind + 1) + "\n" + '  '.repeat(ind) + "}";
+                    } else if (Array.isArray(val)) {
+                        return "[\n" + val.map((v, i) => '  '.repeat(ind + 1) + highlightValue(v, `${p}.${i}`, ind + 1)).join(",\n") + "\n" + '  '.repeat(ind) + "]";
+                    } else {
+                        if (typeof val === 'string') return `<span class="text-emerald-400">${JSON.stringify(val)}</span>`;
+                        if (typeof val === 'number') return `<span class="text-sky-400">${val}</span>`;
+                        if (typeof val === 'boolean') return `<span class="text-orange-400 font-bold">${val}</span>`;
+                        if (val === null) return `<span class="text-zinc-500">null</span>`;
+                        return JSON.stringify(val);
+                    }
+                };
+
+                const entries = Object.entries(obj);
+                return entries.map(([key, value], idx) => {
+                    const currentPath = `${path}.${key}`;
+                    const comma = idx === entries.length - 1 ? "" : ",";
+                    const coloredKey = `<span class="text-pink-400">"${key}"</span>`;
+                    const coloredVal = highlightValue(value, currentPath, indent);
+                    return `${spacing}  ${coloredKey}: ${coloredVal}${comma}`;
+                }).join('\n');
+            };
+
+            const resultCount = useMemo(() => {
+                if (!searchTerm) return null;
+                let c = 0;
+                const check = (o) => Object.entries(o).forEach(([k, v]) => {
+                    if (typeof v === 'object' && v !== null) check(v);
+                    if (k.toLowerCase().includes(searchTerm) || String(v).toLowerCase().includes(searchTerm)) c++;
+                });
+                check(config); return c;
+            }, [config, searchTerm]);
+
+            const ConfigField = ({ obj, path, level = 0, forcedVisible = false }) => {
+                const entries = Object.entries(obj);
+
+                if (entries.length === 0 && level === 0 && !searchTerm) {
+                    return (
+                        <div className="flex flex-col items-center p-20 text-zinc-600 opacity-40">
+                            <span className="text-[10px] uppercase tracking-[0.2em] font-black">No manifest loaded</span>
+                        </div>
+                    );
+                }
+
+                const filtered = entries.filter(([k, v]) => {
+                    if (!searchTerm || forcedVisible) return true;
+                    const match = (o, t) => {
+                        if (o === null || typeof o !== 'object') return String(o).toLowerCase().includes(t);
+                        return Object.entries(o).some(([sk, sv]) => sk.toLowerCase().includes(t) || match(sv, t));
+                    };
+                    return k.toLowerCase().includes(searchTerm) || match(v, searchTerm);
+                });
+
+                if (searchTerm && filtered.length === 0 && level === 0) return (
+                    <div className="flex flex-col items-center p-20 text-zinc-600">
+                        <Icon name="Search" size={40} className="mb-4 opacity-10" />
+                        <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500">No matching parameters</span>
+                    </div>
+                );
+
+                return filtered.map(([key, value]) => {
+                    const currentPath = `${path}.${key}`;
+                    const isObj = typeof value === 'object' && value !== null && !Array.isArray(value);
+                    const isArr = Array.isArray(value);
+                    const nameMatch = searchTerm && key.toLowerCase().includes(searchTerm);
+                    const childForcedVisible = forcedVisible || nameMatch;
+                    const isExpanded = expandedPaths.has(currentPath) || !!searchTerm;
+
+                    if (isObj || isArr) {
+                        return (
+                            <div key={currentPath} className={cn("mb-3 relative", level === 0 && "bg-zinc-900/30 border border-zinc-800 rounded-lg p-1 shadow-sm")}>
+                                <button onClick={() => toggleExpand(currentPath)} className="w-full flex items-center gap-2 p-2 hover:bg-zinc-800/50 rounded-md transition-all text-left group">
+                                    {isExpanded ? <Icon name="ChevronDown" className="text-zinc-500" /> : <Icon name="ChevronRight" className="text-zinc-500" />}
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-200">{key}</span>
+                                </button>
+                                {isExpanded && (
+                                    <div className={cn("pl-8 pr-2 pb-2 space-y-1 relative", level === 0 && "pt-2 border-t border-zinc-800/50 mt-1")}>
+                                        {isArr ? value.map((item, i) => {
+                                            const itemPath = `${currentPath}.${i}`;
+                                            const isPrimitive = typeof item !== 'object' || item === null;
+                                            if (!childForcedVisible && searchTerm && isPrimitive && !String(item).toLowerCase().includes(searchTerm)) return null;
+
+                                            if (isPrimitive) {
+                                                return (
+                                                    <div key={i} className="flex items-center gap-4 py-1 px-3 hover:bg-zinc-800/30 rounded-md ml-1 relative">
+                                                        <span className="text-[9px] text-zinc-600 font-bold w-12 shrink-0">#{i}</span>
+                                                        <div className="flex-1">
+                                                            <Input value={item} onChange={e => updateValue(itemPath, e.target.value)} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <div key={i} className="bg-zinc-950/30 p-2 rounded border border-zinc-900 mb-2 ml-1">
+                                                    <div className="text-[9px] text-zinc-600 font-bold mb-1 uppercase tracking-widest border-b border-zinc-800/30 pb-1">Index_{i}</div>
+                                                    <ConfigField obj={item} path={itemPath} level={level + 1} forcedVisible={childForcedVisible} />
+                                                </div>
+                                            );
+                                        }) : <ConfigField obj={value} path={currentPath} level={level + 1} forcedVisible={childForcedVisible} />}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    }
+
+                    return (
+                        <div key={currentPath} className="flex items-center gap-4 py-1.5 px-3 hover:bg-zinc-800/30 rounded-md ml-1 relative">
+                            <label className="config-label">{key}</label>
+                            <div className="flex-1 flex items-center justify-between">
+                                {typeof value === 'boolean' ? (
+                                    <Fragment>
+                                        <span className="text-[10px] font-bold text-orange-400">{value ? 'TRUE' : 'FALSE'}</span>
+                                        <Switch checked={value} onCheckedChange={v => updateValue(currentPath, v)} />
+                                    </Fragment>
+                                ) : (
+                                    <Input value={value} type={typeof value === 'number' ? 'number' : 'text'} colorClass={typeof value === 'number' ? 'text-sky-400' : 'text-emerald-400'} onChange={e => updateValue(currentPath, typeof value === 'number' ? Number(e.target.value) : e.target.value)} />
+                                )}
+                            </div>
+                        </div>
+                    );
+                });
+            };
+
+            const onDrop = (e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const file = e.dataTransfer.files[0];
+                if (!file || !file.name.endsWith('.json')) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const json = parseJsonWithComments(ev.target.result);
+                        setConfig(json);
+                        setExpandedPaths(new Set(getModulePaths(json)));
+                        setIsDirty(false);
+                        setError(null);
+                    } catch (err) {
+                        setError("Failed to parse JSON: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            return (
+                <div
+                    className={cn("h-screen w-screen bg-[#050505] text-zinc-200 flex flex-col", isDragging && "brightness-125")}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={onDrop}
+                >
+                    <nav className="h-14 border-b border-zinc-800 bg-[#09090b]/90 backdrop-blur-xl z-30 shrink-0 sticky top-0 shadow-sm flex justify-center">
+                        <div className="max-w-[1200px] w-full flex items-center justify-between px-6">
+                            <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                    <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileUpload} accept=".json" />
+                                    <Button variant="outline" onClick={() => fileInputRef.current?.click()}>Import</Button>
+                                    <Button variant="outline" className="relative" onClick={download}>
+                                        Export
+                                        {isDirty && <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full border border-zinc-950 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></span>}
+                                    </Button>
+                                    <div className="h-4 w-px bg-zinc-800 mx-2" />
+                                    <Button variant="ghost" size="xs" onClick={toggleModules} className="hover:text-zinc-100 px-3">
+                                        {modulesExpanded ? <Icon name="Minimize" /> : <Icon name="Maximize" />}
+                                        {modulesExpanded ? " Contract Modules" : " Expand Modules"}
+                                    </Button>
+                                    <Button variant="secondary" size="xs" className="border-zinc-700 px-3" onClick={toggleAll}>
+                                        {allExpanded ? <Icon name="Minimize" /> : <Icon name="Maximize" />}
+                                        {allExpanded ? " Contract All Submodules" : " Expand All Submodules"}
+                                    </Button>
+                                </div>
+                                {error && <span className="parsing-error">{error}</span>}
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2 bg-zinc-900/50 px-4 py-1.5 rounded-full border border-zinc-800 focus-within:ring-1 focus-within:ring-zinc-700 group">
+                                    <Icon name="Search" className="text-zinc-600 group-focus-within:text-zinc-400" />
+                                    <input placeholder="" value={searchTerm} className="bg-transparent border-none outline-none text-[10px] w-64 focus:w-80 transition-all uppercase" onChange={e => setSearchTerm(e.target.value.toLowerCase())} />
+                                    {searchTerm && <span className="text-[9px] font-black bg-zinc-800 px-2 py-0.5 rounded text-zinc-400 border border-zinc-700">{resultCount} MATCHES</span>}
+                                </div>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <main className="flex-1 flex justify-center bg-[#050505] overflow-hidden">
+                        <div className="max-w-[1200px] w-full flex book-spread-container h-full">
+
+                            <section className="w-1/2 overflow-y-scroll pt-12 pb-24 custom-scrollbar border-r border-zinc-900/50 flex flex-col">
+                                <div className="w-full flex-1 flex justify-end">
+                                    <div className="page-container p-8 mb-40">
+                                        <ConfigField obj={config} path="root" />
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section className="w-1/2 overflow-y-scroll pt-12 pb-24 custom-scrollbar flex flex-col">
+                                <div className="w-full flex-1 flex justify-start">
+                                    <div className="page-container bg-[#09090b] relative group overflow-hidden mb-40">
+                                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                            <Button variant="secondary" size="xs" onClick={copy} className="h-7 border-zinc-700 bg-zinc-900/80 backdrop-blur-md">
+                                                {isCopied ? "Copied" : "Copy"}
+                                            </Button>
+                                        </div>
+                                        <div className="flex-1 p-8 font-mono text-[11px] leading-relaxed selection:bg-zinc-800">
+                                            <pre dangerouslySetInnerHTML={{ __html: Object.keys(config).length > 0 ? '{\n' + renderHighlightedJson(config) + '\n}' : '// No manifest loaded' }} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                        </div>
+                    </main>
+
+                    {isDragging && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 backdrop-blur-[2px] pointer-events-none border-4 border-dashed border-zinc-700 m-4 rounded-2xl">
+                            <div className="flex flex-col items-center gap-4 p-12 bg-zinc-900 rounded-3xl border border-zinc-800 shadow-2xl">
+                                <span className="text-2xl font-black uppercase tracking-[0.3em] text-zinc-100">Release to Sync</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>

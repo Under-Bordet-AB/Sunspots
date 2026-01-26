@@ -1,0 +1,57 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.plo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Build directories
+build/
+bin/
+out/
+
+# Logs
+*.log
+.logs/
+
+# Editor/IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+.venv/
+scripts/out/
+
+# Database files
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+
+# Personal notes (not project docs)
+.notes/
+
+.cache/

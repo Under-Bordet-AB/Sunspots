@@ -1,0 +1,54 @@
+# Sunspots Clang-Format Configuration
+# Matches: docs/standards/code.md
+
+Language:        Cpp
+BasedOnStyle:    Google
+
+# Indentation
+IndentWidth:     4
+TabWidth:        4
+UseTab:          Never
+ContinuationIndentWidth: 4
+
+# Line Length
+ColumnLimit:     120
+
+# Braces: K&R style (same line)
+BreakBeforeBraces: Attach
+
+# Control flow: don't collapse to single line
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+
+# Pointer/Reference alignment: left (char* ptr)
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Space after cast: (int) x → (int) x
+SpaceAfterCStyleCast: true
+
+# Include ordering (matches coding standard)
+# 1. Own header, 2. System <>, 3. Project ""
+SortIncludes:    CaseSensitive
+IncludeBlocks:   Regroup
+IncludeCategories:
+  - Regex:           '^"[^/]*\.h"$'    # Own header (no path)
+    Priority:        -1
+  - Regex:           '^<'              # System headers
+    Priority:        1
+  - Regex:           '^"'              # Project headers
+    Priority:        2
+
+# Align
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+
+# Misc
+ReflowComments:  true
+SpacesBeforeTrailingComments: 2
+Standard:        c++11  # Required for C99/C11 compatibility
