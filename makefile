@@ -10,7 +10,7 @@
 SHELL = /bin/bash
 
 CC = gcc
-CFLAGS_COMMON = -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I .
+CFLAGS_COMMON = -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -lcurl -pthread -I src -I .
 CFLAGS_DEBUG = $(CFLAGS_COMMON) -g -fsanitize=address,undefined -fno-omit-frame-pointer
 CFLAGS_RELEASE = $(CFLAGS_COMMON) -O2 -DNDEBUG
 CFLAGS_VALGRIND = $(CFLAGS_COMMON) -g -O0
