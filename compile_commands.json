@@ -1,0 +1,37 @@
+[
+  {
+    "directory": "/home/Cdev/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/main.c -o build/obj/src/core/main.o",
+    "file": "src/core/main.c"
+  }
+,
+  {
+    "directory": "/home/Cdev/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/daemon.c -o build/obj/src/core/daemon.o",
+    "file": "src/core/daemon.c"
+  }
+,
+  {
+    "directory": "/home/Cdev/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/config/config.c -o build/obj/src/config/config.o",
+    "file": "src/config/config.c"
+  }
+,
+  {
+    "directory": "/home/Cdev/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/json/cJSON.c -o build/obj/src/libs/json/cJSON.o",
+    "file": "src/libs/json/cJSON.c"
+  }
+,
+  {
+    "directory": "/home/Cdev/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c tests/test_args.c -o build/obj/tests/test_args.o",
+    "file": "tests/test_args.c"
+  }
+,
+  {
+    "directory": "/home/Cdev/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c tests/test_config.c -o build/obj/tests/test_config.o",
+    "file": "tests/test_config.c"
+  }
+]
