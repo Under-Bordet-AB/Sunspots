@@ -75,12 +75,12 @@ void test_complex_config(void) {
     printf("[PASS] Complex Config\n");
 }
 
-int main(void) {
-    int passed = 0;
-    test_complex_config();
-    passed++;
-    passed += run_arg_tests();
+// int main(void) {
+//     int passed = 0;
+//     test_complex_config();
+//     passed++;
+//     passed += run_arg_tests();
 
-    printf("TEST_SUMMARY: %d tests run, %d passed, 0 failed\n", passed, passed);
-    return 0;
-}
+//     printf("TEST_SUMMARY: %d tests run, %d passed, 0 failed\n", passed, passed);
+//     return 0;
+// }

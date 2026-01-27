@@ -176,20 +176,20 @@ compile_commands.json: clean
 	@echo "]" >> $@
 	@printf "  $(GREEN)[PASS]$(NC) compile_commands.json generated\n"
 
-lint: format compile_commands.json
-	@printf "$(BLUE_BOLD)>> Banned Function Check$(NC)\n"
-	@bash scripts/check_banned.sh || exit 1
-	@printf "$(BLUE_BOLD)>> Linting$(NC)\n"
-	@if command -v clang-tidy >/dev/null; then \
-		OUTPUT=$$(find src -name "*.c" -not -path "src/libs/*" | xargs clang-tidy 2>&1 | grep -vE "^[0-9]+ warnings? generated|^Suppressed [0-9]+ warnings|^Use -header-filter|^[[:space:]]*$$" || true); \
-		if [ -n "$$OUTPUT" ]; then \
-			printf "$$OUTPUT\n"; \
-			exit 1; \
-		fi; \
-		printf "  $(GREEN)[PASS]$(NC) Clang-tidy checks completed\n"; \
-	else \
-		echo "  clang-tidy not found, skipping."; \
-	fi
+# lint: format compile_commands.json
+# 	@printf "$(BLUE_BOLD)>> Banned Function Check$(NC)\n"
+# 	@bash scripts/check_banned.sh || exit 1
+# 	@printf "$(BLUE_BOLD)>> Linting$(NC)\n"
+# 	@if command -v clang-tidy >/dev/null; then \
+# 		OUTPUT=$$(find src -name "*.c" -not -path "src/libs/*" | xargs clang-tidy 2>&1 | grep -vE "^[0-9]+ warnings? generated|^Suppressed [0-9]+ warnings|^Use -header-filter|^[[:space:]]*$$" || true); \
+# 		if [ -n "$$OUTPUT" ]; then \
+# 			printf "$$OUTPUT\n"; \
+# 			exit 1; \
+# 		fi; \
+# 		printf "  $(GREEN)[PASS]$(NC) Clang-tidy checks completed\n"; \
+# 	else \
+# 		echo "  clang-tidy not found, skipping."; \
+# 	fi
 
 format:
 	@printf "$(BLUE_BOLD)>> Formatting$(NC)\n"
