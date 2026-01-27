@@ -6,17 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct memory_struct {
-    char* memory;
-    size_t size;
-};
-
-typedef struct {
-    CURLM* multi_handle;
-    CURL* easy_handle;
-    int still_running;
-    struct memory_struct mem;
-} curl_client_t;
+// Opaque type - internal structure hidden in implementation
+typedef struct curl_client_t curl_client_t;
 
 // Initialize curl_client - allocates and initializes the client structure
 // Returns 0 on success, -1 on error

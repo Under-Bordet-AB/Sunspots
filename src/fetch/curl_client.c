@@ -1,5 +1,18 @@
 #include "curl_client.h"
 
+// Internal structure definitions
+struct memory_struct {
+    char* memory;
+    size_t size;
+};
+
+struct curl_client_t {
+    CURLM* multi_handle;
+    CURL* easy_handle;
+    int still_running;
+    struct memory_struct mem;
+};
+
 // Global initialization counter to ensure curl_global_init/cleanup are called once
 static int global_init_count = 0;
 
