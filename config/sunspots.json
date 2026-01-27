@@ -9,7 +9,9 @@
     "server": {},
     "database": {},
     "compute": {},
-    "fetch": {},
+    "fetch": {
+      "interval": 5
+    },
     "transform": {}
   }
 }
