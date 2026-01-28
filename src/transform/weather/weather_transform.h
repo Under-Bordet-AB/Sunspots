@@ -3,9 +3,9 @@
 
 #include "transform.h"
 #include "weather_model.h"
-#include "jansson.h"
+#include "cJSON.h"
 
-transform_status_t transform_weather_openmeteo(const json_t *input, weather_data_t *out);
+transform_status_t transform_weather_openmeteo(const cJSON *input, weather_data_t *out);
 
 
 #endif
