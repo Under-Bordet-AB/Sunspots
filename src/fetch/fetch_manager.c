@@ -1,6 +1,13 @@
-#include "fetch/fetch_manager.h"
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
-static pid_t fetch_pid = -1;
+// #include "curl_client.h"
+// #include "parsers.h"
+// #include "database_manager.h"
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
@@ -8,39 +15,18 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    printf("Initializing fetch manager.\n");
+    printf("Starting fetch manager.\n");
 
+    // Parse arguments
     int interval = (int) atoi(argv[1]);
     int timeout = (int) atoi(argv[2]);
 
-    fetch_pid = fork();
-
-    if (fetch_pid < 0) {
-        perror("Fork failed");
-        return -1;
-    } else if (fetch_pid == 0) {
-        fetch_work(interval, timeout);
-        _exit(0);
-    }
-
-    atexit(fetch_dispose);
-
-    if (fetch_pid > 0) {
-        int status;
-        waitpid(fetch_pid, &status, 0);
-    }
-
-    return 0;
-}
-
-void fetch_work(int interval, int timeout) {
-    printf("Starting fetch manager.\n");
-
+    // Test loop
     int iterations = 0;
     int max_iterations = 5;
 
     while (iterations < max_iterations) {
-        printf("RUNNING!!! Iteration %d/%d\n", iterations + 1, max_iterations);
+        printf("Running iteration %d/%d\n", iterations + 1, max_iterations);
 
         iterations++;
 
@@ -49,13 +35,20 @@ void fetch_work(int interval, int timeout) {
             usleep(500000);
         }
     }
+
+    return 0;
 }
 
-void fetch_dispose() {
-    printf("Cleaning up fetch manager.\n");
+int fetch_from_smhi() {
+    // curl from site
+    // normalize with parser
+    // save to database
+    return 0;
+}
 
-    if (fetch_pid > 0) {
-        kill(fetch_pid, SIGTERM);
-        waitpid(fetch_pid, NULL, 0);
-    }
+int fetch_from_elpris() {
+    // curl from site
+    // normalize with parser
+    // save to database
+    return 0;
 }
