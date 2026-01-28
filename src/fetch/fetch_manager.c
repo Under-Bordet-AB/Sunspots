@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,46 +10,77 @@
 // #include "parsers.h"
 // #include "database_manager.h"
 
+#define URL_OPENMETEO ""
+#define URL_SMHI ""
+#define URL_ELPRIS ""
+
+int g_interval = 0;
+int g_timeout = 0;
+
+int fetch_openmeteo_work();
+int fetch_smhi_work();
+int fetch_elpris_work();
+
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <interval> <timeout>\n", argc > 0 ? argv[0] : "fetch_manager");
+        fprintf(stderr, "Usage: ./path/to/bin <interval> <timeout>\n");
         return EXIT_FAILURE;
     }
 
     printf("Starting fetch manager.\n");
 
     // Parse arguments
-    int interval = (int) atoi(argv[1]);
-    int timeout = (int) atoi(argv[2]);
+    g_interval = (int) atoi(argv[1]);
+    g_timeout = (int) atoi(argv[2]);
 
-    // Test loop
-    int iterations = 0;
-    int max_iterations = 5;
+    while (1) {
+        printf("Fetching from APIs...\n");
 
-    while (iterations < max_iterations) {
-        printf("Running iteration %d/%d\n", iterations + 1, max_iterations);
+        pthread_t thread1, thread2;
 
-        iterations++;
+        pthread_create(&thread1, NULL, (void* (*) (void*) ) fetch_openmeteo_work, NULL);
+        pthread_detach(thread1);
 
-        if (iterations < max_iterations) {
-            // sleep(interval);
-            usleep(500000);
-        }
+        pthread_create(&thread2, NULL, (void* (*) (void*) ) fetch_elpris_work, NULL);
+        pthread_detach(thread2);
+
+        sleep(g_interval);
     }
 
     return 0;
 }
 
-int fetch_from_smhi() {
-    // curl from site
-    // normalize with parser
-    // save to database
+int fetch_openmeteo_work() {
+    printf("Fetching data from openmeteo.\n");
     return 0;
 }
 
-int fetch_from_elpris() {
-    // curl from site
-    // normalize with parser
-    // save to database
+int fetch_smhi_work() {
+    printf("Fetching data from smhi.\n");
+    return 0;
+}
+
+int fetch_elpris_work() {
+    printf("Fetching data from elpris.\n");
+    return 0;
+}
+
+int fetch_from_url(char* url, char** buffer) {
+    return 0;
+}
+
+int normalize_openmeteo(char* raw, char** buffer) {
+    return 0;
+}
+
+int normalize_smhi(char* raw, char** buffer) {
+    return 0;
+}
+
+int normalize_elpris(char* raw, char** buffer) {
+    return 0;
+}
+
+int save_to_database(char* data, char* filename) {
     return 0;
 }
