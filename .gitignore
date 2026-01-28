@@ -25,6 +25,8 @@
 *.exe
 *.out
 *.app
+/server
+/sunspots.out
 
 # Build directories
 build/
@@ -34,6 +36,7 @@ out/
 # Logs
 *.log
 .logs/
+logs/
 
 # Editor/IDE specific
 .vscode/
