@@ -1,4 +1,4 @@
-#include "curl_client.h"
+#include "curly.h"
 
 // Internal structure definitions
 struct memory_struct {
@@ -6,7 +6,7 @@ struct memory_struct {
     size_t size;
 };
 
-struct curl_client_t {
+struct curly_t {
     CURLM* multi_handle;
     CURL* easy_handle;
     int still_running;
@@ -34,7 +34,7 @@ int write_memory_callback(void* contents, size_t size, size_t nmemb, void* user_
     return real_size;
 }
 
-int curl_client_init(curl_client_t** client) {
+int curly_init(curly_t** client) {
     if (!client) {
         return -1;
     }
@@ -49,7 +49,7 @@ int curl_client_init(curl_client_t** client) {
     global_init_count++;
 
     // Allocate the client structure
-    *client = (curl_client_t*) malloc(sizeof(curl_client_t));
+    *client = (curly_t*) malloc(sizeof(curly_t));
     if (!*client) {
         global_init_count--;
         if (global_init_count == 0) {
@@ -138,7 +138,7 @@ int curl_client_init(curl_client_t** client) {
     return 0;
 }
 
-int curl_client_make_request(curl_client_t** client, const char* url) {
+int curly_make_request(curly_t** client, const char* url) {
     if (!client || !*client || !url) {
         return -1;
     }
@@ -158,7 +158,7 @@ int curl_client_make_request(curl_client_t** client, const char* url) {
     return 0;
 }
 
-int curl_client_poll(curl_client_t** client) {
+int curly_poll(curly_t** client) {
     if (!client || !*client) {
         return -1;
     }
@@ -171,7 +171,7 @@ int curl_client_poll(curl_client_t** client) {
     return 0;
 }
 
-int curl_client_is_running(curl_client_t** client) {
+int curly_is_running(curly_t** client) {
     if (!client || !*client) {
         return -1;
     }
@@ -179,7 +179,7 @@ int curl_client_is_running(curl_client_t** client) {
     return (*client)->still_running > 0 ? 1 : 0;
 }
 
-int curl_client_read_response(curl_client_t** client, char** buffer) {
+int curly_read_response(curly_t** client, char** buffer) {
     if (!client || !*client || !buffer) {
         return -1;
     }
@@ -198,7 +198,7 @@ int curl_client_read_response(curl_client_t** client, char** buffer) {
     return 0;
 }
 
-int curl_client_reset(curl_client_t** client) {
+int curly_reset(curly_t** client) {
     if (!client || !*client) {
         return -1;
     }
@@ -223,7 +223,7 @@ int curl_client_reset(curl_client_t** client) {
     return 0;
 }
 
-int curl_client_cleanup(curl_client_t** client) {
+int curly_cleanup(curly_t** client) {
     if (!client || !*client) {
         return -1;
     }
