@@ -3,6 +3,7 @@
 
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -12,47 +13,14 @@
 // #include "parser_elpris.h"
 // #include "database_manager.h"
 
-static pid_t fetch_pid = -1;
+typedef struct fetch_manager_t {
+    int interval;
+    int timeout;
+} fetch_manager_t;
 
-void fetch_cleanup() {
-    printf("Cleaning up fetch manager.\n");
+void fetch_dispose();
 
-    if (fetch_pid > 0) {
-        kill(fetch_pid, SIGTERM);
-        waitpid(fetch_pid, NULL, 0);
-    }
-}
-
-void fetch_start() {
-    printf("Starting fetch manager.\n");
-
-    int iterations = 0;
-    int max_iterations = 5;
-
-    while (iterations < max_iterations) {
-        printf("RUNNING!!! Iteration %d/%d\n", iterations + 1, max_iterations);
-
-        iterations++;
-
-        if (iterations < max_iterations) {
-            sleep(1);
-        }
-    }
-}
-
-void fetch_init() {
-    printf("Initializing fetch manager.\n");
-
-    fetch_pid = fork();
-
-    if (fetch_pid < 0) {
-        perror("Fork failed");
-        return;
-    } else if (fetch_pid == 0) {
-        fetch_start();
-        _exit(0);
-    }
-}
+void fetch_work(int interval, int timeout);
 
 int fetch_from_smhi() {
     // curl from site
