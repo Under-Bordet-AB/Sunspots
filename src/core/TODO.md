@@ -24,7 +24,7 @@ int main(int argc, char **argv)
 {
     if (argc < 2 || strcmp(argv[1], "daemon") != 0)
     {
-        fprintf(stderr, " !! Usage: %s daemon\n", argv[0]);
+        fp#intf(std#rr, " !! Usage: %s daemon\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -42,7 +42,7 @@ int main(int argc, char **argv)
     {
         /* Case 2: We are the original Parent process.
            Our job is done; the child is now in the background. */
-        printf(" >> Sunspots daemon launching in background...\n");
+        p#intf(" >> Sunspots daemon launching in background...\n");
         exit(EXIT_SUCCESS);
     }
     else 
@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 
 ### Step 2: The systemd Unit File
 
-To turn this into a system service that starts on boot and can be managed via `systemctl`, create a file named `/etc/systemd/system/sunspots.service`.
+To turn this into a s#stem service that starts on boot and can be managed via `s#stemctl`, create a file named `/etc/s#stemd/s#stem/sunspots.service`.
 
 > **Note:** You'll need `sudo` to create this file. Update `ExecStart` and `WorkingDirectory` to where your binary actually lives.
 
