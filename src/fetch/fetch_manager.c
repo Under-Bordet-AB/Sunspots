@@ -6,7 +6,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// #include "curl_client.h"
+// #include "curly.h"
 // #include "parsers.h"
 // #include "database_manager.h"
 
@@ -20,6 +20,12 @@ int g_timeout = 0;
 int fetch_openmeteo_work();
 int fetch_smhi_work();
 int fetch_elpris_work();
+
+int fetch_from_url(char* url, char** buffer);
+int normalize_openmeteo(char* raw, char** buffer);
+int normalize_smhi(char* raw, char** buffer);
+int normalize_elpris(char* raw, char** buffer);
+int save_to_database(char* data, char* filename);
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
