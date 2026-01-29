@@ -11,5 +11,8 @@
 
 #define HTTP_VERSION "HTTP/1.1" // We should support keep-alive
 #define MAX_URL_LEN 256
+#define CORS_ALLOWED_ORIGIN "*"
+#define CORS_ALLOWED_METHODS "GET, OPTIONS"
+#define CORS_ALLOWED_HEADERS "Content-Type"
 
 #endif

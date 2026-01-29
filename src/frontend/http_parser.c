@@ -1,9 +1,12 @@
 #include <ctype.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "libs/linked_list/linked_list.h"
 #include "frontend/http_parser.h"
+#include "frontend/endpoints.h"
 
 char* substr(const char* start, const char* end)
 {
@@ -34,6 +37,62 @@ ProtocolVersion Enum_Protocol(const char* protocol) {
     if (strcmp(protocol, "HTTP/3.0") == 0) return HTTP_3_0;
 
     return Protocol_Unknown;
+}
+
+const char* RequestMethod_tostring(RequestMethod method) {
+    switch (method) {
+    case GET:
+        return "GET";
+    case POST:
+        return "POST";
+    case PATCH:
+        return "PATCH";
+    case PUT:
+        return "PUT";
+    case DELETE:
+        return "DELETE";
+    case OPTIONS:
+        return "OPTIONS";
+    case HEAD:
+        return "HEAD";
+    default:
+        return "-unknown-";
+    }
+}
+
+const char* CommonResponseMessages(int code) {
+    switch (code) {
+    case 200:
+        return "OK";
+    case 204:
+        return "No Content";
+    case 301:
+        return "Moved Permanently";
+    case 302:
+        return "Found";
+    case 304:
+        return "Not Modified";
+    case 400:
+        return "Bad Request";
+    case 401:
+        return "Unauthorized";
+    case 403:
+        return "Forbidden";
+    case 404:
+        return "Not Found";
+    case 405:
+        return "Method Not Allowed";
+    case 413:
+        return "Content Too Large";
+    case 500:
+        return "Internal Server Error";
+    case 501:
+        return "Not Implemented";
+    case 503:
+        return "Service Unavailable";
+    default:
+        return "";
+    }
 }
 
 void str_to_lower(char *s)
@@ -265,5 +324,92 @@ void http_header_free(void* header_var) {
         free((void*)hdr->Name);
         free((void*)hdr->Value);
         free(hdr);
+    }
+}
+
+http_response* http_response_init(int code, const char* body, int bodyLen) {
+    if(!body)
+        return NULL;
+
+    http_response* response = calloc(1, sizeof(http_response));
+    if(!response)
+        return NULL;
+
+    response->headers = LinkedList_create();
+
+    response->responseCode = code;
+    if(bodyLen == -1)
+    {
+        response->body = strdup(body);
+        bodyLen = strlen(response->body);
+    } else {
+        response->body = malloc(bodyLen);
+        memcpy((char*)response->body, body, bodyLen);
+    }
+    response->bodyLen = bodyLen;
+
+    return response;
+}
+
+void http_response_add_header(http_response* response, const char* name, const char* value)
+{
+    if(!response || !name || !value)
+        return;
+    
+    http_header* header = calloc(1, sizeof(http_header));
+    if (header != NULL) {
+        header->Name = strdup(name);
+        header->Value = strdup(value);
+        LinkedList_append(response->headers, header);
+    }
+}
+
+const char* http_response_stringify(http_response* response, size_t* outSize) {
+    const char* message = CommonResponseMessages(response->responseCode);
+    // Count size of everything before allocating
+    // 5 = 2 spaces + response code (3 digits) + null term
+    int messageSize = 5 + strlen(HTTP_VERSION) + strlen(message);
+    if (response->headers != NULL) {
+        char temp[16];
+        snprintf(temp, 16, "%i", response->bodyLen);
+        http_response_add_header(response, "Content-Length", (const char*)temp);
+        LinkedList_foreach(response->headers, node) {
+            http_header* hdr = (http_header*)node->item;
+            messageSize += 4 + strlen(hdr->Name) + strlen(hdr->Value); // 4 = \r\n and symbols between name & value
+        }
+    }
+    messageSize += 4 + response->bodyLen + 1; // 4 = \r\n\r\n
+    // printf("We have to allocate %i bytes.\n",messageSize);
+    char* status = malloc(messageSize);
+    // write first line
+    int curPos = snprintf(status, messageSize, "%s %d %s", HTTP_VERSION, response->responseCode, message);
+    // write headers
+    if (response->headers != NULL) {
+        LinkedList_foreach(response->headers, node) {
+            http_header* hdr = (http_header*)node->item;
+            int written = snprintf(&status[curPos], messageSize - curPos, "\r\n%s: %s", hdr->Name, hdr->Value);
+            curPos += written;
+        }
+    }
+    // write body
+    const uint8_t separator[] = {'\r', '\n', '\r', '\n'};
+    memcpy(&status[curPos], separator, sizeof(separator));
+    curPos += sizeof(separator);
+    if(response->body != NULL)
+        memcpy(&status[curPos], response->body, response->bodyLen);
+    *outSize = messageSize;
+    return status;
+}
+
+void http_response_dispose(http_response** response_var)
+{
+    if (response_var && *response_var) {
+        http_response* response = *response_var;
+        if(response->body != NULL)
+            free((void*)response->body);
+        if(response->headers != NULL)
+            LinkedList_dispose(&response->headers, http_header_free);
+        free(response);
+        *response_var = NULL;
     }
 }

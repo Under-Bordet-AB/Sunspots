@@ -41,10 +41,20 @@ typedef struct
     LinkedList* headers;
 } http_request;
 
+typedef struct
+{
+    int responseCode;
+    const char* body;
+    int bodyLen;
+    LinkedList* headers;
+} http_response;
+
 RequestMethod Enum_Method(const char* method);
 ProtocolVersion Enum_Protocol(const char* protocol);
 
 const char* RequestMethod_tostring(RequestMethod method);
+
+void str_to_lower(char *s);
 
 const char* http_get_header(http_request* req, const char* name);
 
@@ -52,5 +62,10 @@ http_request* http_parse_request(const char* message);
 void http_request_dispose(http_request** request_var);
 
 void http_header_free(void* header_var);
+
+http_response* http_response_init(int code, const char* body, int bodyLen);
+void http_response_add_header(http_response* response, const char* name, const char* value);
+const char* http_response_stringify(http_response* response, size_t* outSize);
+void http_response_dispose(http_response** response_var);
 
 #endif

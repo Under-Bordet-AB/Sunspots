@@ -6,9 +6,10 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
+#include "frontend/endpoints.h"
+#include "frontend/http_parser.h"
 #include "frontend/client_queue.h"
 #include "frontend/http_constants.h"
-#include "frontend/http_parser.h"
 #include "libs/linked_list/linked_list.h"
 
 void* http_worker_thread(void* arg) {
@@ -88,19 +89,31 @@ void* http_worker_thread(void* arg) {
                 buffer[total] = '\0';
 
                 // Handle request
-                printf("[Thread-%ld] Request received: %s\n", pthread_self(), req->path);
-                if(strcmp(req->path, "/health") == 0)
+                printf("[Thread-%ld] %s received: %s\n", pthread_self(), RequestMethod_tostring(req->method), req->path);
+                
+                http_response* resp = process_request(req);
+                if(!resp)
                 {
-                    char testResponse[256];
-                    snprintf(testResponse, 256, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: keep-alive\r\nContent-Length: 33\r\n\r\nHello from Thread-%li", pthread_self());
-                    send(client_fd, testResponse, strlen(testResponse), 0);
-                } else {
-                    char testResponse[256];
-                    snprintf(testResponse, 256, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: keep-alive\r\nContent-Length: 33\r\n\r\nHello from Thread-%li", pthread_self());
-                    send(client_fd, testResponse, strlen(testResponse), 0);
+                    printf("[Thread-%ld] Failed to generate a response, disconnecting client.\n", pthread_self());
+                    break;
                 }
 
+                if(strlen(CORS_ALLOWED_ORIGIN) > 0)
+                    http_response_add_header(resp, "Access-Control-Allow-Origin", CORS_ALLOWED_ORIGIN);
+                if(strlen(CORS_ALLOWED_METHODS) > 0)
+                    http_response_add_header(resp, "Access-Control-Allow-Methods", CORS_ALLOWED_METHODS);
+                if(strlen(CORS_ALLOWED_HEADERS) > 0)
+                    http_response_add_header(resp, "Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS);
+
+                size_t response_size = 0;
+                const char* response_str = http_response_stringify(resp, &response_size);
+                
+                send(client_fd, response_str, response_size, 0);
+
+                free((char*)response_str);
+
                 http_request_dispose(&req);
+                http_response_dispose(&resp);
 
                 continue;
             }
