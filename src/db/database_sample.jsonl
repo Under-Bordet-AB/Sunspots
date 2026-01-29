@@ -1,0 +1,11 @@
+{"timestamp":1769701518,"source":"Sensor_Network","type":"log_entry","data":"92.80"}
+{"timestamp":1769701518,"source":"Calculator_Svc","type":"power_usage","data":"0.22"}
+{"timestamp":1769701518,"source":"System_Log","type":"log_entry","data":"8.85"}
+{"timestamp":1769701518,"source":"API_smhi","type":"error_report","data":"19.22"}
+{"timestamp":1769701518,"source":"System_Log","type":"log_entry","data":"70.95"}
+{"timestamp":1769701518,"source":"System_Log","type":"temperature","data":"96.68"}
+{"timestamp":1769701518,"source":"System_Log","type":"humidity","data":"50.92"}
+{"timestamp":1769701518,"source":"Sensor_Network","type":"error_report","data":"97.44"}
+{"timestamp":1769701518,"source":"Calculator_Svc","type":"humidity","data":"73.66"}
+{"timestamp":1769701518,"source":"API_smhi","type":"error_report","data":"14.70"}
+{"timestamp":1769701519,"source":"API_smhi","type":"power_usage","data":"90.29"}
