@@ -2,6 +2,7 @@
  * THIS IS TEST CODE!
  **/
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -22,14 +23,15 @@ int main(int argc, char *argv[]) {
     int heartbeat_sig = SIGRTMIN; 
 
     printf(" >> [Worker %d] Online. Pulsing every %ds to Parent PID: %d\n", getpid(), speed, ppid);
-
-	int c = 0;
+	double sum = 10.0;
+	int i = 0;
     while (1) {
+		i++;
+		sum *= sqrt(sum);
+		if (i == 4) sleep(5);
         /* Send a Real-Time signal to the Parent.
            Because we setup the Daemon with SA_SIGINFO, 
            it will see our PID in the siginfo_t struct. */
-		c++;
-		if (c == 4) sleep(5);
         if (kill(ppid, heartbeat_sig) == -1) {
             perror(" !! Worker signal failed");
             exit(EXIT_FAILURE);
