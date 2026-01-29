@@ -37,18 +37,13 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-	/* Get working directory for exec path.
-	   This needs to be solved with another soluton
-	   when each binary is in its separate directory
-	 */
+	/* Get working directory for exec path. This needs to be solved with another soluton	   
+	   when each binary is in its separate directory */
 	char prj_path[1024];
 	getcwd(prj_path, sizeof(prj_path));
-	
-	/**
-	 * THE DAEMON DETACHMENT RITUAL
-	 * Step 1: First fork to get our child
-	 * to run in the background,
-	 **/
+
+    /* THE DAEMON DETACHMENT RITUAL */
+	/* Step 1: First fork to get our child to run in the background */
     pid_t init_pid = fork();
     if (init_pid < 0)
     {
@@ -60,12 +55,8 @@ int main(int argc, char **argv)
         printf(" >> Daemon is now running in the background.\n");
         exit(EXIT_SUCCESS);
     }
-	/**
-	 * Step 2: We are now the first child.
-	 * Become session leader, Become session leader.
-	 * This ensures that when the user closes 
-     * their terminal window, we don't get taken down with it.
-	 **/
+
+	/* Step 2: We are now the first child. Become session leader, closing the shell won't kill us now */
 	else
 	{
 		if (setsid() < 0)
@@ -81,18 +72,10 @@ int main(int argc, char **argv)
 		}
 		else if (second_pid > 0)
 		{
-			/**
-			 * Step 3: The job of the first spawned child
-			 * is done. Our child is not a session leader
-			 * and can not be re-acquired by a terminal.
-			 * Time to rest.
-			 **/
-			 exit(EXIT_SUCCESS);
+			/* Step 3:  Our child is not a session leader and can not be re-acquired by a terminal. */	
+			exit(EXIT_SUCCESS);
 		}
-		/**
-		 * Step 4: Send the daemon into the void
-		 * blind and deaf.
-		 **/
+		/* Step 4: Send the daemon into the void */		
 		else
 		{
 			printf(" >> Daemon cannot be re-aqcuired by terminal.\n"
@@ -113,11 +96,7 @@ int main(int argc, char **argv)
 			dup2(scream_into_the_void, STDERR_FILENO);
 		}
 	}
-	/**
-	 * From here we only run dark and foreboding daemon code.
-	 * Very, fucking, metal.
-	 **/
-
+    /* From here we only run dark and foreboding daemon code. Very, fucking, metal. */
 	openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
 	syslog(LOG_NOTICE, "Sunspots daemon started successfully. Detached and darkened.");
     daemon_signal_setup();
@@ -158,19 +137,16 @@ int main(int argc, char **argv)
             }
             else if (!watch_table[i].alive)
             {
-               /* The process is still "running" according to the OS, but it 
-                  hasn't sent a heartbeat signal. It's likely deadlocked or hung. */
+               /* The process is still "running" according to the OS, but it hasn't sent a heartbeat signal. It's likely deadlocked or hung. */
 				syslog(LOG_ERR, "Process: %s PID: %i hung. Restarting.",
                        watch_table[i].name, watch_table[i].pid);
                 kill(watch_table[i].pid, SIGKILL);
                 waitpid(watch_table[i].pid, NULL, 0);				
-				// Can add getrusage() here to print how much resources was used to log
 				struct rusage usage;
 				if (getrusage(RUSAGE_CHILDREN, &usage) == 0)
 				{
-					// On Linux, ru_maxrss is in Kilobytes.
 					syslog(LOG_INFO, "Total Child RAM Peak: %ld KB", usage.ru_maxrss);
-					// CPU time is split into seconds and microseconds
+					/* CPU time is split into seconds and microseconds */
 					syslog(LOG_INFO, "Total User CPU Time: %ld.%06ld sec",
 						   usage.ru_utime.tv_sec, usage.ru_utime.tv_usec);
 				}
