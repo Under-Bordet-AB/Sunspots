@@ -17,16 +17,16 @@
 int g_interval = 0;
 int g_timeout = 0;
 
-int fetch_openmeteo_work();
-int fetch_smhi_work();
-int fetch_elpris_work();
-
+void* fetch_openmeteo_work();
+void* fetch_smhi_work();
+void* fetch_elpris_work();
+/*
 int fetch_from_url(char* url, char** buffer);
 int normalize_openmeteo(char* raw, char** buffer);
 int normalize_smhi(char* raw, char** buffer);
 int normalize_elpris(char* raw, char** buffer);
 int save_to_database(char* data, char* filename);
-
+*/
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Usage: ./path/to/bin <interval> <timeout>\n");
@@ -34,6 +34,17 @@ int main(int argc, char* argv[]) {
     }
 
     printf("Starting fetch manager.\n");
+
+    /*
+    char* endptr;
+    pid_t ppid = (int)strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0') return EXIT_FAILURE;
+
+    if (kill(ppid, SIGRTMIN) == -1) {
+        perror("Could not signal daemon, terminating.\n");
+        exit(EXIT_FAILURE);
+    }
+    */
 
     // Parse arguments
     g_interval = (int) atoi(argv[1]);
@@ -56,21 +67,21 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-int fetch_openmeteo_work() {
+void* fetch_openmeteo_work() {
     printf("Fetching data from openmeteo.\n");
-    return 0;
+    return NULL;
 }
 
-int fetch_smhi_work() {
+void* fetch_smhi_work() {
     printf("Fetching data from smhi.\n");
-    return 0;
+    return NULL;
 }
 
-int fetch_elpris_work() {
+void* fetch_elpris_work() {
     printf("Fetching data from elpris.\n");
-    return 0;
+    return NULL;
 }
-
+/*
 int fetch_from_url(char* url, char** buffer) {
     return 0;
 }
@@ -90,3 +101,4 @@ int normalize_elpris(char* raw, char** buffer) {
 int save_to_database(char* data, char* filename) {
     return 0;
 }
+*/
