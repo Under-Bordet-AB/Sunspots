@@ -13,7 +13,6 @@
 #include <unistd.h>
 
 #include "libs/json/cJSON.h"
-// #include "libs/jj_log/jj_log.h" // TODO: Enable when submodule available
 
 // Access to environment variables
 // environ is provided by unistd.h or declared here if unistd.h doesn't (standard dependent)
@@ -41,7 +40,6 @@ static char* read_file_to_string(const char* path) {
 
     FILE* f = fopen(path, "rb");
     if (!f) {
-        // jj_log_error("Config", "Failed to open file: %s", path);
         return NULL;
     }
 
@@ -56,14 +54,12 @@ static char* read_file_to_string(const char* path) {
     }
 
     if (length < 0 || length > MAX_CONFIG_SIZE) {
-        // jj_log_error("Config", "File too large or invalid size: %s", path);
         (void) fclose(f);
         return NULL;
     }
 
-    char* buf = malloc(length + 1);
+    char* buf = malloc(sizeof(*buf) * (length + 1));
     if (!buf) {
-        // jj_log_error("Config", "Failed to allocate memory for file: %s", path);
         (void) fclose(f);
         return NULL;
     }
@@ -71,7 +67,6 @@ static char* read_file_to_string(const char* path) {
     memset(buf, 0, length + 1);
 
     if (fread(buf, 1, length, f) != (size_t) length) {
-        // jj_log_error("Config", "Failed to read file: %s", path);
         free(buf);
         (void) fclose(f);
         return NULL;
@@ -253,9 +248,6 @@ int config_load_file(config* cfg, const char* path) {
     free(json_str);
 
     if (!new_json) {
-        // const char *error_ptr = cJSON_GetErrorPtr();
-        // jj_log_error("Config", "Parse error near: %s", error_ptr ? error_ptr :
-        // "unknown");
         return -EINVAL;  // Parse error
     }
 

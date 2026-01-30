@@ -1,10 +1,17 @@
 {
   "system": {
-    "version": "1.0",
+    "version": "0.1",
     "name": "Sunspots",
     "debug": true
   },
   "modules": {
+    "config": {},
+    "jj_log": {
+      "file_path": "logs/sunspots.log",
+      "console_enabled": true,
+      "console_color": true,
+      "ring_buffer_size": 4096
+    },
     "core": {},
     "server": {},
     "database": {},
