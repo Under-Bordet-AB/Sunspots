@@ -8,7 +8,9 @@
 
 #include "curly.h"
 // #include "parsers.h"
-// #include "database_manager.h"
+
+#define ATOMIC_FILE_RW_IMPLEMENTATION
+#include "atomic_file_rw.h"
 
 #define URL_OPENMETEO ""
 #define URL_SMHI ""
@@ -16,7 +18,6 @@
 
 pid_t g_ppid = 0;
 int g_interval = 900;
-int g_timeout = 30;
 
 void* heartbeat();
 void* fetch_openmeteo_work();
@@ -32,7 +33,7 @@ int save_to_database(char* data, char* filename);
 */
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: ./path/to/bin <PPID> <interval> <timeout>\n");
+        fprintf(stderr, "Usage: ./path/to/bin <PPID> <interval>\n");
         return EXIT_FAILURE;
     }
 
@@ -44,7 +45,6 @@ int main(int argc, char* argv[]) {
     if (*endptr != '\0') return EXIT_FAILURE;
 
     g_interval = (int) atoi(argv[2]);
-    g_timeout = (int) atoi(argv[3]);
 
     pthread_t thread0;
     pthread_create(&thread0, NULL, (void* (*) (void*) ) heartbeat, NULL);
@@ -74,18 +74,15 @@ void* heartbeat() {
         //     exit(EXIT_FAILURE);
         // }
         printf("Beating...\n");
-        sleep (5);
+        sleep (1);
     }
 
     return NULL;
 }
 
 void* fetch_openmeteo_work() {
-    printf("Fetching data from openmeteo.\n");
-
     char* buffer = NULL;
     if (fetch_from_url(URL_OPENMETEO, &buffer) < 0) {
-        printf("Fetching from openmeteo failed\n");
         return NULL;
     }
 
@@ -98,11 +95,8 @@ void* fetch_openmeteo_work() {
 }
 
 void* fetch_smhi_work() {
-    printf("Fetching data from smhi.\n");
-
     char* buffer = NULL;
     if (fetch_from_url(URL_SMHI, &buffer) < 0) {
-        printf("Fetching from openmeteo failed\n");
         return NULL;
     }
 
@@ -115,11 +109,8 @@ void* fetch_smhi_work() {
 }
 
 void* fetch_elpris_work() {
-    printf("Fetching data from elpris.\n");
-
     char* buffer = NULL;
     if (fetch_from_url(URL_ELPRIS, &buffer) < 0) {
-        printf("Fetching from openmeteo failed\n");
         return NULL;
     }
 
@@ -127,12 +118,11 @@ void* fetch_elpris_work() {
         printf("%s\n", buffer);
         free(buffer);
     }
+
     return NULL;
 }
 
 int fetch_from_url(char* url, char** buffer) {
-    printf("Running fetch_from_url function\n");
-
     curly_t* curly = NULL;
     if (curly_init(&curly) < 0) {
         printf("Curly failed to initiate\n");
@@ -145,12 +135,20 @@ int fetch_from_url(char* url, char** buffer) {
         return -1;
     }
 
+    int iterations = 0;
+    int max_iterations = 300; // 30 seconds
+
     while (curly_poll(&curly) == 0) {
-        printf("Polling curly...\n");
         if (curly_is_running(&curly) == 0) {
-            printf("Curling complete!\n");
             break;
         }
+
+        iterations++;
+        if (iterations > max_iterations) {
+            break;
+        }
+
+        usleep(100000); // 10 milliseconds
     }
 
     char* response = NULL;
