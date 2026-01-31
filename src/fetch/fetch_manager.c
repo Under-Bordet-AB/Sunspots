@@ -46,13 +46,14 @@ int main(int argc, char* argv[]) {
     g_interval = (int) atoi(argv[2]);
     g_timeout = (int) atoi(argv[3]);
 
+    pthread_t thread0;
+    pthread_create(&thread0, NULL, (void* (*) (void*) ) heartbeat, NULL);
+    pthread_detach(thread0);
+
     while (1) {
         printf("Fetching from APIs...\n");
 
-        pthread_t thread0, thread1, thread2;
-
-        pthread_create(&thread0, NULL, (void* (*) (void*) ) heartbeat, NULL);
-        pthread_detach(thread0);
+        pthread_t thread1, thread2;
 
         pthread_create(&thread1, NULL, (void* (*) (void*) ) fetch_openmeteo_work, NULL);
         pthread_detach(thread1);
