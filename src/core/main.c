@@ -7,11 +7,13 @@
   Make daemon go dark, done
   what logger to use? syslog, done
   add health data to when process is reaped, done (maybe more info?)
+  Make macro out of detachment process? 
   
  */
 
 #define _GNU_SOURCE
 #include "daemon.h"
+#include "../../src/config/config.h"
 #include <stdbool.h>
 #include <time.h>
 #include <unistd.h>
@@ -81,7 +83,7 @@ int main(int argc, char **argv)
 			printf(" >> Daemon cannot be re-aqcuired by terminal.\n"
 				   " >> Daemon is now entering the dark and empty void.\n"
 				   " !! USE 'kill -SIGINT %i' TO KILL IT!\n", getpid());
-			umask(0);                       /* Our daemon has no rights */
+			umask(0);                       /* Daemon has many rights */
 			if (chdir("/") != 0)            /* Change wd to root */
 			{
 				perror(" !! chdir failed");
@@ -104,11 +106,11 @@ int main(int argc, char **argv)
 	/* This like CWD needs a better solution */
 	char core_path[1024];
 	char fetch_path[1024];
-	// char server_path[1024];
+	// char server_path[1024];cd ..
 	snprintf(core_path, sizeof(core_path), "%s/sunspots_core", prj_path);
 	snprintf(fetch_path, sizeof(fetch_path), "%s/fetch_data", prj_path);
-    spawn_process(0, core_path, "Sunspots_core", 2);
-    spawn_process(1, fetch_path, "Fetch_data", 1);
+    spawn_process(0, core_path, "Sunspots_core", 2, prj_path);
+    spawn_process(1, fetch_path, "Fetch_data", 1, prj_path);
     active_processes = 2;
 
     /* THE MONITORING LOOP */
@@ -161,7 +163,7 @@ int main(int argc, char **argv)
 
             if (needs_restart && g_daemon_running)
             {
-                spawn_process(i, watch_table[i].path, watch_table[i].name, watch_table[i].heartbeat_speed);                
+                spawn_process(i, watch_table[i].path, watch_table[i].name, watch_table[i].heartbeat_speed, prj_path);                
             }
         }
     }
@@ -190,8 +192,9 @@ int main(int argc, char **argv)
     return EXIT_SUCCESS;        
 }
 
-void spawn_process(int index, const char *path, const char *name, int speed)
+void spawn_process(int index, const char *path, const char *name, int speed, const char *wd)
 {
+	
     watch_table[index].path = path;
     watch_table[index].name = name;
     watch_table[index].heartbeat_speed = speed > 0 ? speed : HEARTBEAT_SPEED;
@@ -200,9 +203,10 @@ void spawn_process(int index, const char *path, const char *name, int speed)
 	int pipefd[2];
 	if (pipe2(pipefd, O_CLOEXEC) == -1)
 	{
+		// Change to syslog
 		perror("creating error pipe failed");
 		return;
-	}	
+	}
 	
     pid_t p = fork();
     if (p < 0)
@@ -217,6 +221,9 @@ void spawn_process(int index, const char *path, const char *name, int speed)
     {		
         /* CHILD CONTEXT */
 		close(pipefd[0]); /* Children don't read */
+		chdir(wd); /* Go back home from root */
+		/* READ IN CONFIG HERE */
+		setenv("TEST", "TEST VALUE", 1);
 		/* ADD SETENV WITH JSON BLOB HERE */
         char p_pid_str[32];
         char p_hspeed_str[32];
@@ -247,13 +254,9 @@ void spawn_process(int index, const char *path, const char *name, int speed)
     }
 }
 
-void daemon_shutdown_handler(int sig)
-{
-	// Change to write(STDOUT,, ...) 
-    syslog(LOG_INFO,"Daemon killed.");
-    g_daemon_running = 0;
-}
-
+/* 1. info->si_pid provides kernel-verified identity of the signaling worker. */
+/* 2. Handler must be 'Async-Signal-Safe'; avoid printf/malloc here in production. */
+/* 3. Flips the 'alive' latch; the main loop will clear this bit every checkup. */
 void heartbeat_handler(int sig, siginfo_t *info, void *context)
 {
     pid_t sender = info->si_pid;
@@ -267,26 +270,32 @@ void heartbeat_handler(int sig, siginfo_t *info, void *context)
     }
 }
 
+/* 1. Uses SA_SIGINFO to enable metadata (PID) collection for heartbeats. */
+/* 2. SA_RESTART ensures heartbeats don't break the daemon's nanosleep timing. */
+/* 3. SIGINT/SIGTERM intentionally omit SA_RESTART to force immediate loop exit. */
 void daemon_signal_setup()
 {
     struct sigaction sa_rt = {0};
     sa_rt.sa_sigaction = heartbeat_handler;
     sigemptyset(&sa_rt.sa_mask);
     /* SA_RESTART: Prevents heartbeats from breaking the sleep() in our loop */
-    sa_rt.sa_flags = SA_SIGINFO | SA_RESTART;
-    
+    sa_rt.sa_flags = SA_SIGINFO | SA_RESTART; 
     if (sigaction(HEARTBEAT_SIG, &sa_rt, NULL) != 0)
     {
         perror("Failed to setup signal handler for process");
         exit(EXIT_FAILURE);
     }
-
     struct sigaction sa_term = {0};
     sa_term.sa_handler = daemon_shutdown_handler;
     sigemptyset(&sa_term.sa_mask);
     /* No SA_RESTART here: We want SIGINT/SIGTERM to wake the loop immediately */
     sa_term.sa_flags = 0;
-    
     sigaction(SIGTERM, &sa_term, NULL);
     sigaction(SIGINT, &sa_term, NULL);
+}
+
+void daemon_shutdown_handler(int sig)
+{
+    syslog(LOG_INFO,"Daemon killed.");
+    g_daemon_running = 0;
 }
