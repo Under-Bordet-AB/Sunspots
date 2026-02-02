@@ -66,16 +66,6 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-int compute_work() {
-    printf("Compute working\n");
-
-    // Read from file
-    // Calculate
-    // Save to file
-
-    return 0;
-}
-
 void* heartbeat() {
     while (1) {
         // if (kill(g_ppid, SIGRTMIN) == -1) {
@@ -87,4 +77,14 @@ void* heartbeat() {
     }
 
     return NULL;
+}
+
+int compute_work() {
+    printf("Compute working\n");
+
+    // Read from file
+    // Calculate
+    // Save to file
+
+    return 0;
 }
