@@ -1,7 +1,7 @@
 CC := gcc
 SOURCES := $(wildcard *.c) $(wildcard ../libs/*.c)
 INCLUDES := -I.. -I../../ -I/usr/include/cjson/
-CFLAGS := -Wall -Wextra -pthread $(INCLUDES)
+CFLAGS := -Wall -Wextra -Wno-unused-parameter -pthread $(INCLUDES)
 LDFLAGS := -lcurl -lcjson
 TARGET := fetch_manager
 

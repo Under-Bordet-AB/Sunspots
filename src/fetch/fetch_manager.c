@@ -19,17 +19,18 @@
 pid_t g_ppid = 0;
 int g_interval = 900;
 
+// Fundamental functions
 void* heartbeat();
 void* fetch_openmeteo_work();
 void* fetch_smhi_work();
 void* fetch_elprisjustnu_work();
 
+// Helper functions
 int fetch_from_url(char* url, char** buffer);
-/*
 int normalize_openmeteo(char* raw, char** buffer);
 int normalize_smhi(char* raw, char** buffer);
 int normalize_elpris(char* raw, char** buffer);
-*/
+
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID> <interval>\n");
@@ -181,7 +182,7 @@ int fetch_from_url(char* url, char** buffer) {
 
     return 0;
 }
-/*
+
 int normalize_openmeteo(char* raw, char** buffer) {
     return 0;
 }
@@ -193,4 +194,3 @@ int normalize_smhi(char* raw, char** buffer) {
 int normalize_elprisjustnu(char* raw, char** buffer) {
     return 0;
 }
-*/
