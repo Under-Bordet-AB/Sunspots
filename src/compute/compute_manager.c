@@ -8,7 +8,9 @@
 #include <unistd.h>
 #include <string.h>
 
+#define ATOMIC_FILE_RW_IMPLEMENTATION
 #include "../libs/atomic_file_rw.h"
+
 #include "compute.h"
 
 #define DB_PATH "tester"
