@@ -6,49 +6,49 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// #include "curly.h"
+#include "curly.h"
 // #include "parsers.h"
-// #include "database_manager.h"
+
+#define ATOMIC_FILE_RW_IMPLEMENTATION
+#include "../libs/atomic_file_rw.h"
 
 #define URL_OPENMETEO ""
 #define URL_SMHI ""
-#define URL_ELPRIS ""
+#define URL_ELPRISJUSTNU ""
 
-int g_interval = 0;
-int g_timeout = 0;
+pid_t g_ppid = 0;
+int g_interval = 900;
 
+void* heartbeat();
 void* fetch_openmeteo_work();
 void* fetch_smhi_work();
-void* fetch_elpris_work();
-/*
+void* fetch_elprisjustnu_work();
+
 int fetch_from_url(char* url, char** buffer);
+/*
 int normalize_openmeteo(char* raw, char** buffer);
 int normalize_smhi(char* raw, char** buffer);
 int normalize_elpris(char* raw, char** buffer);
-int save_to_database(char* data, char* filename);
 */
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: ./path/to/bin <interval> <timeout>\n");
+        fprintf(stderr, "Usage: ./path/to/bin <PPID> <interval>\n");
         return EXIT_FAILURE;
     }
 
     printf("Starting fetch manager.\n");
 
-    /*
+    // Parse arguments
     char* endptr;
-    pid_t ppid = (int)strtol(argv[1], &endptr, 10);
+    g_ppid = (int)strtol(argv[1], &endptr, 10);
     if (*endptr != '\0') return EXIT_FAILURE;
 
-    if (kill(ppid, SIGRTMIN) == -1) {
-        perror("Could not signal daemon, terminating.\n");
-        exit(EXIT_FAILURE);
-    }
-    */
+    g_interval = (int)strtol(argv[2], &endptr, 10);
+    if (*endptr != '\0') return EXIT_FAILURE;
 
-    // Parse arguments
-    g_interval = (int) atoi(argv[1]);
-    g_timeout = (int) atoi(argv[2]);
+    pthread_t thread0;
+    pthread_create(&thread0, NULL, (void* (*) (void*) ) heartbeat, NULL);
+    pthread_detach(thread0);
 
     while (1) {
         printf("Fetching from APIs...\n");
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
         pthread_create(&thread1, NULL, (void* (*) (void*) ) fetch_openmeteo_work, NULL);
         pthread_detach(thread1);
 
-        pthread_create(&thread2, NULL, (void* (*) (void*) ) fetch_elpris_work, NULL);
+        pthread_create(&thread2, NULL, (void* (*) (void*) ) fetch_elprisjustnu_work, NULL);
         pthread_detach(thread2);
 
         sleep(g_interval);
@@ -67,25 +67,121 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
+void* heartbeat() {
+    while (1) {
+        if (kill(g_ppid, SIGRTMIN) == -1) {
+            perror("Could not signal daemon, terminating.\n");
+            exit(EXIT_FAILURE);
+        }
+        printf("Beating...\n");
+        sleep (1);
+    }
+
+    return NULL;
+}
+
 void* fetch_openmeteo_work() {
-    printf("Fetching data from openmeteo.\n");
+    char* buffer = NULL;
+    if (fetch_from_url(URL_OPENMETEO, &buffer) < 0) {
+        return NULL;
+    }
+
+    if (buffer) {
+        printf("%s\n", buffer);
+        free(buffer);
+    }
+
+    // normalize_openmeteo
+
+    // af_save("", "", "");
+
     return NULL;
 }
 
 void* fetch_smhi_work() {
-    printf("Fetching data from smhi.\n");
+    char* buffer = NULL;
+    if (fetch_from_url(URL_SMHI, &buffer) < 0) {
+        return NULL;
+    }
+
+    if (buffer) {
+        printf("%s\n", buffer);
+        free(buffer);
+    }
+
+    // normalize_smhi
+
+    // af_save("", "", "");
+
     return NULL;
 }
 
-void* fetch_elpris_work() {
-    printf("Fetching data from elpris.\n");
+void* fetch_elprisjustnu_work() {
+    char* buffer = NULL;
+    if (fetch_from_url(URL_ELPRISJUSTNU, &buffer) < 0) {
+        return NULL;
+    }
+
+    if (buffer) {
+        printf("%s\n", buffer);
+        free(buffer);
+    }
+
+    // normalize_elprisjustnu
+
+    // af_save("", "", "");
+
     return NULL;
 }
-/*
+
 int fetch_from_url(char* url, char** buffer) {
+    curly_t* curly = NULL;
+    if (curly_init(&curly) < 0) {
+        printf("Curly failed to initiate\n");
+        return -1;
+    }
+
+    if (curly_make_request(&curly, url) < 0) {
+        printf("Request failed\n");
+        curly_cleanup(&curly);
+        return -1;
+    }
+
+    int iterations = 0;
+    int max_iterations = 300; // 30 seconds
+
+    while (curly_poll(&curly) == 0) {
+        if (curly_is_running(&curly) == 0) {
+            break;
+        }
+
+        iterations++;
+        if (iterations > max_iterations) {
+            break;
+        }
+
+        usleep(100000); // 10 milliseconds
+    }
+
+    char* response = NULL;
+    if (curly_read_response(&curly, &response) < 0) {
+        printf("Reading response failed\n");
+        curly_cleanup(&curly);
+        return -1;
+    }
+    
+    if (response) {
+        *buffer = response;
+    }
+
+    if (curly_cleanup(&curly) < 0) {
+        printf("Failed to cleanup curly\n");
+        return -1;
+    }
+
     return 0;
 }
-
+/*
 int normalize_openmeteo(char* raw, char** buffer) {
     return 0;
 }
@@ -94,11 +190,7 @@ int normalize_smhi(char* raw, char** buffer) {
     return 0;
 }
 
-int normalize_elpris(char* raw, char** buffer) {
-    return 0;
-}
-
-int save_to_database(char* data, char* filename) {
+int normalize_elprisjustnu(char* raw, char** buffer) {
     return 0;
 }
 */
