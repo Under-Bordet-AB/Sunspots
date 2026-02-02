@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -12,9 +13,9 @@
 #define ATOMIC_FILE_RW_IMPLEMENTATION
 #include "../libs/atomic_file_rw.h"
 
-#define URL_OPENMETEO ""
-#define URL_SMHI ""
-#define URL_ELPRISJUSTNU ""
+#define URL_OPENMETEO "https://api.open-meteo.com/v1/forecast?latitude=59.3293&longitude=18.0686&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
+#define URL_SMHI "https://opendata.smhi.se/metfcst/snow1gv1/get_point_forecast?latitude=59.3293&longitude=18.0686"
+#define URL_ELPRISJUSTNU "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
 
 pid_t g_ppid = 0;
 int g_interval = 900;
@@ -70,10 +71,10 @@ int main(int argc, char* argv[]) {
 
 void* heartbeat() {
     while (1) {
-        if (kill(g_ppid, SIGRTMIN) == -1) {
-            perror("Could not signal daemon, terminating.\n");
-            exit(EXIT_FAILURE);
-        }
+        // if (kill(g_ppid, SIGRTMIN) == -1) {
+        //     perror("Could not signal daemon, terminating.\n");
+        //     exit(EXIT_FAILURE);
+        // }
         printf("Beating...\n");
         sleep (1);
     }
@@ -84,53 +85,83 @@ void* heartbeat() {
 void* fetch_openmeteo_work() {
     char* buffer = NULL;
     if (fetch_from_url(URL_OPENMETEO, &buffer) < 0) {
+        printf("Couldn't fetch from Openmeteo.\n");
         return NULL;
     }
 
-    if (buffer) {
-        printf("%s\n", buffer);
-        free(buffer);
+    if (!buffer) {
+        printf("Openmeteo buffer is NULL\n");
+        return NULL;
     }
 
+    printf("Openmeteo API response: %.100s...\n", buffer);
+
     // normalize_openmeteo
-
-    // af_save("", "", "");
-
+    
+    if (af_save("test", "test", buffer) < 0) {
+        printf("Couldn't save Openmeteo data to database.\n");
+    }
+    
+    free(buffer);
+    
     return NULL;
 }
 
 void* fetch_smhi_work() {
     char* buffer = NULL;
     if (fetch_from_url(URL_SMHI, &buffer) < 0) {
+        printf("Couldn't fetch from SMHI.\n");
         return NULL;
     }
 
-    if (buffer) {
-        printf("%s\n", buffer);
-        free(buffer);
+    if (!buffer) {
+        printf("SMHI buffer is NULL\n");
+        return NULL;
     }
+
+    printf("SMHI API response: %.100s...\n", buffer);
 
     // normalize_smhi
 
-    // af_save("", "", "");
+    if (af_save("test", "test", buffer) < 0) {
+        printf("Couldn't save SMHI data to database.\n");
+    }
+    
+    free(buffer);
 
     return NULL;
 }
 
 void* fetch_elprisjustnu_work() {
     char* buffer = NULL;
-    if (fetch_from_url(URL_ELPRISJUSTNU, &buffer) < 0) {
+    
+    char url[128];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    snprintf(url, sizeof(url), URL_ELPRISJUSTNU, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+
+    printf("%s\n", url);
+    
+    if (fetch_from_url(url, &buffer) < 0) {
+        printf("Couldn't fetch from Elprisjustnu.\n");
         return NULL;
     }
 
-    if (buffer) {
-        printf("%s\n", buffer);
-        free(buffer);
+    if (!buffer) {
+        printf("Elprisjustnu buffer is NULL\n");
+        return NULL;
     }
+
+    printf("Elprisjustnu API response: %.100s...\n", buffer);
 
     // normalize_elprisjustnu
 
-    // af_save("", "", "");
+    if (af_save("test", "test", buffer) < 0) {
+        printf("Couldn't save Elprisjustnu data to database.\n");
+    }
+    
+    free(buffer);
 
     return NULL;
 }
