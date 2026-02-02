@@ -1,6 +1,6 @@
 CC := gcc
 SOURCES := $(wildcard *.c) $(wildcard ../libs/*.c)
-INCLUDES := $(shell find src -type d | sed 's/^/-I')
+INCLUDES := -I.. -I../../ -I/usr/include/cjson/
 CFLAGS := -Wall -Wextra -pthread $(INCLUDES)
 LDFLAGS := -lcurl -lcjson
 TARGET := compute_manager

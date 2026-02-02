@@ -8,6 +8,11 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "../libs/atomic_file_rw.h"
+#include "compute.h"
+
+#define DB_PATH "tester"
+
 pid_t g_ppid = 0;
 
 void* heartbeat();
@@ -35,7 +40,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Watch file for modifications
-    const char* db_path = "tester";
+    const char* db_path = DB_PATH;
     int watch_fd = inotify_add_watch(inotify_fd, db_path, IN_CLOSE_WRITE);
     if (watch_fd < 0) {
         perror("inotify_add_watch failed");
@@ -61,6 +66,10 @@ int main(int argc, char* argv[]) {
 
 int compute_work() {
     printf("Compute working\n");
+
+    // Read from file
+    // Calculate
+    // Save to file
 
     return 0;
 }
