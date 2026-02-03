@@ -22,7 +22,7 @@ int compute_work();
 
 int main(int argc, char* argv[]) {
     if (argc < 1) {
-        fprintf(stderr, "Usage: ...\n");
+        fprintf(stderr, "Usage: <PPID>\n");
         return EXIT_FAILURE;
     }
 
@@ -31,8 +31,7 @@ int main(int argc, char* argv[]) {
     // Parse arguments
     char* endptr;
     g_ppid = (int) strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0')
-        return EXIT_FAILURE;
+    if (*endptr != '\0') return EXIT_FAILURE;
 
     // Initialize inotify
     int inotify_fd = inotify_init();
