@@ -55,6 +55,8 @@ int main(int argc, char* argv[]) {
     while (1) {
         printf("Fetching from APIs...\n");
 
+        // Create daemon that forks and checks the different apis (and sends heartbeats)
+
         pthread_t thread1, thread2;
 
         pthread_create(&thread1, NULL, (void* (*) (void*) ) fetch_openmeteo_work, NULL);
