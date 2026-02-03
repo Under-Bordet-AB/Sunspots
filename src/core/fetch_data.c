@@ -53,7 +53,8 @@ void handle_inotify(int fd, void *ctx);
 
 /* --- 2. MAIN EXECUTION --- */
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     if (argc < 2) {
         return EXIT_FAILURE;
     }
@@ -66,19 +67,21 @@ int main(int argc, char *argv[]) {
     ctx.ppid = (pid_t)atoi(argv[1]);
 
     system_state_t sys = {0};
-
+	//////////////////////////////////
     // 2. SETUP INOTIFY (File Watcher)
     const char *file_to_watch = "/home/drone/Code/c/system_c_cpp/boiler_room_prj/Sunspots/src/core/output.envar";
 	uint32_t mask = IN_CLOSE_WRITE;
-    
+
     int inotify_fd = inotify_init1(IN_NONBLOCK);
-    if (inotify_fd < 0) {
+    if (inotify_fd < 0)
+	{
         syslog(LOG_ERR, "inotify_init1 failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
     
     int wd = inotify_add_watch(inotify_fd, file_to_watch, mask);
-    if (wd < 0) {
+    if (wd < 0)
+	{
         // Fallback: If file doesn't exist yet, we might want to wait or exit. 
         // For now, we log and exit to alert the Daemon.
         syslog(LOG_ERR, "Failed to watch file %s: %s", file_to_watch, strerror(errno));
@@ -88,7 +91,8 @@ int main(int argc, char *argv[]) {
 
     // 3. SETUP TIMERFD (Heartbeat Metronome)
     int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
-    if (timer_fd < 0) {
+    if (timer_fd < 0)
+	{
         syslog(LOG_ERR, "timerfd_create failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
@@ -99,7 +103,8 @@ int main(int argc, char *argv[]) {
     ts.it_value.tv_sec = 1;     // First expiration after 1 second
     ts.it_value.tv_nsec = 0;
     
-    if (timerfd_settime(timer_fd, 0, &ts, NULL) < 0) {
+    if (timerfd_settime(timer_fd, 0, &ts, NULL) < 0)
+	{
         syslog(LOG_ERR, "timerfd_settime failed");
         exit(EXIT_FAILURE);
     }
@@ -116,7 +121,8 @@ int main(int argc, char *argv[]) {
     // 5. SETUP EPOLL & REGISTER DISPATCH KEYS
     // Note: epoll_create1(0) is preferred over epoll_create(0)
     sys.epoll_fd = epoll_create1(0); 
-    if (sys.epoll_fd < 0) {
+    if (sys.epoll_fd < 0)
+	{
         perror("epoll_create1");
         exit(EXIT_FAILURE);
     }
@@ -126,7 +132,8 @@ int main(int argc, char *argv[]) {
     // Register Timer: Use the ENUM Index as the key!
     ev.events = EPOLLIN;
     ev.data.u32 = SOURCE_TIMER; 
-    if (epoll_ctl(sys.epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev) == -1) {
+    if (epoll_ctl(sys.epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev) == -1)
+	{
         perror("epoll_ctl: timer");
         exit(EXIT_FAILURE);
     }
@@ -134,11 +141,12 @@ int main(int argc, char *argv[]) {
     // Register Inotify: Use the ENUM Index as the key!
     ev.events = EPOLLIN;
     ev.data.u32 = SOURCE_INOTIFY;
-    if (epoll_ctl(sys.epoll_fd, EPOLL_CTL_ADD, inotify_fd, &ev) == -1) {
+    if (epoll_ctl(sys.epoll_fd, EPOLL_CTL_ADD, inotify_fd, &ev) == -1)
+	{
         perror("epoll_ctl: inotify");
         exit(EXIT_FAILURE);
     }
-
+	/////////////////////////////////////////////////////////////
     syslog(LOG_INFO, "Event loop starting. Entering the Matrix.");
 
     /* --- 3. THE EVENT LOOP --- */
@@ -149,7 +157,8 @@ int main(int argc, char *argv[]) {
         // Wait indefinitely (-1). The timer guarantees we wake up every second.
         int nfds = epoll_wait(sys.epoll_fd, events, 10, -1);
 
-        if (nfds == -1) {
+        if (nfds == -1)
+		{
             if (errno == EINTR) continue; // Interrupted by signal
             syslog(LOG_ERR, "epoll_wait failed");
             break;
@@ -200,7 +209,8 @@ void handle_timer(int fd, void *ctx)
     
     // We MUST read the timerfd to clear the event, otherwise epoll spins at 100% CPU
     ssize_t s = read(fd, &exp, sizeof(exp));
-    if (s != sizeof(exp)) {
+    if (s != sizeof(exp))
+	{
         syslog(LOG_ERR, "Timer read error");
     }
 
@@ -220,7 +230,8 @@ void handle_inotify(int fd, void *ctx)
     {
         len = read(fd, buff, sizeof(buff));
         
-        if (len == -1) {
+        if (len == -1)
+		{
             if (errno == EAGAIN) break; // No more data
             syslog(LOG_ERR, "Inotify read error");
             exit(EXIT_FAILURE);
