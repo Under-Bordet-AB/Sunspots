@@ -20,6 +20,7 @@ time_t g_last_openmeteo_heartbeat = 0;
 time_t g_last_smhi_heartbeat = 0;
 time_t g_last_elprisjustnu_heartbeat = 0;
 
+void* heartbeat();
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context);
 
 int main(int argc, char* argv[]) {
@@ -112,6 +113,19 @@ int main(int argc, char* argv[]) {
     }
 
     return 0;
+}
+
+void* heartbeat() {
+    // while (1) {
+    //     if (kill(g_parent_pid, SIGRTMIN) == -1) {
+    //         perror("Could not signal daemon, terminating.\n");
+    //         exit(EXIT_FAILURE);
+    //     }
+    //     printf("Beating...\n");
+    //     sleep (1);
+    // }
+
+    return NULL;
 }
 
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context) {
