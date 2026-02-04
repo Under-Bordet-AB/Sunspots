@@ -64,7 +64,7 @@ int main(int argc, char* argv[]) {
                 perror("fork");
                 return EXIT_FAILURE;
             } else if (g_openmeteo_pid == 0) {
-                execv("./fetch_openmeteo", (char* const[]){"./fetch_openmeteo", parent_pid_str, NULL});
+                execv("./apis/fetch_openmeteo", (char* const[]){"./apis/fetch_openmeteo", parent_pid_str, NULL});
                 perror("execv");
                 exit(EXIT_FAILURE);
             }
@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
                 perror("fork");
                 return EXIT_FAILURE;
             } else if (g_elprisjustnu_pid == 0) {
-                execv("./fetch_elprisjustnu", (char* const[]){"./fetch_elprisjustnu", parent_pid_str, NULL});
+                execv("./apis/fetch_elprisjustnu", (char* const[]){"./apis/fetch_elprisjustnu", parent_pid_str, NULL});
                 perror("execv");
                 exit(EXIT_FAILURE);
             }
