@@ -24,7 +24,7 @@ void* heartbeat();
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context);
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
+    if (argc < 1) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
@@ -42,6 +42,10 @@ int main(int argc, char* argv[]) {
     sa.sa_flags = SA_SIGINFO;
     sa.sa_sigaction = handle_child_heartbeat;
     sigaction(SIGUSR1, &sa, NULL);
+
+    pthread_t thread_heartbeat;
+    pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);
+    pthread_detach(thread_heartbeat);
 
     g_openmeteo_pid = 0;
     g_elprisjustnu_pid = 0;
@@ -116,14 +120,14 @@ int main(int argc, char* argv[]) {
 }
 
 void* heartbeat() {
-    // while (1) {
-    //     if (kill(g_parent_pid, SIGRTMIN) == -1) {
-    //         perror("Could not signal daemon, terminating.\n");
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     printf("Beating...\n");
-    //     sleep (1);
-    // }
+    while (1) {
+        // if (kill(g_parent_pid, SIGRTMIN) == -1) {
+        //     perror("Could not signal daemon, terminating.\n");
+        //     exit(EXIT_FAILURE);
+        // }
+        printf("Beating...\n");
+        sleep (1);
+    }
 
     return NULL;
 }

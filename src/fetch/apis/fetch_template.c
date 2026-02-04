@@ -10,12 +10,14 @@
 #define API_URL "http://httpbin.org/get"
 #define INTERVAL 30
 #define NORMALIZE_FUNCTION normalize_data()
+#define DATABASE_SAVE_FUNCTION save_to_database();
 
 pid_t parent_ppid;
 
 void* heartbeat();
 int fetch_from_url(char* url, char** buffer);
 int normalize_data(char* raw, char** buffer);
+int save_to_database(char* buffer);
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
@@ -61,7 +63,7 @@ int main(int argc, char* argv[]) {
             return NULL;
         }
         
-        free(normalize_data);
+        free(normalized_data);
         free(buffer);
         
         return NULL;

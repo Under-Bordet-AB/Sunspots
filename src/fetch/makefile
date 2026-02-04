@@ -1,15 +1,16 @@
 CC := gcc
-SOURCES := $(wildcard *.c) $(wildcard ../libs/*.c)
+SOURCES_t := $(wildcard *.c) $(wildcard ../libs/*.c)
+SOURCES := fetch_manager_forks.c curly.c $(wildcard ../libs/*.c)
 INCLUDES := -I.. -I../../ -I/usr/include/cjson/
 CFLAGS := -Wall -Wextra -Wno-unused-parameter -pthread $(INCLUDES)
 LDFLAGS := -lcurl -lcjson
-TARGET := fetch_manager
+TARGET := fetch_manager_forks
 
-fetch_manager: fetch_manager.c
+fetch_manager_forks: fetch_manager_forks.c
 	$(CC) $(SOURCES) -o $(TARGET) $(CFLAGS) $(LDFLAGS)
 
 clean:
-	rm -f fetch_manager
+	rm -f fetch_manager_forks
 
 run:
-	./fetch_manager 1337 900
+	./fetch_manager_forks 1337
