@@ -24,7 +24,7 @@ void* heartbeat();
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context);
 
 int main(int argc, char* argv[]) {
-    if (argc < 1) {
+    if (argc < 2) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO;
     sa.sa_sigaction = handle_child_heartbeat;
-    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGRTMIN, &sa, NULL);
 
     pthread_t thread_heartbeat;
     pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);

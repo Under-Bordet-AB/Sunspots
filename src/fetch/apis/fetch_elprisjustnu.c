@@ -8,9 +8,9 @@
 #define ATOMIC_FILE_RW_IMPLEMENTATION
 #include "atomic_file_rw.h"
 
-#define API_NAME "HTTPBIN"
-#define API_URL "http://httpbin.org/get"
-#define INTERVAL 30
+#define API_NAME "Elprisjustnu"
+#define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
+#define INTERVAL 3600*24
 
 pid_t parent_ppid;
 
@@ -20,7 +20,7 @@ int normalize_data(char* raw, char** buffer);
 int save_to_database(char* buffer);
 
 int main(int argc, char* argv[]) {
-    if (argc < 1) {
+    if (argc < 2) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
@@ -37,7 +37,14 @@ int main(int argc, char* argv[]) {
 
     while (1) {
         char* buffer = NULL;
-        if (fetch_from_url(API_URL, &buffer) < 0) {
+
+        char url[128];
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+
+        snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+
+        if (fetch_from_url(url, &buffer) < 0) {
             printf("Couldn't fetch from %s.\n", API_NAME);
             return EXIT_FAILURE;
         }

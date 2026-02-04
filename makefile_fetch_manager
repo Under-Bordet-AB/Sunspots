@@ -1,0 +1,15 @@
+CC := gcc
+SOURCES := src/fetch/fetch_manager_forks.c $(wildcard src/libs/*.c)
+INCLUDES := -I.. -I../../ -Isrc/libs -I/usr/include/cjson/
+CFLAGS := -Wall -Wextra -Wno-unused-parameter -pthread
+LDFLAGS := -lcurl -lcjson
+TARGET := fetch_manager
+
+fetch_manager: src/fetch/fetch_manager_forks.c
+	$(CC) $(SOURCES) -o $(TARGET) $(CFLAGS) $(INCLUDES) $(LDFLAGS)
+
+clean:
+	rm -f fetch_manager
+
+run:
+	./fetch_manager 1

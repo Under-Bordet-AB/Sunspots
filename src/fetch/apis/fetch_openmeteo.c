@@ -8,9 +8,9 @@
 #define ATOMIC_FILE_RW_IMPLEMENTATION
 #include "atomic_file_rw.h"
 
-#define API_NAME "HTTPBIN"
-#define API_URL "http://httpbin.org/get"
-#define INTERVAL 30
+#define API_NAME "Openmeteo"
+#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=59.3293&longitude=18.0686&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
+#define INTERVAL 900
 
 pid_t parent_ppid;
 
@@ -20,7 +20,7 @@ int normalize_data(char* raw, char** buffer);
 int save_to_database(char* buffer);
 
 int main(int argc, char* argv[]) {
-    if (argc < 1) {
+    if (argc < 2) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }

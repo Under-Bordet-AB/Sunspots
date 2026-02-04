@@ -1,0 +1,14 @@
+CC := gcc
+SRC_LIBS := $(shell find src/libs -type f -name '*.c')
+SOURCES := src/fetch/apis/fetch_openmeteo.c $(SRC_LIBS)
+INCLUDES := -I.. -I../../ -Isrc/libs -I/usr/include/cjson/
+CFLAGS := -Wall -Wextra -Wno-unused-parameter -pthread
+LDFLAGS := -lcurl -lcjson
+
+TARGET := fetch_openmeteo
+
+fetch_openmeteo: src/fetch/apis/fetch_openmeteo.c
+	$(CC) $(SOURCES) -o $(TARGET) $(CFLAGS) $(INCLUDES) $(LDFLAGS)
+
+clean:
+	rm -f fetch_openmeteo
