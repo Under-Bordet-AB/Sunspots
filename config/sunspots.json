@@ -1,15 +1,43 @@
 {
-  "system": {
-    "version": "1.0",
-    "name": "Sunspots",
-    "debug": true
+  "common": {
+    "location": {
+      "name": "Stockholm, Sweden",
+      "latitude": "59.3293",
+      "longitude": "18.0686"
+    },
+    "paths": {
+      "db_file": ".db/database.jsonl",
+      "endpoints_dir": "endpoints",
+      "log_file": "logs/sunspots.jsonl"
+    },
+    "heartbeat": {
+      "interval_ms": 1000,
+      "timeout_sec": 10
+    },
+    "schema": {
+      "version": 1
+    }
   },
-  "modules": {
-    "core": {},
-    "server": {},
-    "database": {},
-    "compute": {},
-    "fetch": {},
-    "transform": {}
+  "workers": {
+    "fetch_openmeteo": {
+      "name": "fetch_openmeteo",
+      "poll_interval_minutes": 15,
+      "api_base": "https://api.open-meteo.com/v1/forecast",
+      "current_fields": "temperature_2m,cloud_cover,shortwave_radiation"
+    },
+    "fetch_smhi": {
+      "name": "fetch_smhi",
+      "poll_interval_minutes": 15,
+      "api_base": "https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point"
+    },
+    "calc_smhi_avg_temp": {
+      "name": "calc_smhi_avg_temp",
+      "poll_interval_minutes": 1
+    },
+    "server": {
+      "name": "server",
+      "listen_host": "127.0.0.1",
+      "listen_port": 8080
+    }
   }
 }

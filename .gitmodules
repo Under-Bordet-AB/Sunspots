@@ -1,3 +1,0 @@
-[submodule "src/libs/jj_log"]
-	path = src/libs/jj_log
-	url = https://github.com/jimmyjordanSWE/jj_log.git

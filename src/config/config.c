@@ -10,10 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "libs/json/cJSON.h"
-// #include "libs/jj_log/jj_log.h" // TODO: Enable when submodule available
 
 // Access to environment variables
 // environ is provided by unistd.h or declared here if unistd.h doesn't (standard dependent)
@@ -41,7 +41,6 @@ static char* read_file_to_string(const char* path) {
 
     FILE* f = fopen(path, "rb");
     if (!f) {
-        // jj_log_error("Config", "Failed to open file: %s", path);
         return NULL;
     }
 
@@ -56,14 +55,12 @@ static char* read_file_to_string(const char* path) {
     }
 
     if (length < 0 || length > MAX_CONFIG_SIZE) {
-        // jj_log_error("Config", "File too large or invalid size: %s", path);
         (void) fclose(f);
         return NULL;
     }
 
     char* buf = malloc(length + 1);
     if (!buf) {
-        // jj_log_error("Config", "Failed to allocate memory for file: %s", path);
         (void) fclose(f);
         return NULL;
     }
@@ -71,7 +68,6 @@ static char* read_file_to_string(const char* path) {
     memset(buf, 0, length + 1);
 
     if (fread(buf, 1, length, f) != (size_t) length) {
-        // jj_log_error("Config", "Failed to read file: %s", path);
         free(buf);
         (void) fclose(f);
         return NULL;
@@ -225,6 +221,22 @@ static cJSON* parse_arg_value(const char* val) {
     return cJSON_CreateString(val);
 }
 
+static int write_text_file(const char* path, const char* data, size_t len) {
+    if (!path || !data)
+        return -EINVAL;
+
+    FILE* f = fopen(path, "wb");
+    if (!f)
+        return -errno;
+
+    size_t written = fwrite(data, 1, len, f);
+    int close_rc = fclose(f);
+    if (written != len || close_rc != 0)
+        return -EIO;
+
+    return 0;
+}
+
 // ============================================================================
 // Lifecycle
 // ============================================================================
@@ -253,9 +265,6 @@ int config_load_file(config* cfg, const char* path) {
     free(json_str);
 
     if (!new_json) {
-        // const char *error_ptr = cJSON_GetErrorPtr();
-        // jj_log_error("Config", "Parse error near: %s", error_ptr ? error_ptr :
-        // "unknown");
         return -EINVAL;  // Parse error
     }
 
@@ -334,6 +343,23 @@ int config_load_args(config* cfg, int argc, char** argv) {
     cJSON_Delete(overrides);
 
     return 0;
+}
+
+int config_load_sources(config* cfg, const char* file_path, int argc, char** argv) {
+    if (!cfg)
+        return -EINVAL;
+
+    if (file_path) {
+        int rc = config_load_file(cfg, file_path);
+        if (rc != 0)
+            return rc;
+    }
+
+    int rc = config_load_env(cfg);
+    if (rc != 0)
+        return rc;
+
+    return config_load_args(cfg, argc, argv);
 }
 
 // ============================================================================
@@ -441,4 +467,56 @@ int config_get_string(const config* cfg, const char* key, char* out, size_t size
 
     memcpy(out, src, len + 1);  // Safe because we checked length
     return 0;
+}
+
+int config_get_string_dup(const config* cfg, const char* key, char** out) {
+    if (!cfg || !key || !out)
+        return -EINVAL;
+
+    cJSON* item = resolve_path(TO_CONST_JSON(cfg), key);
+    if (!item)
+        return -ENOENT;
+    if (!cJSON_IsString(item) || !item->valuestring)
+        return -EINVAL;
+
+    char* dup = strdup(item->valuestring);
+    if (!dup)
+        return -ENOMEM;
+    *out = dup;
+    return 0;
+}
+
+int config_export_subtree_json(const config* root, const char* path, char** out_json) {
+    if (!root || !path || !out_json)
+        return -EINVAL;
+
+    cJSON* item = resolve_path(TO_CONST_JSON(root), path);
+    if (!item)
+        return -ENOENT;
+
+    cJSON* clone = cJSON_Duplicate(item, 1);
+    if (!clone)
+        return -ENOMEM;
+
+    char* txt = cJSON_PrintUnformatted(clone);
+    cJSON_Delete(clone);
+    if (!txt)
+        return -ENOMEM;
+
+    *out_json = txt;
+    return 0;
+}
+
+int config_write_subtree_file(const config* root, const char* path, const char* out_path) {
+    if (!root || !path || !out_path)
+        return -EINVAL;
+
+    char* json = NULL;
+    int rc = config_export_subtree_json(root, path, &json);
+    if (rc != 0)
+        return rc;
+
+    rc = write_text_file(out_path, json, strlen(json));
+    cJSON_free(json);
+    return rc;
 }

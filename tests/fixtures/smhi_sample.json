@@ -1,0 +1,30 @@
+{
+  "approvedTime": "2026-02-05T10:00:00Z",
+  "referenceTime": "2026-02-05T10:00:00Z",
+  "timeSeries": [
+    {
+      "validTime": "2026-02-05T10:00:00Z",
+      "parameters": [
+        { "name": "t", "values": [ -1.8 ] },
+        { "name": "ws", "values": [ 4.4 ] },
+        { "name": "tcc_mean", "values": [ 6 ] }
+      ]
+    },
+    {
+      "validTime": "2026-02-05T11:00:00Z",
+      "parameters": [
+        { "name": "t", "values": [ -1.2 ] },
+        { "name": "ws", "values": [ 4.9 ] },
+        { "name": "tcc_mean", "values": [ 5 ] }
+      ]
+    },
+    {
+      "validTime": "2026-02-05T12:00:00Z",
+      "parameters": [
+        { "name": "t", "values": [ -0.7 ] },
+        { "name": "ws", "values": [ 5.1 ] },
+        { "name": "tcc_mean", "values": [ 4 ] }
+      ]
+    }
+  ]
+}

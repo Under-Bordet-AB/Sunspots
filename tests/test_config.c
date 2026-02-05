@@ -5,6 +5,8 @@
 #include "config/config.h"
 
 int run_arg_tests(void);
+int run_sdk_tests(void);
+int run_fetch_provider_tests(void);
 
 void test_complex_config(void) {
     // Use static fixture (persists across builds)
@@ -80,6 +82,8 @@ int main(void) {
     test_complex_config();
     passed++;
     passed += run_arg_tests();
+    passed += run_sdk_tests();
+    passed += run_fetch_provider_tests();
 
     printf("TEST_SUMMARY: %d tests run, %d passed, 0 failed\n", passed, passed);
     return 0;

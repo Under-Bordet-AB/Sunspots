@@ -24,7 +24,7 @@
 6.  **Parameter Limit**: Max 5 parameters per function; use a configuration struct for more.
 
 ## Mandatory modules
-- Use jj_log submodule for all logging. Never printf() or similar. 
+- Use the project logging module `src/log/sunspots_log.*` for runtime logging. Never printf() or similar. 
 - todo: decision for IPC comms, JSON parsing.
 
 ## Naming & Style

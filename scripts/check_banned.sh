@@ -5,7 +5,7 @@ SEARCH_DIR="src"
 EXCLUDE_DIR="libs"
 STANDARDS_FILE="docs/standards/banned.md"
 
-# Output-related identifiers that MUST use jj_log
+# Output-related identifiers that MUST use the project logger module
 LOG_ONLY=("printf" "fprintf" "vprintf" "vfprintf" "stdout" "stderr" "puts" "fputs" "putchar" "fputc" "perror")
 
 # Colors
@@ -44,8 +44,8 @@ while read -r id || [ -n "$id" ]; do
             done
 
             if [ $is_log_only -eq 1 ]; then
-                echo -e "         ➜  REASON: All output must be captured via the jj_log module."
-                echo -e "         ➜  RECOMMENDATION: Use jj_log functions instead of $id."
+                echo -e "         ➜  REASON: All output must be captured via src/log/sunspots_log."
+                echo -e "         ➜  RECOMMENDATION: Use SUNSPOTS_LOG_* macros instead of $id."
             else
                 echo -e "         ➜  REASON: This identifier is banned for safety/security reasons."
                 echo -e "         ➜  RECOMMENDATION: Use safe POSIX alternatives (see docs/standards/code.md)."

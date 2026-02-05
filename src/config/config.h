@@ -51,6 +51,11 @@ int config_load_env(config* cfg);
  */
 int config_load_args(config* cfg, int argc, char** argv);
 
+/**
+ * @brief Load sources in precedence order: file -> env -> args.
+ */
+int config_load_sources(config* cfg, const char* file_path, int argc, char** argv);
+
 // ============================================================================
 // Navigation (Subtrees)
 // ============================================================================
@@ -102,5 +107,20 @@ int config_get_bool(const config* cfg, const char* key, bool* out);
 
 // Retrieve string into a user-provided buffer
 int config_get_string(const config* cfg, const char* key, char* out, size_t size);
+
+/**
+ * @brief Duplicate a string value (caller owns *out with free()).
+ */
+int config_get_string_dup(const config* cfg, const char* key, char** out);
+
+/**
+ * @brief Export a subtree to compact JSON text (caller owns *out_json with free()).
+ */
+int config_export_subtree_json(const config* root, const char* path, char** out_json);
+
+/**
+ * @brief Export a subtree and write it to a file path.
+ */
+int config_write_subtree_file(const config* root, const char* path, const char* out_path);
 
 #endif  // CONFIG_H
