@@ -34,12 +34,12 @@ int main(int argc, char* argv[]) {
 
     printf("Starting fetch manager.\n");
 
-    setup();
-
     // Parse arguments
     char* endptr;
     g_parent_pid = (int)strtol(argv[1], &endptr, 10);
     if (*endptr != '\0') return EXIT_FAILURE;
+
+    setup();
 
     // Set up signal handler for child heartbeats
     struct sigaction sa;
