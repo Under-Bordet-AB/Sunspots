@@ -4,33 +4,40 @@
 
 /*
   TO DO:
-
+  1. Read config in daemon fork
+  2. Set up inotify for config file
+  3. Write and close triggers re-read of config
+  4. Re-read of config triggers restart of processes
+  Potential problems, what if the children are up to some good?
+  Is there a good way to send a "soft" signal to die after completing current task?
  */
+
 
 #define _GNU_SOURCE
 
 #include "daemon.h"
-#include "../../src/config/config.h"
-#include <stdbool.h>
+#include "../../src/libs/json/cJSON.h"
+#include <stdlib.h>
+#include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/stat.h>
+#include <signal.h>
 #include <syslog.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#include <sys/syslog.h>
+#include <sys/stat.h>
 
-#define FETCH_WD "../fetch/fetch"
-#define COMPUTE_WD "../compute/compute"
-#define SERVER_WD "../server/server"
+#define CONFIG_WD "../config/config.json"
 
-watch_entry_t watch_table[MAX_CHILDREN] = {0};
+watch_entry_t *watch_table = NULL;
 int active_processes = 0;
 volatile sig_atomic_t g_daemon_running = 1;
+
+char *read_conf(char *filepath);
+void  set_env(char **config);
 
 int main(int argc, char **argv)
 {
@@ -40,76 +47,71 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-	/* Get working directory for exec path. This needs to be solved with another soluton	   
-	   when each binary is in its separate directory */
 	char prj_path[1024];
 	getcwd(prj_path, sizeof(prj_path));
+	
+	DAEMONIZE();
 
-    /* THE DAEMON DETACHMENT RITUAL */
-	/* Step 1: First fork to get our child to run in the background */
-    pid_t init_pid = fork();
-    if (init_pid < 0)
-    {
-        perror(" !! 1st fork failed");
-        exit(EXIT_FAILURE);
-    }
-    if (init_pid > 0)
-    {
-        printf(" >> Daemon is now running in the background.\n");
-        exit(EXIT_SUCCESS);
-    }
-
-	/* Step 2: We are now the first child. Become session leader, closing the shell won't kill us now */
-	else
-	{
-		if (setsid() < 0)
-		{
-			perror(" !! setsid failed");
-			exit(EXIT_FAILURE);
-		}
-		pid_t second_pid = fork();
-		if (second_pid < 0)
-		{
-			perror(" !! 2th fork failed");
-			exit(EXIT_FAILURE);
-		}
-		else if (second_pid > 0)
-		{
-			/* Step 3:  Our child is not a session leader and can not be re-acquired by a terminal. */	
-			exit(EXIT_SUCCESS);
-		}
-		/* Step 4: Send the daemon into the void */		
-		else
-		{
-			printf(" >> Daemon cannot be re-aqcuired by terminal.\n"
-				   " >> Daemon is now entering the dark and empty void.\n"
-				   " !! USE 'kill -SIGINT %i' TO KILL IT!\n", getpid());
-			umask(0);                       /* Daemon has many rights */
-			if (chdir("/") != 0)            /* Change wd to root */
-			{
-				perror(" !! chdir failed");
-				exit(EXIT_FAILURE);
-			}
-			close(STDIN_FILENO);
-			close(STDOUT_FILENO);
-			close(STDERR_FILENO);
-			int scream_into_the_void = open("/dev/null", O_RDWR);
-			dup2(scream_into_the_void, STDIN_FILENO);
-			dup2(scream_into_the_void, STDOUT_FILENO);
-			dup2(scream_into_the_void, STDERR_FILENO);
-		}
-	}
-    /* From here we only run dark and foreboding daemon code. Very, fucking, metal. */
 	openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
 	syslog(LOG_NOTICE, "Sunspots daemon started successfully. Detached and darkened.");
     daemon_signal_setup();
 
-	/* BOOTSTRAP: Will be changed to dynamic solution later on */
-    spawn_process(0, FETCH_WD, "Fetch", 2, prj_path);
-    spawn_process(1, COMPUTE_WD, "Compute", 2, prj_path);
-	spawn_process(2, SERVER_WD, "Server", 2, prj_path);
-    active_processes = 3; // THIS IS A STUPID SOLUTION :)
+	/* Read config */
+	char abs_conf_path[1024];
+	snprintf(abs_conf_path, sizeof(abs_conf_path), "%s/%s", prj_path, CONFIG_WD);
+	char *config_data = read_conf(abs_conf_path);
+	if (!config_data)
+	{
+		syslog(LOG_ERR, "Could not read config file.");
+		exit(EXIT_FAILURE);
+	}
+	syslog(LOG_NOTICE, "Read config file from path.");
+	cJSON *root = cJSON_Parse(config_data);
+	if (!root)
+	{
+		const char *err_ptr = cJSON_GetErrorPtr();
+		if (err_ptr != NULL)
+		{
+			syslog(LOG_ERR, "JSON Syntax error before: %s", err_ptr);
+		}
+		exit(EXIT_FAILURE);		
+	}
+	cJSON *modules = cJSON_GetObjectItemCaseSensitive(root, "modules");
+	if (!cJSON_IsArray(modules))
+	{
+		syslog(LOG_ERR, "JSON Parse Error before: %s", cJSON_GetErrorPtr());
+		cJSON_Delete(root);
+		free(config_data);
+		exit(EXIT_FAILURE);
+	}
+		
+	active_processes = cJSON_GetArraySize(modules);		
+	watch_table = calloc(active_processes, sizeof(watch_entry_t));
+	if (!watch_table)
+	{
+		syslog(LOG_CRIT, "Calloc failed.");
+		exit(EXIT_FAILURE);
+	}
 
+	cJSON *module = NULL;
+	int i = 0;   
+	cJSON_ArrayForEach(module, modules)
+	{
+		cJSON *name = cJSON_GetObjectItemCaseSensitive(module, "name");
+		cJSON *path = cJSON_GetObjectItemCaseSensitive(module, "bin_path");
+		cJSON *hb   = cJSON_GetObjectItemCaseSensitive(module, "heartbeat_interval");
+		if (cJSON_IsString(name) && cJSON_IsString(path) && cJSON_IsNumber(hb))
+		{
+			watch_table[i].name = strdup(name->valuestring);
+			watch_table[i].path = strdup(path->valuestring);
+			watch_table[i].heartbeat_speed = hb->valueint;
+			watch_table[i].config = cJSON_PrintUnformatted(module);
+			spawn_process(i, watch_table[i].path, watch_table[i].name, watch_table[i].heartbeat_speed, prj_path);
+			i++;
+		}
+	}
+	cJSON_Delete(root);
+	free(config_data);
     /* THE MONITORING LOOP */
     while (g_daemon_running)		
     {
@@ -190,7 +192,7 @@ void spawn_process(int index, const char *path, const char *name, int speed, con
 	int pipefd[2];
 	if (pipe2(pipefd, O_CLOEXEC) == -1)
 	{
-		syslog(LOG_CRIT, "spawn_process: pipe failed");
+		syslog(LOG_ERR, "spawn_process: pipe failed");
 		return;
 	}
 	
@@ -199,48 +201,27 @@ void spawn_process(int index, const char *path, const char *name, int speed, con
     {
 		close(pipefd[0]);
 		close(pipefd[1]);
-		syslog(LOG_CRIT, "spawn_process: fork failed");
+		syslog(LOG_ERR, "spawn_process: fork failed");
         return;
     }
 
     if (p == 0)
     {		
         /* CHILD CONTEXT */
-		close(pipefd[0]); /* Children don't read */
+		close(pipefd[0]);
+		chdir(wd);
+		if (watch_table[index].config != NULL)
+		{
+			/* Contains all fields for that module */
+			setenv("SUNSPOTS_CONFIG", watch_table[index].config, 1);
+		}
 		char p_pid_str[32];
         char p_hspeed_str[32];
-		switch (index)
-		{
-		case 0:
-			// Fetch
-			chdir(FETCH_WD); /* change dir to program wd */
-			/* Pass the Parent PID so the worker knows who to signal */
-			sprintf(p_pid_str, "%d", getppid());
-			sprintf(p_hspeed_str, "%d", speed);
-			break;
-		case 1:
-			// Compute
-			chdir(COMPUTE_WD); 
-			sprintf(p_pid_str, "%d", getppid());
-			sprintf(p_hspeed_str, "%d", speed);
-			break;
-		case 2:
-			// Server
-			chdir(SERVER_WD); 
-			sprintf(p_pid_str, "%d", getppid());
-			sprintf(p_hspeed_str, "%d", speed);
-			break;
-		default:
-			break;
-		}
-		
-		/* READ IN CONFIG HERE */
-		/* ADD SETENV WITH JSON BLOB HERE */		
-		// setenv("TEST", "TEST VALUE", 1);
+		sprintf(p_pid_str, "%d", getppid());
+		sprintf(p_hspeed_str, "%d", speed);
         char *args[] = { (char*)path, p_pid_str, p_hspeed_str, NULL };        
         execvp(args[0], args);
-        /* If execvp returns, something went horribly wrong */
-		syslog(LOG_CRIT, "Execvp failed!");
+		syslog(LOG_ERR, "Execvp failed!");
 		int err = errno;
 		write(pipefd[1], &err, sizeof(err));
 		close(pipefd[1]);
@@ -303,4 +284,54 @@ void daemon_shutdown_handler(int sig)
 {
     syslog(LOG_INFO,"Daemon killed.");
     g_daemon_running = 0;
+}
+
+char *read_conf(char *filepath)
+{
+	FILE *fptr = fopen(filepath, "rb");
+	if (!fptr) return NULL;
+	
+	
+	fseek(fptr, 0, SEEK_END); /* Sets file pos indicator to end of file */
+	size_t len = ftell(fptr); /* Gets value of file pos indicator */
+	rewind(fptr); /* rewinds pos indicator */
+
+	char *buf = (char*)malloc(len + 1);
+	if (!buf)
+	{
+		fclose(fptr);
+		return NULL;
+	}
+	
+	size_t rb = fread(buf, 1, len, fptr);
+	if (rb < len)
+	{
+		if (ferror(fptr))
+		{
+			syslog(LOG_ERR, "Error reading file.");
+			free(buf);
+			return NULL;
+		}
+		else if (feof(fptr))
+		{
+			buf[rb] = '\0';
+		}
+	}
+	else
+	{
+		buf[len] = '\0';
+	}
+
+	fclose(fptr);
+	return buf;
+}
+
+void set_env(char **config)
+{
+	if (setenv("SUNSPOTS_CONFIG", *config, 1) != 0)
+	{
+		syslog(LOG_ERR, "Could not load config into environment.");
+		exit(EXIT_FAILURE);
+	}
+	syslog(LOG_NOTICE, "Loaded config into environment.");
 }

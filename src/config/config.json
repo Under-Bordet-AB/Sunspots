@@ -1,0 +1,31 @@
+{
+    "system": {
+        "version": "1.0",
+        "name": "Sunspots Daemon",
+        "debug_mode": true,
+        "log_path": "/var/log/sunspots.log"
+    },
+    "modules": [
+        {
+            "name": "Fetch",
+            "bin_path": "../fetch/fetch",
+            "heartbeat_interval": 2,
+            "source_url": "https://api.sunspots.io/v1/data",
+            "retry_limit": 3
+        },
+        {
+            "name": "Compute",
+            "bin_path": "../compute/compute",
+            "heartbeat_interval": 5,
+            "precision": "high",
+            "threads": 4
+        },
+        {
+            "name": "Server",
+            "bin_path": "../server/server",
+            "heartbeat_interval": 2,
+            "port": 8080,
+            "max_connections": 100
+        }
+    ]
+}
