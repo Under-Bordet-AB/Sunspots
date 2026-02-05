@@ -82,6 +82,7 @@ int main(int argc, char* argv[]) {
                 apis[i].pid = 0;
             }
 
+            // Check for unexpected exits
             if (apis[i].pid > 0 && waitpid(apis[i].pid, NULL, WNOHANG) > 0) {
                 printf("%s process exited undexpectedly\n", apis[i].name);
                 apis[i].pid = 0;
