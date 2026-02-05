@@ -18,10 +18,10 @@ int sunspots_log_open(sunspots_log** out, const char* path, const char* proc, co
                       const char* config_version);
 void sunspots_log_close(sunspots_log** logp);
 
-int sunspots_log_vwrite(sunspots_log* log, sunspots_log_level level, const char* category, const char* file,
-                        int line, const char* fmt, va_list ap);
-int sunspots_log_write(sunspots_log* log, sunspots_log_level level, const char* category, const char* file,
-                       int line, const char* fmt, ...);
+int sunspots_log_vwrite(sunspots_log* log, sunspots_log_level level, const char* category, const char* file, int line,
+                        const char* fmt, va_list ap);
+int sunspots_log_write(sunspots_log* log, sunspots_log_level level, const char* category, const char* file, int line,
+                       const char* fmt, ...);
 
 const char* sunspots_log_level_name(sunspots_log_level level);
 

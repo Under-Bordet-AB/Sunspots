@@ -128,15 +128,15 @@ static int read_file_limited(const char* path, size_t max_bytes, char** out_body
     size_t len = (size_t) st.st_size;
     char* body = calloc(len + 1, 1);
     if (!body) {
-        fclose(f);
+        (void) fclose(f);
         return -ENOMEM;
     }
     if (fread(body, 1, len, f) != len) {
         free(body);
-        fclose(f);
+        (void) fclose(f);
         return -EIO;
     }
-    fclose(f);
+    (void) fclose(f);
     body[len] = '\0';
     *out_body = body;
     *out_len = len;
@@ -228,7 +228,7 @@ static void build_http_date(char* out, size_t out_sz) {
     time_t now = time(NULL);
     struct tm tm_utc;
     if (!gmtime_r(&now, &tm_utc)) {
-        snprintf(out, out_sz, "Thu, 01 Jan 1970 00:00:00 GMT");
+        (void) snprintf(out, out_sz, "Thu, 01 Jan 1970 00:00:00 GMT");
         return;
     }
     (void) strftime(out, out_sz, "%a, %d %b %Y %H:%M:%S GMT", &tm_utc);
@@ -452,8 +452,7 @@ int main(void) {
             int fd = events[i].data.fd;
             if (fd == inotify_fd) {
                 char buf[4096];
-                while (read(inotify_fd, buf, sizeof(buf)) > 0) {
-                }
+                while (read(inotify_fd, buf, sizeof(buf)) > 0) {}
                 (void) cache_reload_dir(&cache, endpoints_dir, (size_t) max_response_bytes);
                 (void) SUNSPOTS_LOG_DEBUG(log, "cache", "cache reloaded from inotify event");
                 continue;
@@ -470,7 +469,7 @@ int main(void) {
                     }
                     struct timeval tv;
                     tv.tv_sec = read_timeout_ms / 1000;
-                    tv.tv_usec = (read_timeout_ms % 1000) * 1000;
+                    tv.tv_usec = (suseconds_t) ((suseconds_t) (read_timeout_ms % 1000) * 1000);
                     (void) setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
                     (void) setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
                     (void) handle_client(client_fd, &cache);

@@ -23,8 +23,7 @@ static sssdk_type_id map_smhi_param(const char* name) {
     return SSSDK_TYPE_INVALID;
 }
 
-static int emit_metric(sssdk_runtime* rt, sssdk_type_id type_id, double value, const char* valid_time,
-                       long timestamp) {
+static int emit_metric(sssdk_runtime* rt, sssdk_type_id type_id, double value, const char* valid_time, long timestamp) {
     char payload[256];
     int n = snprintf(payload, sizeof(payload), "{\"value\":%.6f,\"valid_time\":\"%s\"}", value,
                      valid_time ? valid_time : "");

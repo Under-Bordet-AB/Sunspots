@@ -36,9 +36,11 @@ CALC_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(CALC_SRCS))
 SERVER_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(SERVER_SRCS))
 TEST_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRCS))
 
-.PHONY: all clean test run root-daemon
+.PHONY: all clean test run root-daemon debug
 
 all: $(BIN_DIR)/sunspotsd $(BIN_DIR)/fetch_openmeteo $(BIN_DIR)/fetch_smhi $(BIN_DIR)/calc_smhi_avg_temp $(BIN_DIR)/sunspots_server root-daemon
+
+debug: all
 
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)

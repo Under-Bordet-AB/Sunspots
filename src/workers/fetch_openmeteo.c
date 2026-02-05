@@ -1,11 +1,10 @@
+#include <curl/curl.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <curl/curl.h>
 
 #include "providers/openmeteo_provider.h"
 #include "sdk/sunspots_sdk.h"
@@ -24,11 +23,11 @@ static int read_file(const char* path, char* out, size_t out_sz) {
     }
     size_t n = fread(out, 1, out_sz - 1, f);
     if (ferror(f)) {
-        fclose(f);
+        (void) fclose(f);
         return -EIO;
     }
     out[n] = '\0';
-    fclose(f);
+    (void) fclose(f);
     return (int) n;
 }
 

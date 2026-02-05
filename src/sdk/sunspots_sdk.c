@@ -2,8 +2,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -44,8 +44,7 @@ static int unit_multiplier_ms(const char* unit) {
         strcmp(unit, "minutes") == 0) {
         return 60 * 1000;
     }
-    if (strcmp(unit, "h") == 0 || strcmp(unit, "hr") == 0 || strcmp(unit, "hour") == 0 ||
-        strcmp(unit, "hours") == 0) {
+    if (strcmp(unit, "h") == 0 || strcmp(unit, "hr") == 0 || strcmp(unit, "hour") == 0 || strcmp(unit, "hours") == 0) {
         return 60 * 60 * 1000;
     }
     return -1;
@@ -132,7 +131,14 @@ int sssdk_bootstrap(sssdk_runtime* rt, int argc, char** argv) {
     }
 
     rt->heartbeat_ms = config_get_int_or(rt->common, "heartbeat.interval_ms", 1000);
-    rt->parent_pid = (pid_t) atoi(argv[1]);
+    errno = 0;
+    char* endptr = NULL;
+    long parent_pid = strtol(argv[1], &endptr, 10);
+    if (errno != 0 || endptr == argv[1] || (endptr && *endptr != '\0') || parent_pid <= 1 || parent_pid > INT_MAX) {
+        sssdk_shutdown(rt);
+        return -EINVAL;
+    }
+    rt->parent_pid = (pid_t) parent_pid;
     rt->running = true;
     (void) sunspots_log_open(&rt->logger, rt->log_file, "worker", config_get_string_or(rt->worker, "name", ""),
                              rt->version);
@@ -308,9 +314,8 @@ int sssdk_reader_next(sssdk_reader* rd, sssdk_record* out) {
         int payload_len = snprintf(rd->payload_buf, sizeof(rd->payload_buf), "%s", payload_txt);
         cJSON_free(payload_txt);
         cJSON_Delete(obj);
-        if (source_len <= 0 || type_len <= 0 || payload_len <= 0 ||
-            (size_t) source_len >= sizeof(rd->source_buf) || (size_t) type_len >= sizeof(rd->type_buf) ||
-            (size_t) payload_len >= sizeof(rd->payload_buf)) {
+        if (source_len <= 0 || type_len <= 0 || payload_len <= 0 || (size_t) source_len >= sizeof(rd->source_buf) ||
+            (size_t) type_len >= sizeof(rd->type_buf) || (size_t) payload_len >= sizeof(rd->payload_buf)) {
             continue;
         }
 
@@ -331,7 +336,7 @@ int sssdk_reader_close(sssdk_reader* rd) {
         return -EINVAL;
     }
     if (rd->fp) {
-        fclose(rd->fp);
+        (void) fclose(rd->fp);
         rd->fp = NULL;
     }
     return 0;

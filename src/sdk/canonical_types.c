@@ -11,34 +11,34 @@ typedef struct type_meta {
     const char* category;
 } type_meta;
 
-static const type_meta k_type_table[] = {
+static const type_meta K_TYPE_TABLE[] = {
 #define X(id, name, unit, category) {id, name, unit, category},
 #include "sdk/canonical_types.def"
 #undef X
 };
 
 const char* sssdk_type_name(sssdk_type_id id) {
-    for (size_t i = 0; i < sizeof(k_type_table) / sizeof(k_type_table[0]); i++) {
-        if (k_type_table[i].id == id) {
-            return k_type_table[i].name;
+    for (size_t i = 0; i < sizeof(K_TYPE_TABLE) / sizeof(K_TYPE_TABLE[0]); i++) {
+        if (K_TYPE_TABLE[i].id == id) {
+            return K_TYPE_TABLE[i].name;
         }
     }
     return NULL;
 }
 
 const char* sssdk_type_unit(sssdk_type_id id) {
-    for (size_t i = 0; i < sizeof(k_type_table) / sizeof(k_type_table[0]); i++) {
-        if (k_type_table[i].id == id) {
-            return k_type_table[i].unit;
+    for (size_t i = 0; i < sizeof(K_TYPE_TABLE) / sizeof(K_TYPE_TABLE[0]); i++) {
+        if (K_TYPE_TABLE[i].id == id) {
+            return K_TYPE_TABLE[i].unit;
         }
     }
     return NULL;
 }
 
 const char* sssdk_type_category(sssdk_type_id id) {
-    for (size_t i = 0; i < sizeof(k_type_table) / sizeof(k_type_table[0]); i++) {
-        if (k_type_table[i].id == id) {
-            return k_type_table[i].category;
+    for (size_t i = 0; i < sizeof(K_TYPE_TABLE) / sizeof(K_TYPE_TABLE[0]); i++) {
+        if (K_TYPE_TABLE[i].id == id) {
+            return K_TYPE_TABLE[i].category;
         }
     }
     return NULL;
@@ -48,9 +48,9 @@ int sssdk_type_parse(const char* name, sssdk_type_id* out) {
     if (!name || !out) {
         return -EINVAL;
     }
-    for (size_t i = 0; i < sizeof(k_type_table) / sizeof(k_type_table[0]); i++) {
-        if (strcmp(name, k_type_table[i].name) == 0) {
-            *out = k_type_table[i].id;
+    for (size_t i = 0; i < sizeof(K_TYPE_TABLE) / sizeof(K_TYPE_TABLE[0]); i++) {
+        if (strcmp(name, K_TYPE_TABLE[i].name) == 0) {
+            *out = K_TYPE_TABLE[i].id;
             return 0;
         }
     }

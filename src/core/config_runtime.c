@@ -72,8 +72,8 @@ int cfg_runtime_build_one(const config* root, const worker_cfg_target* target, c
     return 0;
 }
 
-int cfg_runtime_build_all(const config* root, const worker_cfg_target* targets, size_t n,
-                          const config* common_cfg, char* out_version, size_t out_version_sz) {
+int cfg_runtime_build_all(const config* root, const worker_cfg_target* targets, size_t n, const config* common_cfg,
+                          char* out_version, size_t out_version_sz) {
     if (!root || !targets || n == 0 || !common_cfg || !out_version || out_version_sz < 17) {
         return -EINVAL;
     }

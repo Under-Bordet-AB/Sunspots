@@ -40,7 +40,11 @@ int main(int argc, char** argv) {
         long batch_ts = -1;
         if (rc == 0) {
             sssdk_record rec;
-            while ((rc = sssdk_reader_next(&rd, &rec)) == 1) {
+            for (;;) {
+                rc = sssdk_reader_next(&rd, &rec);
+                if (rc != 1) {
+                    break;
+                }
                 if (rec.type_id != SSSDK_TYPE_TEMPERATURE_C) {
                     continue;
                 }

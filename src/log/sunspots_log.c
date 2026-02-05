@@ -119,8 +119,8 @@ void sunspots_log_close(sunspots_log** logp) {
     *logp = NULL;
 }
 
-int sunspots_log_vwrite(sunspots_log* log, sunspots_log_level level, const char* category, const char* file,
-                        int line, const char* fmt, va_list ap) {
+int sunspots_log_vwrite(sunspots_log* log, sunspots_log_level level, const char* category, const char* file, int line,
+                        const char* fmt, va_list ap) {
     if (!log || log->fd < 0 || !fmt) {
         return -EINVAL;
     }
@@ -175,8 +175,8 @@ int sunspots_log_vwrite(sunspots_log* log, sunspots_log_level level, const char*
     return 0;
 }
 
-int sunspots_log_write(sunspots_log* log, sunspots_log_level level, const char* category, const char* file,
-                       int line, const char* fmt, ...) {
+int sunspots_log_write(sunspots_log* log, sunspots_log_level level, const char* category, const char* file, int line,
+                       const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     int rc = sunspots_log_vwrite(log, level, category, file, line, fmt, ap);
