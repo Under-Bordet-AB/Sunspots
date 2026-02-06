@@ -79,6 +79,6 @@ void daemon_signal_setup();
  * @param name Friendly name for the process.
  * @param speed Frequency of heartbeats expected from this child.
  */
-void spawn_process(int index, const char *path, const char *name, int speed);
+void spawn_process(int index, const char *path, const char *name, int speed, const char *wd);
 
 #endif /* DAEMON_H */
