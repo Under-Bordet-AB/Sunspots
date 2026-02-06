@@ -75,7 +75,7 @@ void test_complex_config(void) {
     printf("[PASS] Complex Config\n");
 }
 
-int run_config_tests(void) {
+int main(void) {
     int passed = 0;
     test_complex_config();
     passed++;
