@@ -3,15 +3,12 @@
  **/
 
 /*
-  TO DO
-  Make daemon go dark, done
-  what logger to use? syslog, done
-  add health data to when process is reaped, done (maybe more info?)
-  Make macro out of detachment process? 
-  
+  TO DO:
+
  */
 
 #define _GNU_SOURCE
+
 #include "daemon.h"
 #include "../../src/config/config.h"
 #include <stdbool.h>
@@ -26,6 +23,10 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/syslog.h>
+
+#define FETCH_WD "../fetch/fetch"
+#define COMPUTE_WD "../compute/compute"
+#define SERVER_WD "../server/server"
 
 watch_entry_t watch_table[MAX_CHILDREN] = {0};
 int active_processes = 0;
@@ -103,21 +104,16 @@ int main(int argc, char **argv)
 	syslog(LOG_NOTICE, "Sunspots daemon started successfully. Detached and darkened.");
     daemon_signal_setup();
 
-	/* This like CWD needs a better solution */
-	char core_path[1024];
-	char fetch_path[1024];
-	// char server_path[1024];cd ..
-	snprintf(core_path, sizeof(core_path), "%s/sunspots_core", prj_path);
-	snprintf(fetch_path, sizeof(fetch_path), "%s/fetch_data", prj_path);
-    spawn_process(0, core_path, "Sunspots_core", 2, prj_path);
-    spawn_process(1, fetch_path, "Fetch_data", 1, prj_path);
-    active_processes = 2;
+	/* BOOTSTRAP: Will be changed to dynamic solution later on */
+    spawn_process(0, FETCH_WD, "Fetch", 2, prj_path);
+    spawn_process(1, COMPUTE_WD, "Compute", 2, prj_path);
+	spawn_process(2, SERVER_WD, "Server", 2, prj_path);
+    active_processes = 3; // THIS IS A STUPID SOLUTION :)
 
     /* THE MONITORING LOOP */
     while (g_daemon_running)		
     {
-		/* Needed to sleep correctly even when reciving
-		   signals from childen */
+		/* Needed to sleep correctly even when reciving signals from childen */
 		struct timespec req = {HEALTH_CHECKUP_INTERVAL, 0}; /* Requested sleep time: s, ns */
 		struct timespec rem; /* kernel writes to this var how much time is left on requested sleep when interreputed */
 		while (nanosleep(&req, &rem) == -1)
@@ -133,31 +129,26 @@ int main(int argc, char **argv)
             int needs_restart = 0;
             if (rv > 0)
             {
-                syslog(LOG_ERR, "Process: %s PID: %i terinated. Restarting.", 
-                       watch_table[i].name, watch_table[i].pid);
+                syslog(LOG_ERR, "Process: %s PID: %i terinated. Restarting.", watch_table[i].name, watch_table[i].pid);
                 needs_restart = 1;
             }
             else if (!watch_table[i].alive)
             {
                /* The process is still "running" according to the OS, but it hasn't sent a heartbeat signal. It's likely deadlocked or hung. */
-				syslog(LOG_ERR, "Process: %s PID: %i hung. Restarting.",
-                       watch_table[i].name, watch_table[i].pid);
+				syslog(LOG_ERR, "Process: %s PID: %i hung. Restarting.", watch_table[i].name, watch_table[i].pid);				
                 kill(watch_table[i].pid, SIGKILL);
                 waitpid(watch_table[i].pid, NULL, 0);				
 				struct rusage usage;
 				if (getrusage(RUSAGE_CHILDREN, &usage) == 0)
 				{
 					syslog(LOG_INFO, "Total Child RAM Peak: %ld KB", usage.ru_maxrss);
-					/* CPU time is split into seconds and microseconds */
-					syslog(LOG_INFO, "Total User CPU Time: %ld.%06ld sec",
-						   usage.ru_utime.tv_sec, usage.ru_utime.tv_usec);
+					syslog(LOG_INFO, "Total User CPU Time: %ld.%06ld sec", usage.ru_utime.tv_sec, usage.ru_utime.tv_usec);
 				}
                 needs_restart = 1;
             }
             else
             {
-                syslog(LOG_INFO, "Process: %s PID: %i is healthy.",
-                       watch_table[i].name, watch_table[i].pid);
+                syslog(LOG_INFO, "Process: %s PID: %i is healthy.", watch_table[i].name, watch_table[i].pid);
                 watch_table[i].alive = 0; 
             }
 
@@ -178,15 +169,11 @@ int main(int argc, char **argv)
 			struct rusage usage;
 			if (getrusage(RUSAGE_CHILDREN, &usage) == 0)
 			{
-				// On Linux, ru_maxrss is in Kilobytes.
 				syslog(LOG_INFO, "Total Child RAM Peak: %ld KB", usage.ru_maxrss);
-				// CPU time is split into seconds and microseconds
-				syslog(LOG_INFO, "Total User CPU Time: %ld.%06ld sec",
-					   usage.ru_utime.tv_sec, usage.ru_utime.tv_usec);
+				syslog(LOG_INFO, "Total User CPU Time: %ld.%06ld sec", usage.ru_utime.tv_sec, usage.ru_utime.tv_usec);
 			}
         }
     }    
-
 	syslog(LOG_NOTICE, "Daemon vanished. All children reaped");
 	closelog();
     return EXIT_SUCCESS;        
@@ -194,7 +181,7 @@ int main(int argc, char **argv)
 
 void spawn_process(int index, const char *path, const char *name, int speed, const char *wd)
 {
-	
+	chdir(wd); /* Move back to prj dir from root for relative path to processes */
     watch_table[index].path = path;
     watch_table[index].name = name;
     watch_table[index].heartbeat_speed = speed > 0 ? speed : HEARTBEAT_SPEED;
@@ -203,8 +190,7 @@ void spawn_process(int index, const char *path, const char *name, int speed, con
 	int pipefd[2];
 	if (pipe2(pipefd, O_CLOEXEC) == -1)
 	{
-		// Change to syslog
-		perror("creating error pipe failed");
+		syslog(LOG_CRIT, "spawn_process: pipe failed");
 		return;
 	}
 	
@@ -213,7 +199,7 @@ void spawn_process(int index, const char *path, const char *name, int speed, con
     {
 		close(pipefd[0]);
 		close(pipefd[1]);
-        perror("Spawning fork failed");
+		syslog(LOG_CRIT, "spawn_process: fork failed");
         return;
     }
 
@@ -221,21 +207,40 @@ void spawn_process(int index, const char *path, const char *name, int speed, con
     {		
         /* CHILD CONTEXT */
 		close(pipefd[0]); /* Children don't read */
-		chdir(wd); /* Go back home from root */
-		/* READ IN CONFIG HERE */
-		setenv("TEST", "TEST VALUE", 1);
-		/* ADD SETENV WITH JSON BLOB HERE */
-        char p_pid_str[32];
+		char p_pid_str[32];
         char p_hspeed_str[32];
-        
-        /* Pass the Parent PID so the worker knows who to signal */
-        sprintf(p_pid_str, "%d", getppid());
-        sprintf(p_hspeed_str, "%d", speed);
+		switch (index)
+		{
+		case 0:
+			// Fetch
+			chdir(FETCH_WD); /* change dir to program wd */
+			/* Pass the Parent PID so the worker knows who to signal */
+			sprintf(p_pid_str, "%d", getppid());
+			sprintf(p_hspeed_str, "%d", speed);
+			break;
+		case 1:
+			// Compute
+			chdir(COMPUTE_WD); 
+			sprintf(p_pid_str, "%d", getppid());
+			sprintf(p_hspeed_str, "%d", speed);
+			break;
+		case 2:
+			// Server
+			chdir(SERVER_WD); 
+			sprintf(p_pid_str, "%d", getppid());
+			sprintf(p_hspeed_str, "%d", speed);
+			break;
+		default:
+			break;
+		}
+		
+		/* READ IN CONFIG HERE */
+		/* ADD SETENV WITH JSON BLOB HERE */		
+		// setenv("TEST", "TEST VALUE", 1);
         char *args[] = { (char*)path, p_pid_str, p_hspeed_str, NULL };        
         execvp(args[0], args);
         /* If execvp returns, something went horribly wrong */
-        perror(" !! Execvp failed! Sending errno through pipe and stopping daemon\n"
-			   " !! ");
+		syslog(LOG_CRIT, "Execvp failed!");
 		int err = errno;
 		write(pipefd[1], &err, sizeof(err));
 		close(pipefd[1]);
