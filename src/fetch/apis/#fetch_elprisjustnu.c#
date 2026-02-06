@@ -8,10 +8,9 @@
 #include "../../libs/curly.h"
 #define ATOMIC_FILE_RW_IMPLEMENTATION
 #include "../../libs/atomic_file_rw.h"
-
-#define API_NAME "Openmeteo"
-#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=59.3293&longitude=18.0686&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
-#define INTERVAL 900
+#define API_NAME "Elprisjustnu"
+#define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
+#define INTERVAL 3600*24
 
 pid_t parent_ppid;
 int g_hb_speed;
@@ -25,7 +24,7 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
-
+	syslog("SUNSPOTS_FETCH_ELPRIS")
     printf("Starting %s fetcher.\n", API_NAME);
 
     char* endptr;
@@ -33,14 +32,21 @@ int main(int argc, char* argv[]) {
     if (*endptr != '\0') return EXIT_FAILURE;
 	g_hb_speed = (int)strtol(argv[2], &endptr, 10);
 	if (*endptr != '\0') return EXIT_FAILURE;
-
+	
     pthread_t thread_heartbeat;
     pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);
     pthread_detach(thread_heartbeat);
 
     while (1) {
         char* buffer = NULL;
-        if (fetch_from_url(API_URL, &buffer) < 0) {
+
+        char url[128];
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+
+        snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+
+        if (fetch_from_url(url, &buffer) < 0) {
             printf("Couldn't fetch from %s.\n", API_NAME);
             return EXIT_FAILURE;
         }

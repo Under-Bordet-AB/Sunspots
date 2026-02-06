@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/syslog.h>
 
 #define HEARTBEAT_TIMEOUT 10
 
@@ -21,23 +22,26 @@ typedef struct api {
 api apis[2];
 
 pid_t g_parent_pid = 0;
+int g_hb_speed;
 
 void* heartbeat();
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context);
 int setup();
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
+    if (argc < 3) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
-
+	openlog("SUNSPOTS_FETCH", LOG_PID, LOG_CONS);
     printf("Starting fetch manager.\n");
 
     // Parse arguments
     char* endptr;
     g_parent_pid = (int)strtol(argv[1], &endptr, 10);
     if (*endptr != '\0') return EXIT_FAILURE;
+	g_hb_speed = (int)strtol(argv[2], &endptr, 10);
+	if (*endptr != '\0') return EXIT_FAILURE;
 
     //setenv("SUNSPOTS CONFIG", watch_table[index].config, 1);
     
@@ -93,7 +97,7 @@ int main(int argc, char* argv[]) {
 
         sleep(2);
     }
-
+	closelog();
     return 0;
 }
 
@@ -117,19 +121,18 @@ int setup() {
 
     for (int i = 0; i < (int)(sizeof(apis) / sizeof(apis[0])); i++) {
         printf("API %d: %s\n", i + 1, apis[i].name);
-    }
-
+    }  
     return 0;
 }
 
 void* heartbeat() {
     while (1) {
-        // if (kill(g_parent_pid, SIGRTMIN) == -1) {
-        //     perror("Could not signal daemon, terminating.\n");
-        //     exit(EXIT_FAILURE);
-        // }
+        if (kill(g_parent_pid, SIGRTMIN) == -1) {
+             perror("Could not signal daemon, terminating.\n");
+             exit(EXIT_FAILURE);
+        }
         printf("Beating...\n");
-        sleep (1);
+        sleep (g_hb_speed);
     }
 
     return NULL;

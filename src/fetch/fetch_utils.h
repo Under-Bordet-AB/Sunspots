@@ -2,7 +2,7 @@
 #define FETCH_UTILS_H
 
 #include <unistd.h>
-#include "curly.h"
+#include "../libs/curly.h"
 
 int fetch_from_url(char* url, char** buffer) {
     curly_t* curly = NULL;

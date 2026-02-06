@@ -1,7 +1,7 @@
 #ifndef ATOMIC_FILE_RW_H
 #define ATOMIC_FILE_RW_H
 
-#include "cJSON.h"
+#include "json/cJSON.h"
 
 #include <errno.h>
 #include <fcntl.h>

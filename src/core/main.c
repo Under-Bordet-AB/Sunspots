@@ -2,6 +2,7 @@
  * main.c - pid supervisor, flat model
  **/
 
+
 #define _GNU_SOURCE
 
 #include "daemon.h"
@@ -15,13 +16,14 @@
 #include <string.h>
 #include <signal.h>
 #include <syslog.h>
+#include <sys/syslog.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <signal.h>
 
-#define CONFIG_WD "../config/config.json"
+#define CONFIG_WD "../../config/sunspots.json"
 
 watch_entry_t *watch_table = NULL;
 int active_processes = 0;
@@ -50,6 +52,7 @@ int main(int argc, char **argv)
 	/* Read config */
 	char abs_conf_path[1024];
 	snprintf(abs_conf_path, sizeof(abs_conf_path), "%s/%s", prj_path, CONFIG_WD);
+	syslog(LOG_NOTICE, "Path is: %s", abs_conf_path);
 	char *config_data = read_conf(abs_conf_path);
 	if (!config_data)
 	{

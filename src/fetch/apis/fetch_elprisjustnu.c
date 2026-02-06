@@ -4,23 +4,23 @@
 #include <signal.h>
 #include <pthread.h>
 
-#include "fetch_utils.h"
-#include "curly.h"
+#include "../fetch_utils.h"
+#include "../../libs/curly.h"
 #define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "atomic_file_rw.h"
-
+#include "../../libs/atomic_file_rw.h"
 #define API_NAME "Elprisjustnu"
 #define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
 #define INTERVAL 3600*24
 
 pid_t parent_ppid;
+int g_hb_speed;
 
 void* heartbeat();
 int normalize_data(char* raw, char** buffer);
 int save_to_database(char* buffer);
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
+    if (argc < 3) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
@@ -30,7 +30,9 @@ int main(int argc, char* argv[]) {
     char* endptr;
     parent_ppid = (int)strtol(argv[1], &endptr, 10);
     if (*endptr != '\0') return EXIT_FAILURE;
-
+	g_hb_speed = (int)strtol(argv[2], &endptr, 10);
+	if (*endptr != '\0') return EXIT_FAILURE;
+	
     pthread_t thread_heartbeat;
     pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);
     pthread_detach(thread_heartbeat);
@@ -86,7 +88,7 @@ void* heartbeat() {
             exit(EXIT_FAILURE);
         }
         printf("Beating...\n");
-        sleep(5);
+        sleep(g_hb_speed);
     }
 
     return NULL;
