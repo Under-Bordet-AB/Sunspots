@@ -16,7 +16,6 @@
 pid_t parent_ppid;
 
 void* heartbeat();
-int fetch_from_url(char* url, char** buffer);
 int normalize_data(char* raw, char** buffer);
 int save_to_database(char* buffer);
 

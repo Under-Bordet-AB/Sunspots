@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define HEARTBEAT_TIMEOUT 5
+#define HEARTBEAT_TIMEOUT 10
 
 typedef struct api {
     char* name;
@@ -18,7 +18,7 @@ typedef struct api {
     time_t last_heartbeat;
 } api;
 
-api apis[3];
+api apis[2];
 
 pid_t g_parent_pid = 0;
 
@@ -39,6 +39,8 @@ int main(int argc, char* argv[]) {
     g_parent_pid = (int)strtol(argv[1], &endptr, 10);
     if (*endptr != '\0') return EXIT_FAILURE;
 
+    //setenv("SUNSPOTS CONFIG", watch_table[index].config, 1);
+    
     setup();
 
     // Set up signal handler for child heartbeats
@@ -103,14 +105,15 @@ int setup() {
     api_curr->interval = 900;
 
     api_curr = &apis[1];
-    api_curr->name = "SMHI";
-    api_curr->path = "./apis/fetch_smhi";
-    api_curr->interval = 900;
-
-    api_curr = &apis[2];
     api_curr->name = "Elprisjustnu";
     api_curr->path = "./apis/fetch_elprisjustnu";
     api_curr->interval = 3600 * 24;
+
+    // api_curr = &apis[3];
+    // api_curr->name = "SMHI";
+    // api_curr->path = "./apis/fetch_smhi";
+    // api_curr->interval = 900;
+
 
     for (int i = 0; i < (int)(sizeof(apis) / sizeof(apis[0])); i++) {
         printf("API %d: %s\n", i + 1, apis[i].name);
