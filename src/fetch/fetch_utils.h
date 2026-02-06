@@ -1,4 +1,3 @@
-#include <unistd.h>
 #include <time.h>
 #include <cJSON.h>
 #include "curly.h"
@@ -35,7 +34,6 @@ int fetch_from_url(char* url, char** buffer) {
         ts.tv_sec = 0;
         ts.tv_nsec = 10 * 1000 * 1000;
         nanosleep(&ts, NULL);
-        // usleep(100000); // 10 milliseconds
     }
 
     char* response = NULL;
