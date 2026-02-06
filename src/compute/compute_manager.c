@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/inotify.h>
+#include <syslog.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -16,37 +17,45 @@
 #define DB_PATH "tester"
 
 pid_t g_ppid = 0;
+int g_heartbeat_freq;
 
 void* heartbeat();
 int compute_work();
+void cleanup(void);
 
 int main(int argc, char* argv[]) {
-    if (argc < 1) {
-        fprintf(stderr, "Usage: <PPID>\n");
-        return EXIT_FAILURE;
+    atexit(cleanup);
+
+    openlog("SUNSPOTS_COMPUTE_MANAGER", LOG_PID | LOG_CONS, LOG_DAEMON);
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: <PPID> <Heartbeat frequency in seconds>\n");
+        exit(EXIT_FAILURE);
     }
 
-    printf("Compute manager started\n");
+    syslog(LOG_INFO, "Compute Manager - Starting...");
 
     // Parse arguments
     char* endptr;
-    g_ppid = (int) strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0') return EXIT_FAILURE;
+    g_ppid = (int)strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0') exit(EXIT_FAILURE);
+    g_heartbeat_freq = (int)strtol(argv[2], &endptr, 10);
+    if (*endptr != '\0') exit(EXIT_FAILURE);
 
     // Initialize inotify
     int inotify_fd = inotify_init();
     if (inotify_fd < 0) {
-        perror("inotify_init failed");
-        return EXIT_FAILURE;
+        syslog(LOG_ERR, "Compute Manager - inotify_init failed.");
+        exit(EXIT_FAILURE);
     }
 
     // Watch file for modifications
     const char* db_path = DB_PATH;
     int watch_fd = inotify_add_watch(inotify_fd, db_path, IN_CLOSE_WRITE);
     if (watch_fd < 0) {
-        perror("inotify_add_watch failed");
+        syslog(LOG_ERR, "Compute Manager - inotify_add_watch failed.");
         close(inotify_fd);
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
 
     // Heartbeat
@@ -58,11 +67,15 @@ int main(int argc, char* argv[]) {
     while (1) {
         int len = read(inotify_fd, buffer, sizeof(buffer));
         if (len > 0) {
-            compute_work();
+            if (compute_work() == 0) {
+                syslog(LOG_INFO, "Compute Manager - Successfully computed result!");
+            } else {
+                syslog(LOG_WARNING, "Compute Manager - Failed to compute results.");
+            }
         }
     }
 
-    return 0;
+    exit(EXIT_FAILURE);
 }
 
 void* heartbeat() {
@@ -79,11 +92,15 @@ void* heartbeat() {
 }
 
 int compute_work() {
-    printf("Compute working\n");
 
     // Read from file
     // Calculate
     // Save to file
 
     return 0;
+}
+
+void cleanup(void) {
+    syslog(LOG_INFO, "Compute Manager - Terminating.");
+    closelog();
 }
