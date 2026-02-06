@@ -30,6 +30,8 @@ void* http_worker_thread(void* arg) {
         char buffer[2048];
         ssize_t bytes;
 
+        int closeReason = 1;
+
         size_t total = 0;
         size_t skip_remaining = 0;
         while ((bytes = recv(client_fd, buffer + total, sizeof(buffer) - total - 1, 0)) > 0) {
@@ -105,6 +107,16 @@ void* http_worker_thread(void* arg) {
                 if(strlen(CORS_ALLOWED_HEADERS) > 0)
                     http_response_add_header(resp, "Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS);
 
+                int shouldBreak = 0;
+                const char* hdr = http_get_header(req, "Connection");
+                if(hdr && strcmp(hdr, "close") == 0)
+                {
+                    shouldBreak = 1;
+                    closeReason = 2;
+                } else {
+                    http_response_add_header(resp, "Connection", "keep-alive");
+                }
+
                 size_t response_size = 0;
                 const char* response_str = http_response_stringify(resp, &response_size);
                 
@@ -115,12 +127,19 @@ void* http_worker_thread(void* arg) {
                 http_request_dispose(&req);
                 http_response_dispose(&resp);
 
+                if(shouldBreak)
+                    break;
+
                 continue;
             }
         }
 
-        printf("[Thread-%ld] Ending client connection. (fd=%d)\n",
-               pthread_self(), client_fd);
+        if(closeReason == 2)
+        {
+            printf("[Thread-%ld] Ending client connection due to requested close. (fd=%d)\n", pthread_self(), client_fd);
+        } else {
+            printf("[Thread-%ld] Ending client connection due to timeout. (fd=%d)\n", pthread_self(), client_fd);
+        }
 
         close(client_fd);
     }

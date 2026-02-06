@@ -1,8 +1,44 @@
 [
   {
     "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/http_parser.c -o build/obj/src/frontend/http_parser.o",
+    "file": "src/frontend/http_parser.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/client_queue.c -o build/obj/src/frontend/client_queue.o",
+    "file": "src/frontend/client_queue.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/http_worker.c -o build/obj/src/frontend/http_worker.o",
+    "file": "src/frontend/http_worker.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/http_main.c -o build/obj/src/frontend/http_main.o",
+    "file": "src/frontend/http_main.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/endpoints.c -o build/obj/src/frontend/endpoints.o",
+    "file": "src/frontend/endpoints.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/json/cJSON.c -o build/obj/src/libs/json/cJSON.o",
     "file": "src/libs/json/cJSON.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/linked_list/linked_list.c -o build/obj/src/libs/linked_list/linked_list.o",
+    "file": "src/libs/linked_list/linked_list.c"
   }
 ,
   {
