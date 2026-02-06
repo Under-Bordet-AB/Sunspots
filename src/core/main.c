@@ -13,6 +13,8 @@
  */
 
 
+
+
 #define _GNU_SOURCE
 
 #include "daemon.h"
@@ -29,6 +31,8 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define CONFIG_WD "../config/config.json"
 
@@ -163,21 +167,29 @@ int main(int argc, char **argv)
 
     for (int i = 0; i < active_processes; i++)
     {
-        pid_t target = watch_table[i].pid;
-        if (kill(target, SIGTERM) == 0)
-        {
-            waitpid(target, NULL, 0);
-            syslog(LOG_INFO, "Process: %s PID: %i reaped\n", watch_table[i].name, watch_table[i].pid);
-			struct rusage usage;
-			if (getrusage(RUSAGE_CHILDREN, &usage) == 0)
+        //pid_t target = watch_table[i].pid;
+		if (watch_table[i].pid > 0)
+		{
+			if (kill(watch_table[i].pid, SIGTERM) == 0)
 			{
-				syslog(LOG_INFO, "Total Child RAM Peak: %ld KB", usage.ru_maxrss);
-				syslog(LOG_INFO, "Total User CPU Time: %ld.%06ld sec", usage.ru_utime.tv_sec, usage.ru_utime.tv_usec);
+				waitpid(watch_table[i].pid, NULL, 0);
 			}
-        }
-    }    
+			else
+			{
+				waitpid(watch_table[i].pid, NULL, WNOHANG);
+			}
+		}
+		if (watch_table[i].name)   { free((void*)watch_table[i].name);   watch_table[i].name = NULL; }
+        if (watch_table[i].path)   { free((void*)watch_table[i].path);   watch_table[i].path = NULL; }
+        if (watch_table[i].config) { free((void*)watch_table[i].config); watch_table[i].config = NULL; }
+    }
+    free(watch_table);
+    watch_table = NULL;
+    active_processes = 0;
+	
 	syslog(LOG_NOTICE, "Daemon vanished. All children reaped");
 	closelog();
+	
     return EXIT_SUCCESS;        
 }
 
@@ -236,6 +248,7 @@ void spawn_process(int index, const char *path, const char *name, int speed, con
 		{
 			g_daemon_running = 0;
 		}
+		close(pipefd[0]);
         watch_table[index].pid = p;
     }
 }
