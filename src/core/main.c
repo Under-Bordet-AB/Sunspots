@@ -2,19 +2,6 @@
  * main.c - pid supervisor, flat model
  **/
 
-/*
-  TO DO:
-  1. Read config in daemon fork
-  2. Set up inotify for config file
-  3. Write and close triggers re-read of config
-  4. Re-read of config triggers restart of processes
-  Potential problems, what if the children are up to some good?
-  Is there a good way to send a "soft" signal to die after completing current task?
- */
-
-
-
-
 #define _GNU_SOURCE
 
 #include "daemon.h"
