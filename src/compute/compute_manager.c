@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
 
     openlog("SUNSPOTS_COMPUTE_MANAGER", LOG_PID | LOG_CONS, LOG_DAEMON);
 
-    if (argc < 2) {
+    if (argc < 3) {
         fprintf(stderr, "Usage: <PPID> <Heartbeat frequency in seconds>\n");
         exit(EXIT_FAILURE);
     }
