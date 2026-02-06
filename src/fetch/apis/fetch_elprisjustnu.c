@@ -109,7 +109,7 @@ int normalize_data(char* raw, char** buffer) {
 
 int save_to_database(char* buffer) {
     if (af_save("Elprisjustnu", "test", buffer) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
+        return -1;
     }
     return 0;
 }

@@ -99,7 +99,7 @@ int normalize_data(char* raw, char** buffer) {
 
 int save_to_database(char* buffer) {
     if (af_save("Openmeteo", "test", buffer) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't save data to database.");
+        return -1;
     }
 
     return 0;
