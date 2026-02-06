@@ -1,36 +1,66 @@
 [
   {
-    "directory": "/home/Cdev/Sunspots",
-    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/main.c -o build/obj/src/core/main.o",
-    "file": "src/core/main.c"
-  }
-,
-  {
-    "directory": "/home/Cdev/Sunspots",
-    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/daemon.c -o build/obj/src/core/daemon.o",
-    "file": "src/core/daemon.c"
-  }
-,
-  {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/gustav/vscode-projects/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/config/config.c -o build/obj/src/config/config.o",
     "file": "src/config/config.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/sunspots_core.c -o build/obj/src/core/sunspots_core.o",
+    "file": "src/core/sunspots_core.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/main.c -o build/obj/src/core/main.o",
+    "file": "src/core/main.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/fetch_data.c -o build/obj/src/core/fetch_data.o",
+    "file": "src/core/fetch_data.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/curly.c -o build/obj/src/libs/curly.o",
+    "file": "src/libs/curly.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/json/cJSON.c -o build/obj/src/libs/json/cJSON.o",
     "file": "src/libs/json/cJSON.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/fetch_manager.c -o build/obj/src/fetch/fetch_manager.o",
+    "file": "src/fetch/fetch_manager.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/apis/fetch_openmeteo.c -o build/obj/src/fetch/apis/fetch_openmeteo.o",
+    "file": "src/fetch/apis/fetch_openmeteo.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/apis/fetch_elprisjustnu.c -o build/obj/src/fetch/apis/fetch_elprisjustnu.o",
+    "file": "src/fetch/apis/fetch_elprisjustnu.c"
+  }
+,
+  {
+    "directory": "/home/gustav/vscode-projects/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c tests/test_args.c -o build/obj/tests/test_args.o",
     "file": "tests/test_args.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/gustav/vscode-projects/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c tests/test_config.c -o build/obj/tests/test_config.o",
     "file": "tests/test_config.c"
   }

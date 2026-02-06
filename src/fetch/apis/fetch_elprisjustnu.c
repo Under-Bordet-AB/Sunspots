@@ -63,15 +63,15 @@ int main(int argc, char* argv[]) {
             return EXIT_FAILURE;
         }
 
-        if ((save_to_database(normalized_data) < 0)) {
+        if ((save_to_database(buffer) < 0)) {
             printf("Couldn't save %s data to database.\n", API_NAME);
             free(normalized_data);
             free(buffer);
             return EXIT_FAILURE;
         }
         
-        free(normalized_data);
-        free(buffer);
+        if (normalized_data != NULL) free(normalized_data);
+        if (buffer != NULL) free(buffer);
         
         sleep(INTERVAL);
     }
@@ -97,7 +97,7 @@ int normalize_data(char* raw, char** buffer) {
 }
 
 int save_to_database(char* buffer) {
-    if (af_save("test", "test", buffer) < 0) {
+    if (af_save("Elprisjustnu", "test", buffer) < 0) {
         printf("Couldn't save %s data to database.\n", API_NAME);
     }
     return 0;

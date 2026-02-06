@@ -7,8 +7,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cJSON.h>
+
+#include "fetch_utils.h"
 
 #define HEARTBEAT_TIMEOUT 10
+#define MAX_APIS 8
 
 typedef struct api {
     char* name;
@@ -18,16 +22,18 @@ typedef struct api {
     time_t last_heartbeat;
 } api;
 
-api apis[2];
+int g_api_count;
+api g_apis[MAX_APIS];
 
 pid_t g_parent_pid = 0;
+int g_hearbeat_speed;
 
 void* heartbeat();
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context);
-int setup();
+int load_apis_from_json(const char* path);
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
+    if (argc < 3) {
         fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
         return EXIT_FAILURE;
     }
@@ -38,10 +44,11 @@ int main(int argc, char* argv[]) {
     char* endptr;
     g_parent_pid = (int)strtol(argv[1], &endptr, 10);
     if (*endptr != '\0') return EXIT_FAILURE;
+    g_hearbeat_speed = (int)strtol(argv[2], &endptr, 10);
+    if (*endptr != '\0') return EXIT_FAILURE;
 
-    //setenv("SUNSPOTS CONFIG", watch_table[index].config, 1);
-    
-    setup();
+    // setup();
+    load_apis_from_json("fetch_manager_config.json");
 
     // Set up signal handler for child heartbeats
     struct sigaction sa;
@@ -58,36 +65,38 @@ int main(int argc, char* argv[]) {
         char parent_pid_str[16];
         snprintf(parent_pid_str, sizeof(parent_pid_str), "%d", getpid());
 
-        for (int i = 0; i < (int)(sizeof(apis) / sizeof(apis[0])); i++) {
+        for (int i = 0; i < (int)(sizeof(g_apis) / sizeof(g_apis[0])); i++) {
+            if (g_apis[i].path == NULL) continue;
+
             // Spawn process
-            if (apis[i].pid == 0) {
-                printf("Spawning %s worker...\n", apis[i].name);
-                apis[i].pid = fork();
-                if (apis[i].pid == -1) {
+            if (g_apis[i].pid == 0) {
+                printf("Spawning %s worker...\n", g_apis[i].name);
+                g_apis[i].pid = fork();
+                if (g_apis[i].pid == -1) {
                     perror("fork");
                     exit(EXIT_FAILURE);
-                } else if (apis[i].pid == 0) {
-                    execv(apis[i].path, (char* const[]){apis[i].path, parent_pid_str, NULL});
+                } else if (g_apis[i].pid == 0) {
+                    execv(g_apis[i].path, (char* const[]){g_apis[i].path, parent_pid_str, NULL});
                     perror("execv");
                     exit(EXIT_FAILURE);
                 }
-                apis[i].last_heartbeat = time(NULL);
+                g_apis[i].last_heartbeat = time(NULL);
             }
 
             time_t now = time(NULL);
 
             // Check for timeouts
-            if (apis[i].pid > 0 && now - apis[i].last_heartbeat > HEARTBEAT_TIMEOUT) {
-                printf("%s process timeout, killing...\n", apis[i].name);
-                kill(apis[i].pid, SIGKILL);
-                waitpid(apis[i].pid, NULL, 0);
-                apis[i].pid = 0;
+            if (g_apis[i].pid > 0 && now - g_apis[i].last_heartbeat > HEARTBEAT_TIMEOUT) {
+                printf("%s process timeout, killing...\n", g_apis[i].name);
+                kill(g_apis[i].pid, SIGKILL);
+                waitpid(g_apis[i].pid, NULL, 0);
+                g_apis[i].pid = 0;
             }
 
             // Check for unexpected exits
-            if (apis[i].pid > 0 && waitpid(apis[i].pid, NULL, WNOHANG) > 0) {
-                printf("%s process exited undexpectedly\n", apis[i].name);
-                apis[i].pid = 0;
+            if (g_apis[i].pid > 0 && waitpid(g_apis[i].pid, NULL, WNOHANG) > 0) {
+                printf("%s process exited undexpectedly\n", g_apis[i].name);
+                g_apis[i].pid = 0;
             }
         }
 
@@ -97,26 +106,45 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-int setup() {
-    api* api_curr;
-    api_curr = &apis[0];
-    api_curr->name = "Openmeteo";
-    api_curr->path = "./apis/fetch_openmeteo";
-    api_curr->interval = 900;
+int load_apis_from_json(const char* path) {
+    char* json = read_file_to_string(path);
+    if (!json) {
+        printf("Fetch manager - JSON config could not be loaded\n");
+        return -1;
+    }
 
-    api_curr = &apis[1];
-    api_curr->name = "Elprisjustnu";
-    api_curr->path = "./apis/fetch_elprisjustnu";
-    api_curr->interval = 3600 * 24;
+    cJSON* root = cJSON_Parse(json);
+    free(json);
+    if (!root) {
+        printf("Fetch manager - JSON config could not be parsed\n");
+        return -1;
+    }
 
-    // api_curr = &apis[3];
-    // api_curr->name = "SMHI";
-    // api_curr->path = "./apis/fetch_smhi";
-    // api_curr->interval = 900;
+    cJSON* apis_json = cJSON_GetObjectItemCaseSensitive(root, "apis");
+    if (!cJSON_IsArray(apis_json)) {
+        printf("Fetch manager - Could not parse JSON root object\n");
+        cJSON_Delete(root);
+        return -1;
+    }
 
+    int count = cJSON_GetArraySize(apis_json);
+    if (count > MAX_APIS) count = MAX_APIS;
 
-    for (int i = 0; i < (int)(sizeof(apis) / sizeof(apis[0])); i++) {
-        printf("API %d: %s\n", i + 1, apis[i].name);
+    for (int i = 0; i < count; i++) {
+        cJSON* item = cJSON_GetArrayItem(apis_json, i);
+        cJSON* name = cJSON_GetObjectItemCaseSensitive(item, "name");
+        cJSON* bin = cJSON_GetObjectItemCaseSensitive(item, "bin_path");
+        cJSON* interval = cJSON_GetObjectItemCaseSensitive(item, "interval");
+
+        if (!cJSON_IsString(name) || !cJSON_IsString(bin) || !cJSON_IsNumber(interval)) {
+            continue;
+        }
+
+        g_apis[i].name = strdup(name->valuestring);
+        g_apis[i].path = strdup(bin->valuestring);
+        g_apis[i].interval = interval->valueint;
+        g_apis[i].pid = 0;
+        g_apis[i].last_heartbeat = time(NULL);
     }
 
     return 0;
@@ -129,17 +157,17 @@ void* heartbeat() {
         //     exit(EXIT_FAILURE);
         // }
         printf("Beating...\n");
-        sleep (1);
+        sleep(g_hearbeat_speed);
     }
 
     return NULL;
 }
 
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context) {
-    for (int i = 0; i < (int)(sizeof(apis) / sizeof(apis[0])); i++) {
-        if (info->si_pid == apis[i].pid) {
-            apis[i].last_heartbeat = time(NULL);
-            printf("%s heartbeat received\n", apis[i].name);
+    for (int i = 0; i < (int)(sizeof(g_apis) / sizeof(g_apis[0])); i++) {
+        if (info->si_pid == g_apis[i].pid) {
+            g_apis[i].last_heartbeat = time(NULL);
+            printf("%s heartbeat received\n", g_apis[i].name);
         }
     }
 }
