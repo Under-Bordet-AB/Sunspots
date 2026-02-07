@@ -91,11 +91,71 @@ void* heartbeat() {
     return NULL;
 }
 
-int compute_work() {
+int load_data(data_t** data) {
+    *data = malloc(sizeof(data_t));
+    int type = 1;
 
-    // Read from file
-    // Calculate
-    // Save to file
+    switch (type) {
+        case 0: // Database
+        syslog(LOG_INFO, "Loading database data...");
+        break;
+        case 1: // Mock
+        syslog(LOG_INFO, "Loading mock data...");
+        (*data)->irradiance = 0.9;
+        (*data)->cloudiness = 0.5;
+        (*data)->temperature = 0.5;
+
+        (*data)->spot_price = 1.0;
+
+        (*data)->battery_charge = 0.2;
+        break;
+    }
+
+    return 0;
+}
+
+int save_result(result_t* result) {
+    int type = 1;
+
+    switch (type) {
+        case 0: // Database
+        (void)result;
+        //af_save("Compute", "Result", result);
+        break;
+        case 1: // Log
+        syslog(LOG_INFO, "Saving mock result.");
+        break;
+    }
+
+    return 0;
+}
+
+int compute_work() {
+    data_t* data;
+    load_data(&data);
+
+    result_t* result;
+
+    int calculation_variant = 0;
+    switch (calculation_variant) {
+        case 0:
+        calculate_simple(data, &result);
+        break;
+        case 1:
+        //calculate_linear(data, &result);
+        break;
+    }
+    free(data);
+
+    save_result(result);
+
+    printf("\nResult:\n");
+    printf("Buy electricity: %d\n", result->buy_electricity);
+    printf("Use solar: %d\n", result->use_solar);
+    printf("Charge battery: %d\n", result->charge_battery);
+    printf("Sell excess: %d\n\n", result->sell_excess);
+
+    free(result);
 
     return 0;
 }

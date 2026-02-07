@@ -22,7 +22,7 @@ typedef struct result_t {
     int sell_excess; // 0 = Don't sell excess, 1 = Sell excess
 } result_t;
 
-int calculate_result(data_t* data, result_t* result);
+int calculate_simple(data_t* data, result_t** result);
 
 /*
 LEOP-systemet ska tillhandahålla följande funktionalitet för energioptimering.
