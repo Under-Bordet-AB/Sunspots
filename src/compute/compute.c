@@ -1,12 +1,67 @@
 #include "compute.h"
 
-int calculate_simple(data_t* data, result_t** result) {
-    if (data == NULL || result == NULL) {
+int data_init(data_t** data) {
+    if (!data) {
+        return -1;
+    }
+
+    *data = malloc(sizeof(data_t));
+    if (!*data) {
+        return -1;
+    }
+
+    memset(*data, 0, sizeof(data_t));
+
+    return 0;
+}
+
+int result_init(result_t** result) {
+    if (!result) {
         return -1;
     }
 
     *result = malloc(sizeof(result_t));
+    if (!*result) {
+        return -1;
+    }
+
     memset(*result, 0, sizeof(result_t));
+
+    return 0;
+}
+
+int data_dispose(data_t** data) {
+    if (!data || !*data) {
+        return -1;
+    }
+
+    free(*data);
+    *data = NULL;
+
+    return 0;
+}
+
+int result_dispose(result_t** result) {
+    if (!result || !*result) {
+        return -1;
+    }
+
+    if ((*result)->time) {
+        free((*result)->time);
+        (*result)->time = NULL;
+    }
+    
+    free(*result);
+    *result = NULL;
+
+    return 0;
+}
+
+
+int calculate_simple(data_t* data, result_t* result) {
+    if (data == NULL || result == NULL) {
+        return -1;
+    }
 
     double cloudiness = data->cloudiness;
     if (cloudiness > 1.0) {
@@ -43,31 +98,31 @@ int calculate_simple(data_t* data, result_t** result) {
     int battery_low = (battery_pct <= battery_low_threshold);
     int battery_high = (battery_pct >= battery_high_threshold);
 
-    (*result)->use_solar = solar_available ? 1 : 0;
+    result->use_solar = solar_available ? 1 : 0;
 
     if (solar_available) {
         if (!battery_high) {
-            (*result)->charge_battery = 1;
+            result->charge_battery = 1;
         }
 
         if (battery_high && price_high) {
-            (*result)->sell_excess = 1;
+            result->sell_excess = 1;
         }
 
-        (*result)->buy_electricity = 0;
+        result->buy_electricity = 0;
     } else {
         if (price_low) {
-            (*result)->buy_electricity = 1;
+            result->buy_electricity = 1;
             if (!battery_high) {
-                (*result)->charge_battery = 1;
+                result->charge_battery = 1;
             }
         } else if (!battery_low) {
-            (*result)->charge_battery = 2;
+            result->charge_battery = 2;
             if (price_high && battery_pct >= battery_sell_threshold) {
-                (*result)->sell_excess = 1;
+                result->sell_excess = 1;
             }
         } else {
-            (*result)->buy_electricity = 1;
+            result->buy_electricity = 1;
         }
     }
 

@@ -91,23 +91,20 @@ void* heartbeat() {
     return NULL;
 }
 
-int load_data(data_t** data) {
-    *data = malloc(sizeof(data_t));
+int load_data(data_t* data) {
     int type = 1;
 
     switch (type) {
         case 0: // Database
-        syslog(LOG_INFO, "Loading database data...");
         break;
         case 1: // Mock
-        syslog(LOG_INFO, "Loading mock data...");
-        (*data)->irradiance = 0.9;
-        (*data)->cloudiness = 0.5;
-        (*data)->temperature = 0.5;
+        data->irradiance = 0.9;
+        data->cloudiness = 0.5;
+        data->temperature = 0.5;
 
-        (*data)->spot_price = 1.0;
+        data->spot_price = 1.0;
 
-        (*data)->battery_charge = 0.2;
+        data->battery_charge = 0.2;
         break;
     }
 
@@ -123,7 +120,7 @@ int save_result(result_t* result) {
         //af_save("Compute", "Result", result);
         break;
         case 1: // Log
-        syslog(LOG_INFO, "Saving mock result.");
+        syslog(LOG_INFO, "Compute Manager - Saving mock result.");
         break;
     }
 
@@ -131,23 +128,49 @@ int save_result(result_t* result) {
 }
 
 int compute_work() {
-    data_t* data;
-    load_data(&data);
+    data_t* data = NULL;
+    if (data_init(&data) < 0) {
+        syslog(LOG_WARNING, "Compute Manager - Data struct failed to initialize.");
+        return -1;
+    }
 
-    result_t* result;
+    if (load_data(data) < 0) {
+        syslog(LOG_WARNING, "Compute Manager - Data failed to load.");
+        data_dispose(&data);
+        return -1;
+    }
+
+    result_t* result = NULL;
+    if (result_init(&result) < 0) {
+        syslog(LOG_WARNING, "Compute Manager - Result struct failed to initialize.");
+        data_dispose(&data);
+        return -1;
+    }
 
     int calculation_variant = 0;
     switch (calculation_variant) {
         case 0:
-        calculate_simple(data, &result);
+        if (calculate_simple(data, result) < 0) {
+            syslog(LOG_WARNING, "Compute Manager - Simple calculation failed.");
+            data_dispose(&data);
+            result_dispose(&result);
+        }
         break;
         case 1:
         //calculate_linear(data, &result);
         break;
     }
-    free(data);
 
-    save_result(result);
+    if (data_dispose(&data) < 0) {
+        syslog(LOG_ERR, "Compute Manager - Data struct failed to dispose.");
+        result_dispose(&result);
+        return -1;
+    }
+
+    if (save_result(result) < 0) {
+        syslog(LOG_WARNING, "Compute Manager - Failed to save result.");
+        return -1;
+    }
 
     printf("\nResult:\n");
     printf("Buy electricity: %d\n", result->buy_electricity);
@@ -155,7 +178,10 @@ int compute_work() {
     printf("Charge battery: %d\n", result->charge_battery);
     printf("Sell excess: %d\n\n", result->sell_excess);
 
-    free(result);
+    if (result_dispose(&result) < 0) {
+        syslog(LOG_ERR, "Compute Manager - Result struct failed to dispose.");
+        return -1;
+    }
 
     return 0;
 }
