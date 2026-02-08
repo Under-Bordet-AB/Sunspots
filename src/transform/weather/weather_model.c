@@ -2,6 +2,7 @@
 #include "weather_model.h"
 
 void weather_data_init(weather_data_t *data){
+    if (!data) { return; }
     data->timestamp_unix = 0;
     data->temperature_c = 0;
     data->cloud_cover_percent = 0;
