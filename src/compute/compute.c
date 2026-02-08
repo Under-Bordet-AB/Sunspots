@@ -45,18 +45,12 @@ int result_dispose(result_t** result) {
     if (!result || !*result) {
         return -1;
     }
-
-    if ((*result)->time) {
-        free((*result)->time);
-        (*result)->time = NULL;
-    }
     
     free(*result);
     *result = NULL;
 
     return 0;
 }
-
 
 int calculate_simple(data_t* data, result_t* result) {
     if (data == NULL || result == NULL) {

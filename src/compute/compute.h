@@ -14,8 +14,6 @@ typedef struct data_t {
 } data_t;
 
 typedef struct result_t {
-    char* time;
-
     int buy_electricity; // 0 = Don't buy, 1 = Buy
     int use_solar; // 0 = Don't use solar, 1 = Use solar
     int charge_battery; // 0 = Don't charge battery, 1 = Charge battery, 2 = Discharge battery

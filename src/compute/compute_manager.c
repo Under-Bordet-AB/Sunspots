@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <signal.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/inotify.h>
@@ -66,12 +67,23 @@ int main(int argc, char* argv[]) {
     char buffer[4096];
     while (1) {
         int len = read(inotify_fd, buffer, sizeof(buffer));
-        if (len > 0) {
-            if (compute_work() == 0) {
-                syslog(LOG_INFO, "Compute Manager - Successfully computed result!");
-            } else {
-                syslog(LOG_WARNING, "Compute Manager - Failed to compute results.");
+        if (len == -1) {
+            if (errno == EINTR) {
+                continue;
             }
+            syslog(LOG_ERR, "Compute Manager - Error receiving inotify event.");
+            break;
+        }
+
+        if (len == 0) {
+            syslog(LOG_ERR, "Compute Manager - inotify fd closed (EOF)");
+            break;
+        }
+
+        if (compute_work() == 0) {
+            syslog(LOG_INFO, "Compute Manager - Successfully computed result!");
+        } else {
+            syslog(LOG_WARNING, "Compute Manager - Failed to compute results.");
         }
     }
 
@@ -84,8 +96,8 @@ void* heartbeat() {
         //     perror("Could not signal daemon, terminating.\n");
         //     exit(EXIT_FAILURE);
         // }
-        printf("Beating...\n");
-        sleep(1);
+        syslog(LOG_INFO, "Compute Manager - Beating...");
+        sleep(g_heartbeat_freq);
     }
 
     return NULL;
@@ -98,13 +110,11 @@ int load_data(data_t* data) {
         case 0: // Database
         break;
         case 1: // Mock
-        data->irradiance = 0.9;
-        data->cloudiness = 0.5;
-        data->temperature = 0.5;
-
-        data->spot_price = 1.0;
-
-        data->battery_charge = 0.2;
+        data->irradiance = 650.0;
+        data->cloudiness = 0.2;
+        data->temperature = 12.0;
+        data->spot_price = 0.9;
+        data->battery_charge = 45.0;
         break;
     }
 
@@ -112,18 +122,17 @@ int load_data(data_t* data) {
 }
 
 int save_result(result_t* result) {
+    (void)result;
     int type = 1;
 
     switch (type) {
         case 0: // Database
-        (void)result;
         //af_save("Compute", "Result", result);
         break;
-        case 1: // Log
-        syslog(LOG_INFO, "Compute Manager - Saving mock result.");
+        case 1: // Mock
         break;
     }
-
+    
     return 0;
 }
 
@@ -154,11 +163,21 @@ int compute_work() {
             syslog(LOG_WARNING, "Compute Manager - Simple calculation failed.");
             data_dispose(&data);
             result_dispose(&result);
+            return -1;
         }
         break;
         case 1:
-        //calculate_linear(data, &result);
+        // if (calculate_linear(data, result) < 0) {
+        //     syslog(LOG_WARNING, "Compute Manager - Simple calculation failed.");
+        //     data_dispose(&data);
+        //     result_dispose(&result);
+        // }
         break;
+    }
+
+    int print_data = 1;
+    if (print_data == 1) {
+        syslog(LOG_INFO, "Data:\nIrradiance: %.2f\nCloudiness: %.2f\nTemperature: %.2f\nSpot-price: %.2f\nBattery charge: %.2f", data->irradiance, data->cloudiness, data->temperature, data->spot_price, data->battery_charge);
     }
 
     if (data_dispose(&data) < 0) {
@@ -169,14 +188,11 @@ int compute_work() {
 
     if (save_result(result) < 0) {
         syslog(LOG_WARNING, "Compute Manager - Failed to save result.");
+        result_dispose(&result);
         return -1;
     }
 
-    printf("\nResult:\n");
-    printf("Buy electricity: %d\n", result->buy_electricity);
-    printf("Use solar: %d\n", result->use_solar);
-    printf("Charge battery: %d\n", result->charge_battery);
-    printf("Sell excess: %d\n\n", result->sell_excess);
+    syslog(LOG_INFO, "Result:\nBuy electricity: %d\nUse solar: %d\nCharge battery: %d\nSell excess: %d", result->buy_electricity, result->use_solar, result->charge_battery, result->sell_excess);
 
     if (result_dispose(&result) < 0) {
         syslog(LOG_ERR, "Compute Manager - Result struct failed to dispose.");
