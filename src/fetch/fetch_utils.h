@@ -1,6 +1,6 @@
 #include <time.h>
-#include <cJSON.h>
-#include "curly.h"
+#include "../libs/json/cJSON.h"
+#include "../libs/curly.h"
 
 int fetch_from_url(char* url, char** buffer) {
     curly_t* curly = NULL;

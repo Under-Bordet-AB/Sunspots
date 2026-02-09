@@ -5,10 +5,10 @@
 #include <signal.h>
 #include <pthread.h>
 
-#include "fetch_utils.h"
-#include "curly.h"
+#include "../fetch_utils.h"
+#include "../../libs/curly.h"
 #define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "atomic_file_rw.h"
+#include "../../libs/atomic_file_rw.h"
 
 #define API_NAME "Openmeteo"
 #define API_URL "https://api.open-meteo.com/v1/forecast?latitude=59.3293&longitude=18.0686&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"

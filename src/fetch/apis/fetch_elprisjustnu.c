@@ -6,10 +6,10 @@
 #include <pthread.h>
 #include <time.h>
 
-#include "fetch_utils.h"
-#include "curly.h"
+#include "../fetch_utils.h"
+#include "../../libs/curly.h"
 #define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "atomic_file_rw.h"
+#include "../../libs/atomic_file_rw.h"
 
 #define API_NAME "Elprisjustnu"
 #define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
@@ -25,7 +25,7 @@ void cleanup(void);
 int main(int argc, char* argv[]) {
     atexit(cleanup);
 
-    openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID | LOG_CONS, LOG_DAEMON);
+    openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID, LOG_DAEMON);
     
     if (argc < 2) {
         syslog(LOG_ERR, "Fetch API - Elprisjustnu - Usage: ./path/to/bin <PPID>");

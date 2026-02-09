@@ -12,6 +12,7 @@
 
 watch_entry_t *watch_table = NULL;
 int g_active_proc = 0;
+char g_prj_root[MAX_PATH];
 volatile sig_atomic_t g_daemon_running = 1;
 
 int main(int argc, char **argv)
@@ -21,25 +22,40 @@ int main(int argc, char **argv)
         printf(" !! Usage: %s daemon\n", argv[0]);
         return EXIT_FAILURE;
     }
-	char prj_path[1024];
-	getcwd(prj_path, sizeof(prj_path));
-	char actual_path[PATH_MAX];
-	if (realpath(CONFIG_WD, actual_path) == NULL)
+
+	/**
+	 * DAEMON SETUP
+	 **/
+	
+	daemon_resolve_project_root();
+
+	char config_path[PATH_MAX];
+	if (snprintf(config_path, sizeof(config_path), "%s/config/%s", g_prj_root, CONFIG_FILENAME) == -1)
 	{
-		fprintf(stderr, " !! Cannot find config file at: %s: %s\n", CONFIG_WD, strerror(errno));
+		perror("snprintf failed");
 		return EXIT_FAILURE;
 	}
+
+	if (access(config_path, R_OK) != 0)
+	{
+		fprintf(stderr, " !! FATAL; Config file missing or unreadable at %s\n", config_path);
+		return EXIT_FAILURE;
+	}	
+
 	DAEMONIZE();
+
 	openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
 	syslog(LOG_NOTICE, "Sunspots daemon started successfully. Detached and darkened.");	
-    daemon_signal_setup();
-	
-	char config_dir[1024]; /* Inotify will watch directory */
-	strncpy(config_dir, actual_path, sizeof(config_dir));
-	char *adapt_to_directory = strrchr(config_dir, '/');
-	if (adapt_to_directory) *adapt_to_directory = '\0';
+    daemon_signal_setup();	
 
-	daemon_reload_config(actual_path, prj_path);
+	char config_dir[PATH_MAX]; /* Inotify will watch directory */
+	if (snprintf(config_dir, sizeof(config_dir), "%s/config", g_prj_root) == -1)
+	{
+		syslog(LOG_CRIT, "snprintf failed: %m");
+		exit(EXIT_FAILURE);
+	}
+
+	daemon_reload_config(config_path, g_prj_root);
 
 	int epoll_fd = epoll_create1(EPOLL_CLOEXEC); /* Our children don't need fd */
 	if (epoll_fd == -1)
@@ -99,6 +115,10 @@ int main(int argc, char **argv)
 	}
 	syslog(LOG_NOTICE, "SUNSPOTS daemon setup complete! Waiting for event...");
 
+	/**
+	 * MONITORING LOOP
+	 **/
+
 	while (g_daemon_running)
 	{
 		int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
@@ -116,7 +136,7 @@ int main(int argc, char **argv)
 				uint64_t exp;
 				if (read(timer_fd, &exp, sizeof(exp)) > 0)
 				{
-					daemon_perform_health_check(prj_path);
+					daemon_perform_health_check(g_prj_root);
 				}
 			}
 			/* inotify triggered: hot reload */
@@ -141,7 +161,7 @@ int main(int argc, char **argv)
 							if (now - last_reload >= 1)
 							{
 								syslog(LOG_NOTICE, "Config change, performing hot-relead.");
-								daemon_reload_config(actual_path, prj_path);
+								daemon_reload_config(config_path, g_prj_root);
 								last_reload = now;
 							}
 							else
@@ -156,6 +176,10 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/**
+	 * SHUTDOWN
+	 **/
+	
 	syslog(LOG_NOTICE, "Shutting down daemon...");
 	for (int i = 0; i < g_active_proc; i++)
 	{
@@ -193,6 +217,76 @@ int main(int argc, char **argv)
 	closelog();
 
 	return EXIT_SUCCESS;	
+}
+
+
+/**
+ * FUNCTIONS
+ **/
+
+char *daemon_read_conf(const char *filepath)
+{
+	FILE *fptr = fopen(filepath, "rb");
+	if (!fptr) return NULL;		
+	fseek(fptr, 0, SEEK_END); /* Sets file pos indicator to end of file */
+	size_t len = ftell(fptr); /* Gets value of file pos indicator */
+	rewind(fptr); /* rewinds pos indicator */
+	char *buf = (char*)malloc(len + 1);
+	if (!buf)
+	{
+		fclose(fptr);
+		return NULL;
+	}	
+	size_t rb = fread(buf, 1, len, fptr);
+	if (rb < len)
+	{
+		if (ferror(fptr))
+		{
+			syslog(LOG_ERR, "Error reading file.");
+			free(buf);
+			return NULL;
+		}
+		else if (feof(fptr))
+		{
+			buf[rb] = '\0';
+		}
+	}
+	else
+	{
+		buf[len] = '\0';
+	}
+
+	fclose(fptr);
+	return buf;
+}
+
+void daemon_resolve_project_root()
+{
+	/* readlink()  places  the  contents of the symbolic link pathname in the buffer
+	 * /proc/self/exe: A special symlink in Linux that points to the actual executable
+	 * file of the current process.
+	 */
+	char exe_path[PATH_MAX];
+	ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path));
+	if (len == -1)
+	{
+		perror(" !! FATAL: Cannot read /proc/self/exe");
+		exit(EXIT_FAILURE);
+	}
+	exe_path[len] = '\0';
+	/* add directory of binary */
+	char *bin_dir = dirname(exe_path);
+	char path_to_root[PATH_MAX];
+	snprintf(path_to_root, sizeof(path_to_root), "%s/../..", bin_dir);
+	/* realpath() expands all symbolic links and resolves references to /./, /../
+	 * and extra '/' characters in the null-terminated string named by path to produce
+	 * a canonicalized absolute pathname.
+	 */
+	if (realpath(path_to_root, g_prj_root) == NULL)
+	{
+		fprintf(stderr," !! FATAL: Could not resolve project root from %s: %s\n",
+				path_to_root, strerror(errno));
+	}
 }
 
 void daemon_reload_config(const char *full_path, const char *prj_path)	
@@ -236,7 +330,17 @@ void daemon_reload_config(const char *full_path, const char *prj_path)
 		if (cJSON_IsString(n) && cJSON_IsString(p) && cJSON_IsNumber(h))
 		{
 			new_table[i].name   = strdup(n->valuestring);
-			new_table[i].path   = strdup(p->valuestring);
+			char raw_path[PATH_MAX];
+			if (snprintf(raw_path, sizeof(raw_path), "%s/%s", prj_path, p->valuestring) == -1)
+			{
+				syslog(LOG_CRIT, "snprintf failed: %m");
+				exit(EXIT_FAILURE);
+			}
+			char *resolved_path = realpath(raw_path, NULL);
+			if (resolved_path)
+			{
+				new_table[i].path = resolved_path;
+			}
 			new_table[i].heartbeat_speed = h->valueint;
 			new_table[i].config = cJSON_PrintUnformatted(module);
 			new_table[i].pid    = 0;
@@ -250,7 +354,11 @@ void daemon_reload_config(const char *full_path, const char *prj_path)
 	}
 	if (i == 0)
 	{
-		syslog(LOG_ERR, "No valid module found in config.");
+		syslog(LOG_ERR, "No valid module found in config. Keeping old one.");
+		free(new_table);
+		cJSON_Delete(root);
+		free(json_data);
+		return;		
 	}
 	/* block signals while reloading */
 	sigset_t mask, oldmask;
@@ -306,38 +414,6 @@ void daemon_reload_config(const char *full_path, const char *prj_path)
 	}
 	cJSON_Delete(root);
 	free(json_data);
-}
-
-void daemon_perform_health_check(const char *prj_path)
-{
-	for (int i = 0; i < g_active_proc; i++)
-	{
-		int status;
-		pid_t rv = waitpid(watch_table[i].pid, &status, WNOHANG);
-		if (rv > 0)
-		{
-			syslog(LOG_ERR, "Process: %s PID: %d terminated. Restarting.",
-				   watch_table[i].name, watch_table[i].pid);
-			daemon_spawn_process(i, watch_table[i].path, watch_table[i].name,
-				                 watch_table[i].heartbeat_speed, prj_path);
-		}
-		else if (!watch_table[i].alive)
-		{
-			syslog(LOG_ERR, "Process: %s PID: %d hung. Restarting.",
-				   watch_table[i].name, watch_table[i].pid);
-			kill(watch_table[i].pid, SIGKILL);
-			waitpid(watch_table[i].pid, NULL, 0);
-			daemon_spawn_process(i, watch_table[i].path, watch_table[i].name,
-				                 watch_table[i].heartbeat_speed, prj_path);			
-		}
-		else
-		{
-			/* Heartbeat received */
-			syslog(LOG_INFO, "Process: %s PID: %d is OK", watch_table[i].name,
-				   watch_table[i].pid);
-			watch_table[i].alive = 0;
-		}
-	}
 }
 
 void daemon_spawn_process(int idx, const char *path, const char *name, int speed, const char *wd)
@@ -396,17 +472,36 @@ void daemon_spawn_process(int idx, const char *path, const char *name, int speed
 	close(pipefd[0]);   
 }
 
-void daemon_heartbeat_handler(int sig, siginfo_t *info, void *context)
+void daemon_perform_health_check(const char *prj_path)
 {
-    pid_t sender = info->si_pid;
-    for (int i = 0; i < g_active_proc; i++)
-    {
-        if (watch_table && watch_table[i].pid == sender)
-        {
-            watch_table[i].alive = 1;
-            return;
-        }
-    }
+	for (int i = 0; i < g_active_proc; i++)
+	{
+		int status;
+		pid_t rv = waitpid(watch_table[i].pid, &status, WNOHANG);
+		if (rv > 0)
+		{
+			syslog(LOG_ERR, "Process: %s PID: %d terminated. Restarting.",
+				   watch_table[i].name, watch_table[i].pid);
+			daemon_spawn_process(i, watch_table[i].path, watch_table[i].name,
+				                 watch_table[i].heartbeat_speed, prj_path);
+		}
+		else if (!watch_table[i].alive)
+		{
+			syslog(LOG_ERR, "Process: %s PID: %d hung. Restarting.",
+				   watch_table[i].name, watch_table[i].pid);
+			kill(watch_table[i].pid, SIGKILL);
+			waitpid(watch_table[i].pid, NULL, 0);
+			daemon_spawn_process(i, watch_table[i].path, watch_table[i].name,
+				                 watch_table[i].heartbeat_speed, prj_path);			
+		}
+		else
+		{
+			/* Heartbeat received */
+			syslog(LOG_INFO, "Process: %s PID: %d is OK", watch_table[i].name,
+				   watch_table[i].pid);
+			watch_table[i].alive = 0;
+		}
+	}
 }
 
 void daemon_signal_setup()
@@ -438,46 +533,17 @@ void daemon_signal_setup()
 	syslog(LOG_NOTICE, "Successfully setup signal handling.");
 }
 
-void daemon_shutdown_handler(int sig)
+void daemon_heartbeat_handler(int sig, siginfo_t *info, void *context)
 {
-    syslog(LOG_INFO,"Daemon killed.");
-    g_daemon_running = 0;
-}
-
-char *daemon_read_conf(const char *filepath)
-{
-	FILE *fptr = fopen(filepath, "rb");
-	if (!fptr) return NULL;		
-	fseek(fptr, 0, SEEK_END); /* Sets file pos indicator to end of file */
-	size_t len = ftell(fptr); /* Gets value of file pos indicator */
-	rewind(fptr); /* rewinds pos indicator */
-	char *buf = (char*)malloc(len + 1);
-	if (!buf)
-	{
-		fclose(fptr);
-		return NULL;
-	}	
-	size_t rb = fread(buf, 1, len, fptr);
-	if (rb < len)
-	{
-		if (ferror(fptr))
-		{
-			syslog(LOG_ERR, "Error reading file.");
-			free(buf);
-			return NULL;
-		}
-		else if (feof(fptr))
-		{
-			buf[rb] = '\0';
-		}
-	}
-	else
-	{
-		buf[len] = '\0';
-	}
-
-	fclose(fptr);
-	return buf;
+    pid_t sender = info->si_pid;
+    for (int i = 0; i < g_active_proc; i++)
+    {
+        if (watch_table && watch_table[i].pid == sender)
+        {
+            watch_table[i].alive = 1;
+            return;
+        }
+    }
 }
 
 void daemon_set_env(char **config)
@@ -488,4 +554,10 @@ void daemon_set_env(char **config)
 		exit(EXIT_FAILURE);
 	}
 	syslog(LOG_NOTICE, "Loaded config into environment.");
+}
+
+void daemon_shutdown_handler(int sig)
+{
+    syslog(LOG_INFO,"Daemon killed.");
+    g_daemon_running = 0;
 }
