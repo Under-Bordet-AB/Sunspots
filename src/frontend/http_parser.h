@@ -1,8 +1,8 @@
 #ifndef HTTP_PARSER_H
 #define HTTP_PARSER_H
 
-#include "libs/linked_list/linked_list.h"
-#include "frontend/http_constants.h"
+#include "linked_list.h"
+#include "http_constants.h"
 
 #define STRICT_VALIDATION 1
 

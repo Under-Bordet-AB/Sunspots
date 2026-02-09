@@ -1,5 +1,5 @@
-#include "frontend/client_queue.h"
-#include "frontend/http_constants.h"
+#include "client_queue.h"
+#include "http_constants.h"
 
 int client_queue[QUEUE_SIZE];
 int q_head = 0;

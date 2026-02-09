@@ -8,10 +8,10 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#include "frontend/client_queue.h"
-#include "frontend/http_constants.h"
-#include "frontend/http_main.h"
-#include "frontend/http_worker.h"
+#include "client_queue.h"
+#include "http_constants.h"
+#include "http_main.h"
+#include "http_worker.h"
 
 http_server* http_init()
 {

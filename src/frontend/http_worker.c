@@ -6,11 +6,11 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#include "frontend/endpoints.h"
-#include "frontend/http_parser.h"
-#include "frontend/client_queue.h"
-#include "frontend/http_constants.h"
-#include "libs/linked_list/linked_list.h"
+#include "endpoints.h"
+#include "http_parser.h"
+#include "client_queue.h"
+#include "http_constants.h"
+#include "linked_list.h"
 
 void* http_worker_thread(void* arg) {
     (void)arg;

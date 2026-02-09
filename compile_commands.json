@@ -1,36 +1,156 @@
 [
   {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/server/server.c -o build/obj/src/server/server.o",
+    "file": "src/server/server.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/transform/weather/openmeteo.c -o build/obj/src/transform/weather/openmeteo.o",
+    "file": "src/transform/weather/openmeteo.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/transform/weather/weather_model.c -o build/obj/src/transform/weather/weather_model.o",
+    "file": "src/transform/weather/weather_model.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/fetch_data.c -o build/obj/src/fetch/fetch_data.o",
+    "file": "src/fetch/fetch_data.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/apis/fetch_elprisjustnu.c -o build/obj/src/fetch/apis/fetch_elprisjustnu.o",
+    "file": "src/fetch/apis/fetch_elprisjustnu.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/apis/fetch_openmeteo.c -o build/obj/src/fetch/apis/fetch_openmeteo.o",
+    "file": "src/fetch/apis/fetch_openmeteo.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/fetch/fetch_manager.c -o build/obj/src/fetch/fetch_manager.o",
+    "file": "src/fetch/fetch_manager.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/utils/unit_utils.c -o build/obj/src/utils/unit_utils.o",
+    "file": "src/utils/unit_utils.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/sunspots_core.c -o build/obj/src/core/sunspots_core.o",
+    "file": "src/core/sunspots_core.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/fetch_data.c -o build/obj/src/core/fetch_data.o",
+    "file": "src/core/fetch_data.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/main.c -o build/obj/src/core/main.o",
     "file": "src/core/main.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
-    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/core/daemon.c -o build/obj/src/core/daemon.o",
-    "file": "src/core/daemon.c"
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/curly.c -o build/obj/src/libs/curly.o",
+    "file": "src/libs/curly.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
-    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/config/config.c -o build/obj/src/config/config.o",
-    "file": "src/config/config.c"
-  }
-,
-  {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/emk530/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/json/cJSON.c -o build/obj/src/libs/json/cJSON.o",
     "file": "src/libs/json/cJSON.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/linked_list/linked_list.c -o build/obj/src/libs/linked_list/linked_list.o",
+    "file": "src/libs/linked_list/linked_list.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/libs/jj_log/jj_log.c -o build/obj/src/libs/jj_log/jj_log.o",
+    "file": "src/libs/jj_log/jj_log.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/http_worker.c -o build/obj/src/frontend/http_worker.o",
+    "file": "src/frontend/http_worker.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/http_parser.c -o build/obj/src/frontend/http_parser.o",
+    "file": "src/frontend/http_parser.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/http_main.c -o build/obj/src/frontend/http_main.o",
+    "file": "src/frontend/http_main.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/frontend_main.c -o build/obj/src/frontend/frontend_main.o",
+    "file": "src/frontend/frontend_main.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/client_queue.c -o build/obj/src/frontend/client_queue.o",
+    "file": "src/frontend/client_queue.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/frontend/endpoints.c -o build/obj/src/frontend/endpoints.o",
+    "file": "src/frontend/endpoints.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/config/config.c -o build/obj/src/config/config.o",
+    "file": "src/config/config.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/compute/compute_manager.c -o build/obj/src/compute/compute_manager.o",
+    "file": "src/compute/compute_manager.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
+    "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c src/compute/compute.c -o build/obj/src/compute/compute.o",
+    "file": "src/compute/compute.c"
+  }
+,
+  {
+    "directory": "/home/emk530/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c tests/test_args.c -o build/obj/tests/test_args.o",
     "file": "tests/test_args.c"
   }
 ,
   {
-    "directory": "/home/Cdev/Sunspots",
+    "directory": "/home/emk530/Sunspots",
     "command": "gcc -std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -pthread -I src -I . -g -fsanitize=address,undefined -fno-omit-frame-pointer -c tests/test_config.c -o build/obj/tests/test_config.o",
     "file": "tests/test_config.c"
   }
