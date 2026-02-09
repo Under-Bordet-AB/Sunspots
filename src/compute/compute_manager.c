@@ -27,7 +27,7 @@ void cleanup(void);
 int main(int argc, char* argv[]) {
     atexit(cleanup);
 
-    openlog("SUNSPOTS_COMPUTE_MANAGER", LOG_PID | LOG_CONS, LOG_DAEMON);
+    openlog("SUNSPOTS_COMPUTE_MANAGER", LOG_PID, LOG_DAEMON);
 
     if (argc < 3) {
         fprintf(stderr, "Usage: <PPID> <Heartbeat frequency in seconds>\n");
@@ -92,10 +92,10 @@ int main(int argc, char* argv[]) {
 
 void* heartbeat() {
     while (1) {
-        // if (kill(g_ppid, SIGRTMIN) == -1) {
-        //     perror("Could not signal daemon, terminating.\n");
-        //     exit(EXIT_FAILURE);
-        // }
+        if (kill(g_ppid, SIGRTMIN) == -1) {
+            perror("Could not signal daemon, terminating.\n");
+            exit(EXIT_FAILURE);
+        }
         syslog(LOG_INFO, "Compute Manager - Beating...");
         sleep(g_heartbeat_freq);
     }

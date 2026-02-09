@@ -38,7 +38,7 @@ void cleanup(void);
 int main(int argc, char* argv[]) {
     atexit(cleanup);
 
-    openlog("SUNSPOTS_FETCH_MANAGER", LOG_PID | LOG_CONS, LOG_DAEMON);
+    openlog("SUNSPOTS_FETCH_MANAGER", LOG_PID, LOG_DAEMON);
     
     if (argc < 3) {
         syslog(LOG_ERR, "Fetch Manager - Usage: ./path/to/bin <PPID> <Heartbeat frequency in seconds>");
@@ -177,10 +177,10 @@ int load_apis_from_json(const char* path) {
 
 void* heartbeat() {
     while (1) {
-        // if (kill(g_parent_pid, SIGRTMIN) == -1) {
-        //     perror("Could not signal daemon, terminating.\n");
-        //     exit(EXIT_FAILURE);
-        // }
+        if (kill(g_parent_pid, SIGRTMIN) == -1) {
+            perror("Could not signal daemon, terminating.\n");
+            exit(EXIT_FAILURE);
+        }
         syslog(LOG_INFO, "Fetch Manager - Beating...");
         sleep(g_heartbeat_freq);
     }
