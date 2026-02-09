@@ -6,14 +6,9 @@
             "interval": 900
         },
         {
-            "name": "SMHI",
-            "bin_path": "./apis/fetch_smhi",
-            "interval": 900
-        },
-        {
             "name": "Elprisjustnu",
             "bin_path": "./apis/fetch_elprisjustnu",
-            "interval": 900
+            "interval": 86400
         }
     ]
 }

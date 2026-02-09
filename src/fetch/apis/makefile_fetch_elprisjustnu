@@ -2,8 +2,8 @@ CC := gcc
 SRC_LIBS := $(shell find ../../libs -type f -name '*.c')
 SOURCES := fetch_elprisjustnu.c $(SRC_LIBS)
 INCLUDES := -I.. -I../../ -I../../libs -I/usr/include/cjson/
-CFLAGS := -Wall -Wextra -Wno-unused-parameter -pthread
-LDFLAGS := -lcurl
+CFLAGS := -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -pthread
+LDFLAGS := -lcurl -lcjson
 
 TARGET := fetch_elprisjustnu
 

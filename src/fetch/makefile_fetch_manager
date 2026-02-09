@@ -1,7 +1,7 @@
 CC := gcc
-SRC_LIBS := $(shell find src/libs -type f -name '*.c')
+SRC_LIBS := $(shell find ../libs -type f -name '*.c')
 SOURCES := fetch_manager.c $(SRC_LIBS)
-INCLUDES := -I.. -I../../ -I../libs -I/usr/include/cjson/
+INCLUDES := -I.. -I../ -I../../ -I../libs -I/usr/include/cjson/
 CFLAGS := -Wall -Wextra -Wno-unused-parameter -pthread
 LDFLAGS := -lcurl -lcjson
 TARGET := fetch_manager
@@ -11,6 +11,3 @@ fetch_manager: fetch_manager.c
 
 clean:
 	rm -f fetch_manager
-
-run:
-	./fetch_manager 1

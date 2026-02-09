@@ -1,38 +1,45 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <syslog.h>
 #include <signal.h>
 #include <pthread.h>
+#include <time.h>
 
-#include "../fetch_utils.h"
-#include "../../libs/curly.h"
+#include "fetch_utils.h"
+#include "curly.h"
 #define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../../libs/atomic_file_rw.h"
+#include "atomic_file_rw.h"
+
 #define API_NAME "Elprisjustnu"
 #define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
 #define INTERVAL 3600*24
 
 pid_t parent_ppid;
-int g_hb_speed;
 
 void* heartbeat();
 int normalize_data(char* raw, char** buffer);
 int save_to_database(char* buffer);
+void cleanup(void);
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: ./path/to/bin <PPID>\n");
-        return EXIT_FAILURE;
+    atexit(cleanup);
+
+    openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID | LOG_CONS, LOG_DAEMON);
+    
+    if (argc < 2) {
+        syslog(LOG_ERR, "Fetch API - Elprisjustnu - Usage: ./path/to/bin <PPID>");
+        exit(EXIT_FAILURE);
     }
 
-    printf("Starting %s fetcher.\n", API_NAME);
+    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
 
     char* endptr;
     parent_ppid = (int)strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0') return EXIT_FAILURE;
-	g_hb_speed = (int)strtol(argv[2], &endptr, 10);
-	if (*endptr != '\0') return EXIT_FAILURE;
-	
+    if (*endptr != '\0') {
+        exit(EXIT_FAILURE);
+    }
+
     pthread_t thread_heartbeat;
     pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);
     pthread_detach(thread_heartbeat);
@@ -47,36 +54,38 @@ int main(int argc, char* argv[]) {
         snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
 
         if (fetch_from_url(url, &buffer) < 0) {
-            printf("Couldn't fetch from %s.\n", API_NAME);
-            return EXIT_FAILURE;
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API.");
+            exit(EXIT_FAILURE);
         }
 
         if (!buffer) {
-            printf("%s buffer is NULL\n", API_NAME);
-            return EXIT_FAILURE;
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL.");
+            exit(EXIT_FAILURE);
         }
-
-        printf("%s API response: %.100s...\n", API_NAME, buffer);
 
         char* normalized_data = NULL;
         if (normalize_data(buffer, &normalized_data) < 0) {
-            printf("Couldn't normalize %s data.\n", API_NAME);
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data.");
             free(buffer);
-            return EXIT_FAILURE;
+            exit(EXIT_FAILURE);
         }
 
-        if ((save_to_database(normalized_data) < 0)) {
-            printf("Couldn't save %s data to database.\n", API_NAME);
+        if ((save_to_database(buffer) < 0)) {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
             free(normalized_data);
             free(buffer);
-            return EXIT_FAILURE;
+            exit(EXIT_FAILURE);
         }
+
+        syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved!");
         
-        free(normalized_data);
-        free(buffer);
+        if (normalized_data != NULL) free(normalized_data);
+        if (buffer != NULL) free(buffer);
         
         sleep(INTERVAL);
     }
+
+    closelog();
 
     return 0;
 }
@@ -84,11 +93,11 @@ int main(int argc, char* argv[]) {
 void* heartbeat() {
     while (1) {
         if (kill(parent_ppid, SIGRTMIN) == -1) {
-            perror("Could not signal daemon, terminating.\n");
+            syslog(LOG_ERR, "Fetch API - Elprisjustnu - Couldn't signal daemon, terminating.");
             exit(EXIT_FAILURE);
         }
-        printf("Beating...\n");
-        sleep(g_hb_speed);
+        syslog(LOG_INFO, "Fetch API - Elprisjustnu - Beating...");
+        sleep(5);
     }
 
     return NULL;
@@ -99,8 +108,12 @@ int normalize_data(char* raw, char** buffer) {
 }
 
 int save_to_database(char* buffer) {
-    if (af_save("test", "test", buffer) < 0) {
-        printf("Couldn't save %s data to database.\n", API_NAME);
+    if (af_save("Elprisjustnu", "test", buffer) < 0) {
+        return -1;
     }
     return 0;
+}
+
+void cleanup(void) {
+    closelog();
 }
