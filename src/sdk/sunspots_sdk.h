@@ -59,3 +59,4 @@ int sssdk_log_warn(sssdk_runtime* rt, const char* msg);
 int sssdk_log_error(sssdk_runtime* rt, const char* msg);
 
 #endif
+

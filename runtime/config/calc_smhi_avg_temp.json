@@ -1,0 +1,1 @@
+{"version":"52dede9ddbee4467","common":{"location":{"name":"Stockholm, Sweden","latitude":"59.3293","longitude":"18.0686"},"paths":{"db_file":".db/database.jsonl","endpoints_dir":"endpoints","log_file":"logs/sunspots.jsonl"},"heartbeat":{"interval_ms":1000,"timeout_sec":10},"schema":{"version":1}},"worker":{"name":"calc_smhi_avg_temp","poll_interval_minutes":1}}

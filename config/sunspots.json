@@ -33,6 +33,7 @@
     "calc_smhi_avg_temp": {
       "name": "calc_smhi_avg_temp",
       "poll_interval_minutes": 1
+
     },
     "server": {
       "name": "server",
