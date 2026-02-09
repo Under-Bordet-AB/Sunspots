@@ -87,21 +87,30 @@ do { \
     } \
 } while (0)
 
-#include <signal.h>
-#include <stdio.h>
+#include "../../src/libs/json/cJSON.h"
+#include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
+#include <stdio.h>
+#include <time.h>
 #include <unistd.h>
-#include <sys/types.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <signal.h>
+#include <syslog.h>
+#include <limits.h>
+#include <sys/syslog.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/epoll.h>
+#include <sys/inotify.h>
+#include <sys/timerfd.h>
 
-/** @brief Maximum number of child processes the supervisor can track. */
+#define MAX_EVENTS 10
 #define MAX_CHILDREN 4
-
-/** @brief The frequency (seconds) at which the daemon inspects the watch table. */
 #define HEALTH_CHECKUP_INTERVAL 5
-
-/** @brief Default pulse rate for children if no specific speed is provided. */
 #define HEARTBEAT_SPEED 2
 
 /** * @brief Real-Time signal (SIGRTMIN) used for heartbeats.
@@ -138,7 +147,7 @@ extern volatile sig_atomic_t g_daemon_running;
  * @param info Kernel-provided info containing the sender's PID.
  * @param context Unused signal context.
  */
-void heartbeat_handler(int sig, siginfo_t *info, void *context);
+void daemon_heartbeat_handler(int sig, siginfo_t *info, void *context);
 
 /**
  * @brief Standard termination handler to trigger a graceful shutdown.
@@ -158,6 +167,12 @@ void daemon_signal_setup();
  * @param name Friendly name for the process.
  * @param speed Frequency of heartbeats expected from this child.
  */
-void spawn_process(int index, const char *path, const char *name, int speed, const char *wd);
+void daemon_spawn_process(int idx, const char *path, const char *name, int speed, const char *wd);
+
+/* Needs desc */
+char *daemon_read_conf(const char *filepath);
+void daemon_reload_config(const char *full_path, const char *prj_path);
+void daemon_set_env(char **config);
+void daemon_perform_health_check(const char *prj_path);
 
 #endif /* DAEMON_H */

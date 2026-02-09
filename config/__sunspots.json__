@@ -6,7 +6,7 @@
         "log_path": "/var/log/sunspots.log"
     },
     "modules": [
-        {
+		{
             "name": "Fetch",
             "bin_path": "../fetch/fetch_manager",
             "heartbeat_interval": 2,
@@ -15,10 +15,17 @@
         },
         {
             "name": "Compute",
-            "bin_path": "../compute/compute_manager",
+            "bin_path": "../compute/compute",
             "heartbeat_interval": 2,
-            "source_url": "",
-            "retry_limit": 3
+            "precision": "high",
+            "threads": 4
+        },
+        {
+            "name": "Server",
+            "bin_path": "../server/server",
+            "heartbeat_interval": 2,
+            "port": 8080,
+            "max_connections": 100
         }
     ]
 }

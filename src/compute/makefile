@@ -9,7 +9,7 @@ compute_manager: compute_manager.c
 	$(CC) $(SOURCES) -o $(TARGET) $(CFLAGS) $(LDFLAGS)
 
 run:
-	./compute_manager 5
+	./compute_manager 5 1
 
 clean:
 	rm -f compute_manager
