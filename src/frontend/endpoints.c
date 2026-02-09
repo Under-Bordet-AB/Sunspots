@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "frontend/http_parser.h"
+#include "http_parser.h"
 
 char* load_file(const char* path, size_t* out_size)
 {

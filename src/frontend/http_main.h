@@ -3,7 +3,7 @@
 
 #include <pthread.h>
 
-#include "frontend/http_constants.h"
+#include "http_constants.h"
 
 typedef struct
 {
