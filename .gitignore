@@ -40,6 +40,9 @@ out/
 .idea/
 *.swp
 *.swo
+*~
+\#*#
+.\#*
 .DS_Store
 .venv/
 scripts/out/
@@ -55,3 +58,14 @@ scripts/out/
 .notes/
 
 .cache/
+
+# Repo-local build outputs (per-module makefiles / ad-hoc builds)
+src/fetch/fetch
+src/fetch/fetch_manager
+src/fetch/test
+src/fetch/apis/fetch_openmeteo
+src/fetch/apis/fetch_elpris
+src/compute/compute
+src/server/server
+src/core/output.envar
+src/compute/tester
