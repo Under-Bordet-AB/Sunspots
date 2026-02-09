@@ -1,11 +1,61 @@
 #include "compute.h"
 
-int calculate_result(data_t* data, result_t* result) {
-    if (data == NULL || result == NULL) {
+int data_init(data_t** data) {
+    if (!data) {
         return -1;
     }
 
-    memset(result, 0, sizeof(*result));
+    *data = malloc(sizeof(data_t));
+    if (!*data) {
+        return -1;
+    }
+
+    memset(*data, 0, sizeof(data_t));
+
+    return 0;
+}
+
+int result_init(result_t** result) {
+    if (!result) {
+        return -1;
+    }
+
+    *result = malloc(sizeof(result_t));
+    if (!*result) {
+        return -1;
+    }
+
+    memset(*result, 0, sizeof(result_t));
+
+    return 0;
+}
+
+int data_dispose(data_t** data) {
+    if (!data || !*data) {
+        return -1;
+    }
+
+    free(*data);
+    *data = NULL;
+
+    return 0;
+}
+
+int result_dispose(result_t** result) {
+    if (!result || !*result) {
+        return -1;
+    }
+    
+    free(*result);
+    *result = NULL;
+
+    return 0;
+}
+
+int calculate_simple(data_t* data, result_t* result) {
+    if (data == NULL || result == NULL) {
+        return -1;
+    }
 
     double cloudiness = data->cloudiness;
     if (cloudiness > 1.0) {
