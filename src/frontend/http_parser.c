@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "libs/linked_list/linked_list.h"
-#include "frontend/http_parser.h"
-#include "frontend/endpoints.h"
+#include "linked_list.h"
+#include "http_parser.h"
+#include "endpoints.h"
 
 char* substr(const char* start, const char* end)
 {

@@ -99,6 +99,8 @@ do { \
 #include <signal.h>
 #include <syslog.h>
 #include <limits.h>
+#include <libgen.h>
+#include <sys/file.h>
 #include <sys/syslog.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -108,6 +110,7 @@ do { \
 #include <sys/inotify.h>
 #include <sys/timerfd.h>
 
+#define MAX_PATH 512
 #define MAX_EVENTS 10
 #define MAX_CHILDREN 4
 #define HEALTH_CHECKUP_INTERVAL 5
@@ -136,10 +139,12 @@ typedef struct watch_entry
 extern watch_entry_t *watch_table;
 
 /** @brief The number of slots currently occupied in the watch_table. */
-extern int active_processes;
+extern int g_active_proc;
 
 /** @brief Global flag to control the daemon's lifecycle. */
 extern volatile sig_atomic_t g_daemon_running;
+
+extern char g_prj_root[];
 
 /**
  * @brief Signal handler that identifies a worker pulse via its PID.
@@ -174,5 +179,6 @@ char *daemon_read_conf(const char *filepath);
 void daemon_reload_config(const char *full_path, const char *prj_path);
 void daemon_set_env(char **config);
 void daemon_perform_health_check(const char *prj_path);
+void daemon_resolve_project_root();
 
 #endif /* DAEMON_H */
