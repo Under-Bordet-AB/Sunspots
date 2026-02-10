@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "linked_list.h"
 #include "http_parser.h"
@@ -236,8 +237,51 @@ http_request* http_parse_request(const char* message) {
                 //request->reason = InvalidProtocol;
                 return NULL;
             }
-            request->path = path;
-            if(STRICT_VALIDATION && path[0] != '/')
+
+            // Separate path and query
+
+            request->query = LinkedList_create();
+            if(request->query == NULL)
+            {
+                free(method); free(protocol);
+                free(current_line);
+                http_request_dispose(&request);
+                return NULL;
+            }
+            const char* begin = strchr(path, '?');
+            if(begin == NULL)
+            {
+                // No query detected
+                request->path = path;
+            } else {
+                request->path = substr(path, begin);
+
+                const char* pos = begin+1;
+                while(*pos)
+                {
+                    const char* amp = strchr(pos, '&');
+                    const char* end = amp ? amp : (path + strlen(path));
+
+                    const char* eq = memchr(pos, '=', end - pos);
+                    http_query_param* param = calloc(1, sizeof(http_query_param));
+                    if (eq) {
+                        param->Name = strndup(pos, eq - pos);
+                        param->Value = strndup(eq + 1, end - eq - 1);
+                    } else {
+                        param->Name = strndup(pos, end - pos);
+                        param->Value = NULL;
+                    }
+
+                    LinkedList_append(request->query, param);
+
+                    if (!amp) break;
+                    pos = amp + 1;
+                }
+
+                free(path);
+            }
+
+            if(STRICT_VALIDATION && request->path[0] != '/')
             {
                 free(method); free(protocol);
                 free(current_line);
@@ -362,6 +406,31 @@ void http_response_add_header(http_response* response, const char* name, const c
         header->Value = strdup(value);
         LinkedList_append(response->headers, header);
     }
+}
+
+const char* guess_mime_type(const char *path)
+{
+    const char *ext = strrchr(path, '.'); // find last dot
+    if (!ext)
+        return "application/octet-stream";
+    ext++;
+
+    if (strcasecmp(ext, "html") == 0) return "text/html";
+    if (strcasecmp(ext, "htm")  == 0) return "text/html";
+    if (strcasecmp(ext, "css")  == 0) return "text/css";
+    if (strcasecmp(ext, "js")   == 0) return "application/javascript";
+    if (strcasecmp(ext, "json") == 0) return "application/json";
+    if (strcasecmp(ext, "png")  == 0) return "image/png";
+    if (strcasecmp(ext, "jpg")  == 0) return "image/jpeg";
+    if (strcasecmp(ext, "jpeg") == 0) return "image/jpeg";
+    if (strcasecmp(ext, "gif")  == 0) return "image/gif";
+    if (strcasecmp(ext, "mp4")  == 0) return "video/mp4";
+    if (strcasecmp(ext, "webm") == 0) return "video/webm";
+    if (strcasecmp(ext, "ogg")  == 0) return "video/ogg";
+    if (strcasecmp(ext, "txt")  == 0) return "text/plain";
+    if (strcasecmp(ext, "xml")  == 0) return "application/xml";
+
+    return "application/octet-stream"; // fallback for unknown extensions
 }
 
 const char* http_response_stringify(http_response* response, size_t* outSize) {

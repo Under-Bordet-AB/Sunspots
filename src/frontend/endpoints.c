@@ -1,8 +1,14 @@
 #include <stdio.h>
+#include <unistd.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "http_parser.h"
+
+#ifndef PATH_MAX
+#define PATH_MAX 256
+#endif
 
 char* load_file(const char* path, size_t* out_size)
 {
@@ -44,6 +50,35 @@ char* load_file(const char* path, size_t* out_size)
     return buffer;
 }
 
+int sanitize_path(const char* url_path, char* out_path, size_t out_size)
+{
+    // Must start with /
+    if (url_path[0] != '/')
+        return -1;
+
+    // Reject traversal attempts
+    if (strstr(url_path, ".."))
+        return -1;
+
+    // Resolve document root
+    char doc_root[PATH_MAX];
+    if (!realpath("./htdocs", doc_root))
+        return -1;
+
+    // Build the final path
+    char temp[PATH_MAX];
+    snprintf(temp, sizeof(temp), "%s%s", doc_root, url_path);
+
+    // Ensure we didn't overflow
+    if (strlen(temp) >= PATH_MAX)
+        return -1;
+
+    strncpy(out_path, temp, out_size - 1);
+    out_path[out_size - 1] = '\0';
+
+    return 0;
+}
+
 http_response* process_request(http_request* req)
 {
     if(!req || !req->path)
@@ -59,6 +94,8 @@ http_response* process_request(http_request* req)
 
     str_to_lower((char*)req->path);
     
+    // Static endpoints
+
     if(strcmp(req->path, "/health") == 0)
     {
         http_response* resp = http_response_init(200, "{\"status\":\"ok\"}", -1);
@@ -68,28 +105,40 @@ http_response* process_request(http_request* req)
         return resp;
     }
 
-    if(strcmp(req->path, "/dog.mp4") == 0)
+    if(strcmp(req->path, "/") == 0)
     {
-        size_t png_size;
-        char* png_data = load_file("dog.mp4", &png_size);
-        if (!png_data)
+        http_response* resp = http_response_init(200, "Welcome to Sunspots!", -1);
+        if(!resp)
+            return NULL;
+        http_response_add_header(resp, "Content-Type", "text/plain");
+        return resp;
+    }
+
+    // Treat URL as file path
+
+    char file_path[PATH_MAX];
+    if(sanitize_path(req->path, file_path, sizeof(file_path)) == 0)
+    {
+        size_t file_size;
+        char* file_data = load_file(file_path, &file_size);
+        if (!file_data)
         {
-            http_response* resp = http_response_init(500, "Failed to load video.", -1);
+            http_response* resp = http_response_init(404, "Not Found", -1);
             if(!resp)
                 return NULL;
             http_response_add_header(resp, "Content-Type", "text/plain");
             return resp;
         }
 
-        http_response* resp = http_response_init(200, png_data, png_size);
+        http_response* resp = http_response_init(200, file_data, file_size);
         if (!resp) {
-            free(png_data);
+            free(file_data);
             return NULL;
         }
 
-        http_response_add_header(resp, "Content-Type", "video/mp4");
+        http_response_add_header(resp, "Content-Type", guess_mime_type(file_path));
 
-        free(png_data);
+        free(file_data);
         return resp;
     }
 
