@@ -38,6 +38,7 @@ typedef struct
     RequestMethod method;
     ProtocolVersion protocol;
     const char* path;
+    LinkedList* query;
     LinkedList* headers;
 } http_request;
 
@@ -48,6 +49,11 @@ typedef struct
     int bodyLen;
     LinkedList* headers;
 } http_response;
+
+typedef struct {
+    const char* Name;
+    const char* Value;
+} http_query_param;
 
 RequestMethod Enum_Method(const char* method);
 ProtocolVersion Enum_Protocol(const char* protocol);
@@ -65,6 +71,7 @@ void http_header_free(void* header_var);
 
 http_response* http_response_init(int code, const char* body, int bodyLen);
 void http_response_add_header(http_response* response, const char* name, const char* value);
+const char* guess_mime_type(const char *path);
 const char* http_response_stringify(http_response* response, size_t* outSize);
 void http_response_dispose(http_response** response_var);
 

@@ -109,7 +109,7 @@ void* http_worker_thread(void* arg) {
 
                 int shouldBreak = 0;
                 const char* hdr = http_get_header(req, "Connection");
-                if(hdr && strcmp(hdr, "close") == 0)
+                if(hdr && strcmp(hdr, "keep-alive") != 0)
                 {
                     shouldBreak = 1;
                     closeReason = 2;
@@ -136,9 +136,9 @@ void* http_worker_thread(void* arg) {
 
         if(closeReason == 2)
         {
-            printf("[Thread-%ld] Ending client connection due to requested close. (fd=%d)\n", pthread_self(), client_fd);
+            printf("[Thread-%ld] Ending client connection due to keep-alive not requested. (fd=%d)\n", pthread_self(), client_fd);
         } else {
-            printf("[Thread-%ld] Ending client connection due to timeout. (fd=%d)\n", pthread_self(), client_fd);
+            printf("[Thread-%ld] Ending client connection due to EOF. (fd=%d)\n", pthread_self(), client_fd);
         }
 
         close(client_fd);
