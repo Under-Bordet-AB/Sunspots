@@ -1,6 +1,7 @@
 #include "core/worker_bootstrap.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +11,13 @@ int worker_cfg_load_from_env(config** out_cfg, char* out_version, size_t out_ver
         return -EINVAL;
     }
 
-    const char* path = getenv("SUNSPOTS_CONFIG_PATH");
+    const char* path = getenv("SUNSPOTS_MASTER_CONFIG");
     const char* version = getenv("SUNSPOTS_CONFIG_VERSION");
-    if (!path || !version) {
-        return -ENOENT;
+    if (!path || path[0] == '\0') {
+        path = "config/sunspots.json";
+    }
+    if (!version || version[0] == '\0') {
+        version = "master";
     }
 
     config* cfg = config_create();
@@ -73,9 +77,27 @@ int worker_cfg_get_section(const config* cfg, const config** out_worker) {
         return -EINVAL;
     }
     const config* c = config_get_subtree(cfg, "worker");
+    if (c) {
+        *out_worker = c;
+        return 0;
+    }
+
+    const char* worker_name = getenv("SUNSPOTS_WORKER_NAME");
+    if (!worker_name || worker_name[0] == '\0') {
+        return -ENOENT;
+    }
+
+    char worker_path[512];
+    int n = snprintf(worker_path, sizeof(worker_path), "workers.%s", worker_name);
+    if (n <= 0 || (size_t)n >= sizeof(worker_path)) {
+        return -ENAMETOOLONG;
+    }
+
+    c = config_get_subtree(cfg, worker_path);
     if (!c) {
         return -ENOENT;
     }
+
     *out_worker = c;
     return 0;
 }

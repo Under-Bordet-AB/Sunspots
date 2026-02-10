@@ -1,5 +1,0 @@
-X(SSSDK_TYPE_TEMPERATURE_C, "temperature_c", "celsius", "weather")
-X(SSSDK_TYPE_CLOUD_COVER_PCT, "cloud_cover_pct", "percent", "weather")
-X(SSSDK_TYPE_SOLAR_IRRADIANCE_WM2, "solar_irradiance_wm2", "watt_per_m2", "solar")
-X(SSSDK_TYPE_WIND_SPEED_MS, "wind_speed_ms", "meter_per_second", "weather")
-X(SSSDK_TYPE_SPOT_PRICE_SEK_KWH, "spot_price_sek_kwh", "sek_per_kwh", "market")

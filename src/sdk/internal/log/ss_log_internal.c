@@ -205,6 +205,40 @@ static int ss_get_log_path(char *out_path, size_t out_sz)
     }
 
     if (ss_extract_json_log_path(cfg, out_path, out_sz) != 0) {
+        const char *key = "\"log_file\"";
+        const char *p = strstr(cfg, key);
+        if (p != NULL) {
+            p += strlen(key);
+            while (*p != '\0' && *p != ':') {
+                ++p;
+            }
+            if (*p == ':') {
+                ++p;
+                while (*p != '\0' && isspace((unsigned char)*p)) {
+                    ++p;
+                }
+                if (*p == '"') {
+                    const char *q;
+                    ++p;
+                    q = p;
+                    while (*q != '\0') {
+                        if (*q == '"' && q > p && q[-1] != '\\') {
+                            break;
+                        }
+                        ++q;
+                    }
+                    if (*q == '"') {
+                        size_t n = (size_t)(q - p);
+                        if (n >= out_sz) {
+                            n = out_sz - 1;
+                        }
+                        memcpy(out_path, p, n);
+                        out_path[n] = '\0';
+                        return 0;
+                    }
+                }
+            }
+        }
         out_path[0] = '\0';
         return 0;
     }

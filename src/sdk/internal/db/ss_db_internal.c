@@ -14,8 +14,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#define SS_SDK_DB_DEFAULT_PATH "logs/ss_sdk_db.tsv"
+#define SS_SDK_DB_DEFAULT_PATH ".db/database.csv"
 #define SS_DB_FIELD_COUNT 12
+#define SS_DB_HEADER "metric,value_type,value,ts_start_utc,ts_end_utc,data_kind,source_api,source_field,source_tz,model_id,model_run_utc,issued_at_utc\n"
 
 typedef struct {
     size_t count;
@@ -154,9 +155,9 @@ static char *ss_escape(const char *s)
         return ss_strdup_local("");
     }
 
-    /* On-disk format is tab-separated; escape separators/control chars. */
+    /* On-disk format is comma-separated; escape separators/control chars. */
     for (i = 0; s[i] != '\0'; ++i) {
-        if (s[i] == '\\' || s[i] == '\t' || s[i] == '\n') {
+        if (s[i] == '\\' || s[i] == ',' || s[i] == '\n' || s[i] == '\r') {
             n += 2;
         } else {
             n += 1;
@@ -172,12 +173,15 @@ static char *ss_escape(const char *s)
         if (s[i] == '\\') {
             out[j++] = '\\';
             out[j++] = '\\';
-        } else if (s[i] == '\t') {
+        } else if (s[i] == ',') {
             out[j++] = '\\';
-            out[j++] = 't';
+            out[j++] = ',';
         } else if (s[i] == '\n') {
             out[j++] = '\\';
             out[j++] = 'n';
+        } else if (s[i] == '\r') {
+            out[j++] = '\\';
+            out[j++] = 'r';
         } else {
             out[j++] = s[i];
         }
@@ -194,11 +198,14 @@ static void ss_unescape_inplace(char *s)
     while (*src != '\0') {
         if (*src == '\\') {
             ++src;
-            if (*src == 't') {
-                *dst++ = '\t';
+            if (*src == ',') {
+                *dst++ = ',';
                 ++src;
             } else if (*src == 'n') {
                 *dst++ = '\n';
+                ++src;
+            } else if (*src == 'r') {
+                *dst++ = '\r';
                 ++src;
             } else if (*src == '\\') {
                 *dst++ = '\\';
@@ -248,16 +255,22 @@ static void ss_record_free_strings(ss_sdk_record *rec)
 static int ss_split_fields(char *line, char *fields[SS_DB_FIELD_COUNT])
 {
     int i = 0;
-    char *p = line;
+    bool escaped = false;
 
-    while (i < SS_DB_FIELD_COUNT) {
-        fields[i++] = p;
-        p = strchr(p, '\t');
-        if (p == NULL) {
-            break;
+    fields[i++] = line;
+    for (char *p = line; *p != '\0' && i < SS_DB_FIELD_COUNT; ++p) {
+        if (escaped) {
+            escaped = false;
+            continue;
         }
-        *p = '\0';
-        ++p;
+        if (*p == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (*p == ',') {
+            *p = '\0';
+            fields[i++] = p + 1;
+        }
     }
 
     return i;
@@ -477,7 +490,7 @@ static char *ss_record_to_line(const ss_sdk_record *rec)
     n = snprintf(
         NULL,
         0,
-        "%d\t%d\t%s\t%lld\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+        "%d,%d,%s,%lld,%lld,%d,%s,%s,%s,%s,%s,%s\n",
         (int)rec->metric,
         (int)rec->value_type,
         e_value,
@@ -502,7 +515,7 @@ static char *ss_record_to_line(const ss_sdk_record *rec)
     snprintf(
         line,
         (size_t)n + 1U,
-        "%d\t%d\t%s\t%lld\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+        "%d,%d,%s,%lld,%lld,%d,%s,%s,%s,%s,%s,%s\n",
         (int)rec->metric,
         (int)rec->value_type,
         e_value,
@@ -577,6 +590,49 @@ static int ss_line_is_duplicate(char *all, const ss_sdk_record *record)
     return 0;
 }
 
+ss_sdk_status ss_sdk_internal_db_record_exists(const ss_sdk_record *record, bool *out_exists)
+{
+    const char *path = ss_db_path();
+    int fd;
+    char *existing = NULL;
+    size_t existing_size = 0;
+    ss_sdk_status rc = SS_SDK_ERR_INTERNAL;
+
+    if (record == NULL || out_exists == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    *out_exists = false;
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        if (errno == ENOENT) {
+            return SS_SDK_OK;
+        }
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    if (flock(fd, LOCK_SH) != 0) {
+        close(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    existing = ss_read_all_fd(fd, &existing_size);
+    flock(fd, LOCK_UN);
+    close(fd);
+    if (existing == NULL) {
+        existing = ss_strdup_local("");
+        if (existing == NULL) {
+            return SS_SDK_ERR_INTERNAL;
+        }
+    }
+
+    *out_exists = ss_line_is_duplicate(existing, record) != 0;
+    rc = SS_SDK_OK;
+    free(existing);
+    (void)existing_size;
+    return rc;
+}
+
 ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record)
 {
     const char *path = ss_db_path();
@@ -619,6 +675,12 @@ ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record)
     line = ss_record_to_line(record);
     if (line == NULL) {
         goto done;
+    }
+
+    if (existing_size == 0) {
+        if (ss_write_all(fd, SS_DB_HEADER, strlen(SS_DB_HEADER)) != 0) {
+            goto done;
+        }
     }
 
     if (lseek(fd, 0, SEEK_END) < 0) {

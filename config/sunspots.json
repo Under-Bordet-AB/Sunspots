@@ -1,14 +1,24 @@
 {
   "common": {
+    "fetch_at_startup": true,
+    "db": {
+      "flush_on_startup": false
+    },
+    "fetch_windows": {
+      "history_days": "7",
+      "forecast_days": "16",
+      "air_quality_forecast_days": "5",
+      "flood_forecast_days": "14"
+    },
     "location": {
       "name": "Stockholm, Sweden",
       "latitude": "59.3293",
       "longitude": "18.0686"
     },
     "paths": {
-      "db_file": ".db/database.jsonl",
+      "db_file": ".db/database.csv",
       "endpoints_dir": "endpoints",
-      "log_file": "logs/sunspots.jsonl"
+      "log_file": "logs/sunspots.log"
     },
     "heartbeat": {
       "interval_ms": 1000,
@@ -21,23 +31,256 @@
   "workers": {
     "fetch_openmeteo": {
       "name": "fetch_openmeteo",
-      "poll_interval_minutes": 15,
-      "api_base": "https://api.open-meteo.com/v1/forecast",
-      "current_fields": "temperature_2m,cloud_cover,shortwave_radiation"
+      "source_api": "openmeteo",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 900,
+        "slot_deadline_sec": 120,
+        "grace_sec": 90
+      },
+      "retry": {
+        "base_sec": 5,
+        "max_sec": 60,
+        "jitter_sec": 2
+      },
+      "request": {
+        "timeout_sec": 15,
+        "url": "https://api.open-meteo.com/v1/forecast?latitude=${common.location.latitude}&longitude=${common.location.longitude}&hourly=temperature_2m,relative_humidity_2m,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,weather_code,shortwave_radiation,precipitation,precipitation_probability&past_days=${common.fetch_windows.history_days}&forecast_days=${common.fetch_windows.forecast_days}"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "openmeteo"
+      },
+      "mapping": [
+        {"path": "hourly.temperature_2m[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.temperature.air.2m.c"},
+        {"path": "hourly.relative_humidity_2m[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.humidity.relative.2m.pct"},
+        {"path": "hourly.cloud_cover[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.cloud.cover.total.pct"},
+        {"path": "hourly.cloud_cover_low[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.cloud.cover.low.pct"},
+        {"path": "hourly.cloud_cover_mid[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.cloud.cover.mid.pct"},
+        {"path": "hourly.cloud_cover_high[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.cloud.cover.high.pct"},
+        {"path": "hourly.wind_speed_10m[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.wind.speed.10m.ms", "transform": "kph_to_ms"},
+        {"path": "hourly.wind_gusts_10m[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.wind.gust.10m.ms", "transform": "kph_to_ms"},
+        {"path": "hourly.wind_direction_10m[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.wind.direction.10m.deg"},
+        {"path": "hourly.pressure_msl[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.pressure.msl.hpa"},
+        {"path": "hourly.shortwave_radiation[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.radiation.shortwave.wm2"},
+        {"path": "hourly.precipitation[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.precip.amount.mm"},
+        {"path": "hourly.precipitation_probability[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.precip.probability.pct"},
+        {"path": "hourly.weather_code[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.condition.symbol.code"}
+      ]
     },
     "fetch_smhi": {
       "name": "fetch_smhi",
-      "poll_interval_minutes": 15,
-      "api_base": "https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point"
+      "source_api": "smhi",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 900,
+        "slot_deadline_sec": 120,
+        "grace_sec": 90
+      },
+      "retry": {
+        "base_sec": 5,
+        "max_sec": 60,
+        "jitter_sec": 2
+      },
+      "request": {
+        "timeout_sec": 15,
+        "url": "https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/${common.location.longitude}/lat/${common.location.latitude}/data.json"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "smhi"
+      },
+      "mapping": [
+        {"path": "timeSeries[*].parameters[name=t].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.temperature.air.2m.c"},
+        {"path": "timeSeries[*].parameters[name=r].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.humidity.relative.2m.pct"},
+        {"path": "timeSeries[*].parameters[name=ws].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.wind.speed.10m.ms"},
+        {"path": "timeSeries[*].parameters[name=gust].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.wind.gust.10m.ms"},
+        {"path": "timeSeries[*].parameters[name=wd].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.wind.direction.10m.deg"},
+        {"path": "timeSeries[*].parameters[name=msl].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.pressure.msl.hpa"},
+        {"path": "timeSeries[*].parameters[name=vis].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.visibility.km"},
+        {"path": "timeSeries[*].parameters[name=tcc_mean].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.cloud.cover.total.pct", "scale": 12.5},
+        {"path": "timeSeries[*].parameters[name=lcc_mean].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.cloud.cover.low.pct", "scale": 12.5},
+        {"path": "timeSeries[*].parameters[name=mcc_mean].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.cloud.cover.mid.pct", "scale": 12.5},
+        {"path": "timeSeries[*].parameters[name=hcc_mean].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.cloud.cover.high.pct", "scale": 12.5},
+        {"path": "timeSeries[*].parameters[name=pmean].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.precip.amount.mm"},
+        {"path": "timeSeries[*].parameters[name=Wsymb2].values[0]", "timestamp_path": "timeSeries[*].validTime", "canonical_name": "weather.condition.symbol.code"}
+      ]
     },
-    "calc_smhi_avg_temp": {
-      "name": "calc_smhi_avg_temp",
-      "poll_interval_minutes": 1
-
+    "fetch_openmeteo_air_quality": {
+      "name": "fetch_openmeteo_air_quality",
+      "source_api": "openmeteo_air",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 3600,
+        "slot_deadline_sec": 180,
+        "grace_sec": 120
+      },
+      "retry": {
+        "base_sec": 10,
+        "max_sec": 120,
+        "jitter_sec": 3
+      },
+      "request": {
+        "timeout_sec": 20,
+        "url": "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${common.location.latitude}&longitude=${common.location.longitude}&hourly=european_aqi,pm10,pm2_5,ozone,nitrogen_dioxide&past_days=${common.fetch_windows.history_days}&forecast_days=${common.fetch_windows.air_quality_forecast_days}"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "openmeteo_air"
+      },
+      "mapping": [
+        {"path": "hourly.european_aqi[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.air_quality.eu.aqi.index"},
+        {"path": "hourly.pm2_5[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.air_quality.pm2_5.ugm3"},
+        {"path": "hourly.pm10[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.air_quality.pm10.ugm3"},
+        {"path": "hourly.ozone[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.air_quality.ozone.ugm3"},
+        {"path": "hourly.nitrogen_dioxide[*]", "timestamp_path": "hourly.time[*]", "canonical_name": "weather.air_quality.no2.ugm3"}
+      ]
+    },
+    "fetch_openmeteo_flood": {
+      "name": "fetch_openmeteo_flood",
+      "source_api": "openmeteo_flood",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 3600,
+        "slot_deadline_sec": 180,
+        "grace_sec": 120
+      },
+      "retry": {
+        "base_sec": 10,
+        "max_sec": 120,
+        "jitter_sec": 3
+      },
+      "request": {
+        "timeout_sec": 20,
+        "url": "https://flood-api.open-meteo.com/v1/flood?latitude=${common.location.latitude}&longitude=${common.location.longitude}&daily=river_discharge&past_days=${common.fetch_windows.history_days}&forecast_days=${common.fetch_windows.flood_forecast_days}"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "openmeteo_flood"
+      },
+      "mapping": [
+        {"path": "daily.river_discharge[*]", "timestamp_path": "daily.time[*]", "canonical_name": "hydro.river.discharge.m3s"}
+      ]
+    },
+    "fetch_swpc_kp": {
+      "name": "fetch_swpc_kp",
+      "source_api": "swpc",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 900,
+        "slot_deadline_sec": 180,
+        "grace_sec": 120
+      },
+      "retry": {
+        "base_sec": 10,
+        "max_sec": 120,
+        "jitter_sec": 3
+      },
+      "request": {
+        "timeout_sec": 20,
+        "url": "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "swpc"
+      },
+      "mapping": [
+        {"path": "[-1].kp_index", "timestamp_path": "[-1].time_tag", "canonical_name": "space.geomagnetic.kp.index", "emit": "first"},
+        {"path": "[-1].kp", "canonical_name": "space.alert.product_id", "emit": "first"}
+      ]
+    },
+    "fetch_usno_moon": {
+      "name": "fetch_usno_moon",
+      "source_api": "usno",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 86400,
+        "slot_deadline_sec": 600,
+        "grace_sec": 300
+      },
+      "retry": {
+        "base_sec": 30,
+        "max_sec": 300,
+        "jitter_sec": 10
+      },
+      "request": {
+        "timeout_sec": 20,
+        "url": "https://aa.usno.navy.mil/api/moon/phases/date?date=${now.year}-${now.month}-${now.day}&nump=1"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "usno"
+      },
+      "mapping": [
+        {"path": "phasedata[0].phase", "canonical_name": "astro.moon.next.phase", "emit": "first"}
+      ]
+    },
+    "fetch_sunrise_sunset": {
+      "name": "fetch_sunrise_sunset",
+      "source_api": "sunrise_sunset",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 86400,
+        "slot_deadline_sec": 600,
+        "grace_sec": 300
+      },
+      "retry": {
+        "base_sec": 30,
+        "max_sec": 300,
+        "jitter_sec": 10
+      },
+      "request": {
+        "timeout_sec": 20,
+        "url": "https://api.sunrise-sunset.org/json?lat=${common.location.latitude}&lng=${common.location.longitude}&formatted=0"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "sunrise_sunset"
+      },
+      "mapping": [
+        {"path": "results.sunrise", "canonical_name": "astro.sunrise.utc"},
+        {"path": "results.sunset", "canonical_name": "astro.sunset.utc"},
+        {"path": "results.day_length", "canonical_name": "astro.day.length.sec"}
+      ]
+    },
+    "fetch_nasa_fireball": {
+      "name": "fetch_nasa_fireball",
+      "source_api": "nasa_fireball",
+      "source_tz": "UTC",
+      "schedule": {
+        "mode": "interval_aligned",
+        "interval_sec": 21600,
+        "slot_deadline_sec": 600,
+        "grace_sec": 300
+      },
+      "retry": {
+        "base_sec": 30,
+        "max_sec": 300,
+        "jitter_sec": 10
+      },
+      "request": {
+        "timeout_sec": 20,
+        "url": "https://ssd-api.jpl.nasa.gov/fireball.api?req-loc=true&limit=1"
+      },
+      "success": {
+        "output_type": "db",
+        "output_target": "nasa_fireball"
+      },
+      "mapping": [
+        {"path": "data[0][1]", "canonical_name": "astro.meteor.event.energy.kt", "coerce": true, "emit": "first"},
+        {"path": "signature.source", "canonical_name": "space.alert.message", "emit": "first"}
+      ]
     },
     "server": {
       "name": "server",
-      "listen_host": "127.0.0.1",
+      "listen_host": "0.0.0.0",
       "listen_port": 8080
     }
   }

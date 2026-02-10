@@ -114,7 +114,7 @@ int config_get_string(const config* cfg, const char* key, char* out, size_t size
 int config_get_string_dup(const config* cfg, const char* key, char** out);
 
 /**
- * @brief Export a subtree to compact JSON text (caller owns *out_json with free()).
+ * @brief Export a subtree to compact JSON text (caller owns *out_json with cJSON_free()).
  */
 int config_export_subtree_json(const config* root, const char* path, char** out_json);
 

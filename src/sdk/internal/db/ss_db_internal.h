@@ -12,6 +12,17 @@
 ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record);
 
 /**
+ * @brief Check whether a canonical record identity is already persisted.
+ *
+ * Identity follows the SDK dedupe contract (metric/timestamp/kind/model/source).
+ *
+ * @param record Canonical input record.
+ * @param out_exists True if an equivalent identity already exists.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_internal_db_record_exists(const ss_sdk_record *record, bool *out_exists);
+
+/**
  * @brief Internal DB read entrypoint used by SDK facade.
  *
  * @param weeks Weeks window, caller already validated for non-negative input.

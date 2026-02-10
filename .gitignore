@@ -30,10 +30,18 @@
 build/
 bin/
 out/
+compile_commands.json
+sunspotsd
 
 # Logs
 *.log
 .logs/
+logs/*.jsonl
+
+# Runtime-generated artifacts
+runtime/config/*.json
+endpoints/*.json
+tests/tmp_*/
 
 # Editor/IDE specific
 .vscode/

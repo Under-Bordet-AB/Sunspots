@@ -51,6 +51,16 @@ typedef enum {
 } ss_sdk_log_level;
 
 /**
+ * @brief Single conversion applied by SDK typed write helpers.
+ */
+typedef enum {
+    SS_SDK_XFORM_NONE = 0,
+    SS_SDK_XFORM_F_TO_C,
+    SS_SDK_XFORM_KPH_TO_MS,
+    SS_SDK_XFORM_MPH_TO_MS
+} ss_sdk_value_transform;
+
+/**
  * @brief Canonical record persisted by SDK DB backend.
  */
 typedef struct ss_sdk_record {
@@ -81,6 +91,24 @@ typedef struct ss_sdk_record {
 } ss_sdk_record;
 
 /**
+ * @brief Process-local defaults used by typed SDK write helpers.
+ */
+typedef struct ss_sdk_session_config {
+    /** Stable provider identifier for this process/session. */
+    const char *source_api;
+    /** Default timezone for this provider/session. */
+    const char *source_tz;
+    /** Default data kind for typed write helpers. */
+    ss_sdk_data_kind default_data_kind;
+    /** Optional default forecast model ID. */
+    const char *default_model_id;
+    /** Optional default forecast model run UTC epoch. */
+    int64_t default_model_run_utc;
+    /** Optional default forecast issued UTC epoch. */
+    int64_t default_issued_at_utc;
+} ss_sdk_session_config;
+
+/**
  * @brief Optional structured logging context for advanced log calls.
  */
 typedef struct ss_sdk_log_fields {
@@ -95,12 +123,109 @@ typedef struct ss_sdk_log_fields {
 } ss_sdk_log_fields;
 
 /**
+ * @brief Initialize process-local SDK session defaults for typed write helpers.
+ *
+ * @param cfg Session configuration.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_session_begin(const ss_sdk_session_config *cfg);
+
+/**
+ * @brief Clear process-local SDK session defaults.
+ */
+void ss_sdk_session_end(void);
+
+/**
+ * @brief Check whether process-local SDK session defaults are active.
+ *
+ * @return true when typed writes can use session defaults.
+ */
+bool ss_sdk_session_is_active(void);
+
+/**
+ * @brief Write one f64 metric using active session defaults.
+ *
+ * @param metric Canonical metric identifier.
+ * @param value Value to write.
+ * @param ts_utc UTC epoch seconds, used as point timestamp.
+ * @param source_field Provider field/key name.
+ * @param xform Optional single conversion before persistence.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_db_write_f64(
+    ss_metric_id metric,
+    double value,
+    int64_t ts_utc,
+    const char *source_field,
+    ss_sdk_value_transform xform
+);
+
+/**
+ * @brief Write one i64 metric using active session defaults.
+ *
+ * @param metric Canonical metric identifier.
+ * @param value Value to write.
+ * @param ts_utc UTC epoch seconds, used as point timestamp.
+ * @param source_field Provider field/key name.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_db_write_i64(
+    ss_metric_id metric,
+    int64_t value,
+    int64_t ts_utc,
+    const char *source_field
+);
+
+/**
+ * @brief Write one bool metric using active session defaults.
+ *
+ * @param metric Canonical metric identifier.
+ * @param value Value to write.
+ * @param ts_utc UTC epoch seconds, used as point timestamp.
+ * @param source_field Provider field/key name.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_db_write_bool(
+    ss_metric_id metric,
+    bool value,
+    int64_t ts_utc,
+    const char *source_field
+);
+
+/**
+ * @brief Write one string metric using active session defaults.
+ *
+ * @param metric Canonical metric identifier.
+ * @param value Value to write.
+ * @param ts_utc UTC epoch seconds, used as point timestamp.
+ * @param source_field Provider field/key name.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_db_write_str(
+    ss_metric_id metric,
+    const char *value,
+    int64_t ts_utc,
+    const char *source_field
+);
+
+/**
  * @brief Validate and persist one canonical record.
  *
  * @param record Input canonical record.
  * @return SDK status code.
  */
 ss_sdk_status ss_sdk_db_write_record(const ss_sdk_record *record);
+
+/**
+ * @brief Check whether a record identity is already present in storage.
+ *
+ * Uses the same identity fields as SDK dedupe on write.
+ *
+ * @param record Canonical input record.
+ * @param out_exists True if equivalent record identity exists.
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_db_record_exists(const ss_sdk_record *record, bool *out_exists);
 
 /**
  * @brief Read canonical records from recent history.

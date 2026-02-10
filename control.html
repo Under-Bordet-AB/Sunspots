@@ -1,0 +1,1577 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sunspots Control Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    :root {
+      --sp-bg-1: #0b1020;
+      --sp-bg-2: #141b34;
+      --sp-card: rgba(20, 27, 52, 0.76);
+      --sp-border: rgba(140, 163, 255, 0.22);
+      --sp-accent: #78a8ff;
+      --sp-good: #47d37b;
+      --sp-warn: #ffb55b;
+      --sp-bad: #ff6f6f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(1200px 700px at 8% -12%, rgba(120, 168, 255, 0.22), transparent 55%),
+        radial-gradient(900px 600px at 85% -5%, rgba(63, 208, 188, 0.16), transparent 52%),
+        linear-gradient(145deg, var(--sp-bg-1), var(--sp-bg-2));
+      background-attachment: fixed;
+      color: #eaf0ff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .brand-badge {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(155deg, #78a8ff, #67d3f6);
+      color: #081226;
+      font-weight: 700;
+      font-size: 1.1rem;
+      box-shadow: 0 10px 24px rgba(104, 176, 255, 0.35);
+      flex-shrink: 0;
+    }
+
+    .glass {
+      background: var(--sp-card);
+      border: 1px solid var(--sp-border);
+      box-shadow: 0 14px 28px rgba(2, 9, 24, 0.32);
+      backdrop-filter: blur(8px);
+    }
+
+    .stat-card {
+      border-radius: 14px;
+      padding: 16px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 32px rgba(2, 9, 24, 0.4);
+    }
+
+    .stat-card .label {
+      color: #a8b9e8;
+      font-size: 0.8rem;
+      margin-bottom: 4px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-card .value {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      overflow-wrap: break-word;
+      word-break: break-all;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .dot-good { 
+      background: var(--sp-good); 
+      box-shadow: 0 0 0 5px rgba(71, 211, 123, 0.16); 
+    }
+    
+    .dot-warn { 
+      background: var(--sp-warn); 
+      box-shadow: 0 0 0 5px rgba(255, 181, 91, 0.16); 
+    }
+    
+    .dot-bad { 
+      background: var(--sp-bad); 
+      box-shadow: 0 0 0 5px rgba(255, 111, 111, 0.16); 
+    }
+
+    .table {
+      margin-bottom: 0;
+    }
+
+    .workers-table {
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    .workers-table th:nth-child(1), .workers-table td:nth-child(1) { width: 18%; }
+    .workers-table th:nth-child(2), .workers-table td:nth-child(2) { width: 10%; }
+    .workers-table th:nth-child(3), .workers-table td:nth-child(3) { width: 13%; }
+    .workers-table th:nth-child(4), .workers-table td:nth-child(4) { width: 13%; }
+    .workers-table th:nth-child(5), .workers-table td:nth-child(5) { width: 13%; }
+    .workers-table th:nth-child(6), .workers-table td:nth-child(6) { width: 8%; }
+    .workers-table th:nth-child(7), .workers-table td:nth-child(7) { width: 17%; }
+    .workers-table th:nth-child(8), .workers-table td:nth-child(8) { width: 8%; }
+
+    .table thead th {
+      color: #b8c8f5;
+      border-bottom-color: rgba(173, 193, 255, 0.32);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 12px;
+    }
+
+    .table td {
+      border-color: rgba(173, 193, 255, 0.1);
+      vertical-align: middle;
+      padding: 12px;
+    }
+
+    .table tbody tr {
+      transition: background-color 0.15s ease;
+    }
+
+    .table tbody tr:hover {
+      background-color: rgba(120, 168, 255, 0.08);
+    }
+
+    .table tbody tr.log-worker-select {
+      cursor: pointer;
+    }
+
+    .worker-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.85rem;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .log-view {
+      height: 56vh;
+      min-height: 460px;
+      max-height: 68vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: rgba(5, 10, 23, 0.68);
+      border: 1px solid rgba(120, 168, 255, 0.22);
+      border-radius: 12px;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .log-view::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .log-view::-webkit-scrollbar-track {
+      background: rgba(5, 10, 23, 0.5);
+      border-radius: 4px;
+    }
+
+    .log-view::-webkit-scrollbar-thumb {
+      background: rgba(120, 168, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    .log-view::-webkit-scrollbar-thumb:hover {
+      background: rgba(120, 168, 255, 0.5);
+    }
+
+    .log-line-error {
+      color: var(--sp-bad);
+    }
+
+    .log-line-warn {
+      color: var(--sp-warn);
+    }
+
+    .log-line-info {
+      color: #78a8ff;
+    }
+
+    .log-line-debug {
+      color: #9ca3af;
+    }
+
+    .log-line {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .log-token-time {
+      color: #8fb1ff;
+    }
+
+    .log-token-worker {
+      color: #67d3f6;
+      font-weight: 600;
+    }
+
+    .config-editor {
+      height: 56vh;
+      min-height: 460px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.84rem;
+      background: rgba(5, 10, 23, 0.62) !important;
+      border-color: rgba(120, 168, 255, 0.28) !important;
+      color: #eaf0ff !important;
+      resize: none;
+    }
+
+    .config-editor:focus {
+      border-color: rgba(120, 168, 255, 0.5) !important;
+      box-shadow: 0 0 0 0.25rem rgba(120, 168, 255, 0.15) !important;
+    }
+
+    .sp-btn {
+      border-radius: 8px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      transition: all 0.15s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .sp-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 16px rgba(5, 14, 34, 0.32);
+    }
+
+    .sp-btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .sp-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .panel-title {
+      font-size: 1rem;
+      letter-spacing: 0.5px;
+      color: #d7e2ff;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .loading {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .spinner-border-sm {
+      width: 1rem;
+      height: 1rem;
+      border-width: 0.15em;
+    }
+
+    .toast-container {
+      z-index: 9999;
+    }
+
+    #daemonHealth {
+      min-width: 145px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #apiCurrent {
+      min-width: 170px;
+      display: inline-flex;
+      justify-content: center;
+    }
+
+    #capabilities {
+      min-width: 88px;
+      display: inline-flex;
+      justify-content: center;
+    }
+
+    @media (max-width: 991.98px) {
+      .log-view, .config-editor {
+        height: 48vh;
+        min-height: 320px;
+      }
+      
+      .stat-card .value {
+        font-size: 1.1rem;
+      }
+    }
+
+    @media (max-width: 575.98px) {
+      .brand-badge {
+        width: 34px;
+        height: 34px;
+        font-size: 1rem;
+      }
+
+      .panel-title {
+        font-size: 0.9rem;
+      }
+
+      .btn-toolbar .btn {
+        font-size: 0.75rem;
+        padding: 0.35rem 0.6rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container-fluid py-3 py-lg-4">
+    <!-- Header -->
+    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
+      <div class="d-flex align-items-center gap-3">
+        <div class="brand-badge">S</div>
+        <div>
+          <h1 class="h4 mb-1">Sunspots Control</h1>
+          <p class="text-secondary small mb-0">Runtime supervision and operator controls</p>
+        </div>
+      </div>
+      
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="input-group input-group-sm" style="width: min(48vw, 330px);">
+          <span class="input-group-text"><i class="bi bi-hdd-network"></i></span>
+          <input id="apiBaseInput" class="form-control" placeholder="http://localhost:9090" aria-label="API Base URL">
+          <button class="btn btn-outline-light sp-btn" id="applyApiBase" type="button" title="Apply API Base">
+            <i class="bi bi-plug"></i>
+          </button>
+        </div>
+        <span id="apiCurrent" class="badge text-bg-dark border border-secondary-subtle">API: same origin</span>
+        <span id="daemonHealth" class="badge text-bg-secondary">
+          <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+          Checking...
+        </span>
+        <button type="button" class="btn btn-outline-light btn-sm sp-btn" id="refreshBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" role="switch" id="autoRefresh">
+          <label class="form-check-label small" for="autoRefresh">Auto 5s</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastRoot" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+    <!-- System Controls -->
+    <div class="row g-3 g-lg-4">
+      <div class="col-12">
+        <div class="glass rounded-4 p-3 p-lg-4">
+          <h2 class="panel-title mb-3">System Controls</h2>
+          
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <button type="button" class="btn btn-primary sp-btn" data-cmd="/api/control/reload">
+              <i class="bi bi-arrow-repeat"></i> Reload Config
+            </button>
+            <button type="button" class="btn btn-warning sp-btn" data-cmd="/api/control/restart_all">
+              <i class="bi bi-bootstrap-reboot"></i> Restart All Workers
+            </button>
+            <button type="button" class="btn btn-outline-info sp-btn" data-cmd="/api/control/clear_status">
+              <i class="bi bi-eraser"></i> Clear Status Files
+            </button>
+            <button type="button" class="btn btn-outline-danger sp-btn" data-cmd="/api/control/flush_db">
+              <i class="bi bi-trash3"></i> Flush Database
+            </button>
+            <button type="button" class="btn btn-outline-danger sp-btn" data-cmd="/api/control/clear_logs">
+              <i class="bi bi-journal-x"></i> Clear Logs
+            </button>
+            <button type="button" class="btn btn-outline-warning sp-btn" data-cmd="/api/control/clean_restart">
+              <i class="bi bi-stars"></i> Clean Restart
+            </button>
+            <button type="button" class="btn btn-danger sp-btn" data-cmd="/api/control/stop">
+              <i class="bi bi-stop-circle"></i> Stop Daemon
+            </button>
+          </div>
+
+          <hr class="border-secondary opacity-25 my-3">
+
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="input-group input-group-sm" style="max-width: 360px;">
+              <label class="input-group-text" for="workerSelect">Worker</label>
+              <select id="workerSelect" class="form-select" aria-label="Select worker">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-success sp-btn" id="workerStart">
+              <i class="bi bi-play-fill"></i> Start
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-warning sp-btn" id="workerRestart">
+              <i class="bi bi-arrow-repeat"></i> Restart
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger sp-btn" id="workerStop">
+              <i class="bi bi-stop-fill"></i> Stop
+            </button>
+            <div class="ms-auto text-secondary small d-flex align-items-center gap-2">
+              <span>Capabilities:</span>
+              <span id="capabilities" class="badge text-bg-secondary">Loading...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="col-12">
+        <div class="row g-3 mb-3">
+          <div class="col-6 col-md-4 col-xxl-2">
+            <div class="glass stat-card">
+              <div class="label">Workers</div>
+              <div id="workersCount" class="value">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-xxl-2">
+            <div class="glass stat-card">
+              <div class="label">Healthy</div>
+              <div id="workersHealthy" class="value">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-xxl-2">
+            <div class="glass stat-card">
+              <div class="label">DB Size</div>
+              <div id="dbSize" class="value">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-6 col-xxl-3">
+            <div class="glass stat-card">
+              <div class="label">Daemon PID</div>
+              <div id="daemonPid" class="value">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-md-6 col-xxl-3">
+            <div class="glass stat-card">
+              <div class="label">Server PID</div>
+              <div id="serverPid" class="value">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-6">
+            <div class="glass stat-card">
+              <div class="label">Database Path</div>
+              <div id="dbPath" class="value text-break">Loading...</div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-6">
+            <div class="glass stat-card">
+              <div class="label">Log Path</div>
+              <div id="logPath" class="value text-break">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workers Table -->
+        <div class="glass rounded-4 p-3 p-lg-4 mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="panel-title mb-0">Workers</h2>
+            <span class="text-secondary small">From <code>runtime/status/*.json</code></span>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-dark table-hover align-middle workers-table">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Status</th>
+                  <th>Slot Start</th>
+                  <th>Deadline</th>
+                  <th>Completed</th>
+                  <th>Records</th>
+                  <th>Error</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="workersBody">
+                <tr>
+                  <td colspan="8" class="text-center text-secondary py-4">
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    Loading worker status...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Logs and Config -->
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="glass rounded-4 p-3 p-lg-4 h-100">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h2 class="panel-title mb-0">Logs</h2>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                  <div class="btn-group btn-group-sm" role="group" aria-label="Log line presets">
+                    <button type="button" class="btn btn-outline-secondary sp-btn" data-lines="200">200</button>
+                    <button type="button" class="btn btn-outline-secondary sp-btn" data-lines="500">500</button>
+                    <button type="button" class="btn btn-outline-secondary sp-btn" data-lines="1000">1000</button>
+                  </div>
+                  <input id="logsLines" type="number" min="20" max="4000" value="200" class="form-control form-control-sm" style="width: 92px;" aria-label="Number of log lines">
+                  <button type="button" id="refreshLogs" class="btn btn-outline-light btn-sm sp-btn">
+                    <i class="bi bi-journal-text"></i> Refresh
+                  </button>
+                </div>
+              </div>
+              
+              <div class="d-flex gap-2 flex-wrap mb-3" id="logFilters">
+                <button type="button" class="btn btn-sm btn-light active sp-btn" data-log-filter="all">All</button>
+                <button type="button" class="btn btn-sm btn-outline-danger sp-btn" data-log-filter="error">Error</button>
+                <button type="button" class="btn btn-sm btn-outline-warning sp-btn" data-log-filter="warn">Warn</button>
+                <button type="button" class="btn btn-sm btn-outline-info sp-btn" data-log-filter="info">Info</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary sp-btn" data-log-filter="debug">Debug</button>
+              </div>
+
+              <div class="d-flex gap-2 flex-wrap mb-3" id="workerLogFilters">
+                <button type="button" class="btn btn-sm btn-light active sp-btn" data-worker-log-filter="all">All Workers</button>
+              </div>
+              
+              <div id="logsView" class="log-view">
+                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                Loading logs...
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="glass rounded-4 p-3 p-lg-4 h-100">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h2 class="panel-title mb-0">Master Config</h2>
+                <div class="d-flex gap-2">
+                  <button type="button" id="reloadConfig" class="btn btn-outline-light btn-sm sp-btn">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reload
+                  </button>
+                  <button type="button" id="saveConfig" class="btn btn-success btn-sm sp-btn">
+                    <i class="bi bi-floppy"></i> Save & Apply
+                  </button>
+                </div>
+              </div>
+              <textarea id="configEditor" class="form-control config-editor" spellcheck="false" aria-label="Configuration editor"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+  <script>
+    'use strict';
+
+    // ===== Application State =====
+    const state = {
+      status: null,
+      capabilities: null,
+      apiBase: '',
+      autoTimer: null,
+      logLines: [],
+      renderedLogLines: [],
+      logFilter: 'all',
+      logWorkerFilter: 'all',
+      isRefreshing: false,
+      lastRefresh: null,
+      pauseAutoRefreshUntilMs: 0
+    };
+
+    // ===== Utility Functions =====
+    const utils = {
+      trimSlash(s) {
+        if (!s) return '';
+        return s.endsWith('/') ? s.slice(0, -1) : s;
+      },
+
+      normalizeApiBase(raw) {
+        const inValue = this.trimSlash((raw || '').trim());
+        if (!inValue) return '';
+        
+        if (/^https?:\/\//i.test(inValue)) {
+          return inValue;
+        }
+        
+        if (/^[a-z0-9.-]+(:\d+)?$/i.test(inValue)) {
+          return `${window.location.protocol}//${inValue}`;
+        }
+        
+        return inValue;
+      },
+
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      },
+
+      formatEpoch(epoch) {
+        if (!Number.isFinite(epoch) || epoch <= 0) return '-';
+        
+        try {
+          return new Date(epoch * 1000).toLocaleString();
+        } catch (err) {
+          console.error('Error formatting epoch:', err);
+          return '-';
+        }
+      },
+
+      formatBytes(n) {
+        if (!Number.isFinite(n) || n < 0) return '-';
+        
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let idx = 0;
+        let v = n;
+        
+        while (v >= 1024 && idx < units.length - 1) {
+          v /= 1024;
+          idx++;
+        }
+        
+        return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[idx]}`;
+      },
+
+      debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+          const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+          };
+          clearTimeout(timeout);
+          timeout = setTimeout(later, wait);
+        };
+      },
+
+      isNearBottom(el, thresholdPx = 24) {
+        if (!el) return true;
+        return (el.scrollHeight - el.scrollTop - el.clientHeight) <= thresholdPx;
+      }
+    };
+
+    // ===== Toast Notifications =====
+    const toast = {
+      show(msg, kind = 'info') {
+        if (typeof bootstrap === 'undefined' || !bootstrap.Toast) {
+          console[kind === 'error' ? 'error' : 'log'](`[Sunspots] ${msg}`);
+          return;
+        }
+
+        const root = document.getElementById('toastRoot');
+        if (!root) return;
+
+        const colorMap = {
+          error: 'danger',
+          warn: 'warning',
+          ok: 'success',
+          success: 'success',
+          info: 'info'
+        };
+
+        const wrap = document.createElement('div');
+        wrap.className = `toast align-items-center text-bg-${colorMap[kind] || 'info'} border-0`;
+        wrap.setAttribute('role', 'status');
+        wrap.setAttribute('aria-live', 'polite');
+        wrap.setAttribute('aria-atomic', 'true');
+
+        const row = document.createElement('div');
+        row.className = 'd-flex';
+
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = msg;
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'btn-close btn-close-white me-2 m-auto';
+        closeBtn.setAttribute('data-bs-dismiss', 'toast');
+        closeBtn.setAttribute('aria-label', 'Close');
+
+        row.appendChild(body);
+        row.appendChild(closeBtn);
+        wrap.appendChild(row);
+        root.appendChild(wrap);
+
+        const toastInstance = new bootstrap.Toast(wrap, { 
+          delay: kind === 'error' ? 5000 : 3000 
+        });
+        
+        toastInstance.show();
+
+        wrap.addEventListener('hidden.bs.toast', () => {
+          wrap.remove();
+        });
+      }
+    };
+
+    // ===== API Functions =====
+    const api = {
+      getEndpointUrl(path) {
+        if (!path) return path;
+        if (/^https?:\/\//i.test(path)) return path;
+
+        try {
+          if (state.apiBase) {
+            return new URL(path, `${state.apiBase}/`).toString();
+          }
+          return new URL(path, window.location.origin).toString();
+        } catch (err) {
+          console.error('Error constructing endpoint URL:', err);
+          return path;
+        }
+      },
+
+      async request(url, options = {}) {
+        try {
+          const response = await fetch(this.getEndpointUrl(url), {
+            ...options,
+            cache: 'no-store'
+          });
+
+          const text = await response.text();
+          let data = null;
+
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch (parseErr) {
+            data = { raw: text };
+          }
+
+          if (!response.ok) {
+            const errorMsg = data?.error || `${response.status} ${response.statusText}`;
+            throw new Error(errorMsg);
+          }
+
+          return data;
+        } catch (err) {
+          console.error('API request failed:', url, err);
+          throw err;
+        }
+      },
+
+      async get(url) {
+        return this.request(url);
+      },
+
+      async post(url, body) {
+        return this.request(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body !== undefined ? JSON.stringify(body) : ''
+        });
+      }
+    };
+
+    // ===== UI Rendering Functions =====
+    const ui = {
+      updateDaemonBadge(status) {
+        const badge = document.getElementById('daemonHealth');
+        if (!badge) return;
+
+        const alive = status?.daemon_alive === true;
+        badge.className = `badge ${alive ? 'text-bg-success' : 'text-bg-danger'}`;
+        badge.innerHTML = alive 
+          ? '<i class="bi bi-check-circle-fill me-1"></i>Daemon alive' 
+          : '<i class="bi bi-x-circle-fill me-1"></i>Daemon offline';
+      },
+
+      renderApiCurrent() {
+        const el = document.getElementById('apiCurrent');
+        if (!el) return;
+        el.textContent = `API: ${state.apiBase || 'same origin'}`;
+      },
+
+      getWorkerStatusBadge(worker) {
+        if (!worker) {
+          return '<span class="status-dot dot-bad"></span>unknown';
+        }
+
+        if (worker.ok === true) {
+          return '<span class="status-dot dot-good"></span>healthy';
+        }
+
+        if (worker.error) {
+          return '<span class="status-dot dot-bad"></span>failed';
+        }
+
+        return '<span class="status-dot dot-warn"></span>pending';
+      },
+
+      renderWorkers(status) {
+        const workers = Array.isArray(status?.workers) ? status.workers : [];
+        const tbody = document.getElementById('workersBody');
+        const select = document.getElementById('workerSelect');
+
+        if (!tbody || !select) return;
+
+        tbody.innerHTML = '';
+        select.innerHTML = '';
+
+        if (workers.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" class="text-center text-secondary py-4">
+                No worker status available.
+              </td>
+            </tr>
+          `;
+          
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No workers';
+          select.appendChild(opt);
+          return;
+        }
+
+        // Sort workers by name
+        const sortedWorkers = workers
+          .slice()
+          .sort((a, b) => String(a.worker || '').localeCompare(String(b.worker || '')));
+
+        sortedWorkers.forEach(w => {
+          const workerName = w.worker || '(unnamed)';
+          const escapedName = utils.escapeHtml(workerName);
+          const escapedError = utils.escapeHtml(w.error || '');
+
+          const tr = document.createElement('tr');
+          tr.classList.add('log-worker-select');
+          tr.setAttribute('data-worker-name', workerName);
+          tr.innerHTML = `
+            <td class="worker-name">${escapedName}</td>
+            <td>${this.getWorkerStatusBadge(w)}</td>
+            <td>${utils.formatEpoch(w.slot_start_utc)}</td>
+            <td>${utils.formatEpoch(w.slot_deadline_utc)}</td>
+            <td>${utils.formatEpoch(w.completed_at_utc)}</td>
+            <td>${Number.isFinite(w.records_written) ? w.records_written : '-'}</td>
+            <td title="${escapedError}" class="text-truncate" style="max-width: 200px;">${escapedError || '-'}</td>
+            <td>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Worker actions">
+                <button type="button" class="btn btn-outline-success sp-btn" data-worker-action="start" data-worker="${escapedName}" title="Start worker">
+                  <i class="bi bi-play-fill"></i>
+                </button>
+                <button type="button" class="btn btn-outline-warning sp-btn" data-worker-action="restart" data-worker="${escapedName}" title="Restart worker">
+                  <i class="bi bi-arrow-repeat"></i>
+                </button>
+                <button type="button" class="btn btn-outline-danger sp-btn" data-worker-action="stop" data-worker="${escapedName}" title="Stop worker">
+                  <i class="bi bi-stop-fill"></i>
+                </button>
+              </div>
+            </td>
+          `;
+          tbody.appendChild(tr);
+
+          const opt = document.createElement('option');
+          opt.value = workerName;
+          opt.textContent = workerName;
+          select.appendChild(opt);
+        });
+
+        // Update stats
+        const healthy = workers.filter(w => w?.ok === true).length;
+        const workersCountEl = document.getElementById('workersCount');
+        const workersHealthyEl = document.getElementById('workersHealthy');
+
+        if (workersCountEl) workersCountEl.textContent = String(workers.length);
+        if (workersHealthyEl) workersHealthyEl.textContent = `${healthy}/${workers.length}`;
+
+        this.renderWorkerLogFilters(sortedWorkers.map((w) => String(w.worker || '(unnamed)')));
+      },
+
+      renderWorkerLogFilters(workerNames) {
+        const root = document.getElementById('workerLogFilters');
+        if (!root) return;
+        const unique = Array.from(new Set((workerNames || []).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        root.innerHTML = '';
+
+        const addBtn = (label, value, active) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          const visualClass = active ? 'btn-light' : 'btn-outline-light';
+          btn.className = `btn btn-sm sp-btn ${visualClass} ${active ? 'active' : ''}`;
+          btn.setAttribute('data-worker-log-filter', value);
+          btn.textContent = label;
+          root.appendChild(btn);
+        };
+
+        addBtn('All Workers', 'all', state.logWorkerFilter === 'all');
+        unique.forEach((name) => {
+          addBtn(name, name, state.logWorkerFilter === name);
+        });
+      },
+
+      applyLogFilter() {
+        const source = Array.isArray(state.logLines) ? state.logLines : [];
+        let filtered = source;
+
+        if (state.logFilter !== 'all') {
+          const token = state.logFilter.toLowerCase();
+          filtered = source.filter(line => 
+            String(line).toLowerCase().includes(token)
+          );
+        }
+
+        if (state.logWorkerFilter !== 'all') {
+          const workerNeedle = state.logWorkerFilter.toLowerCase();
+          filtered = filtered.filter((line) => {
+            const lower = String(line).toLowerCase();
+            return lower.includes(`worker=${workerNeedle}`) || lower.includes(workerNeedle);
+          });
+        }
+
+        const view = document.getElementById('logsView');
+        if (!view) return;
+        const wasNearBottom = utils.isNearBottom(view);
+
+        if (filtered.length === 0) {
+          view.textContent = '(no log lines matching filter)';
+          state.renderedLogLines = [];
+          return;
+        }
+
+        const lineToHtml = (line) => {
+          const raw = String(line || '');
+          const safe = utils.escapeHtml(raw);
+          const level = /\b(ERROR|WARN|INFO|DEBUG)\b/i.exec(raw);
+          const className = level ? `log-line-${level[1].toLowerCase()}` : '';
+          const withTime = safe.replace(/^(\d{4}-\d{2}-\d{2}T\S+Z)/, '<span class="log-token-time">$1</span>');
+          const withWorker = withTime.replace(/(worker=[^\s"]+)/g, '<span class="log-token-worker">$1</span>');
+          return `<div class="log-line ${className}">${withWorker}</div>`;
+        };
+
+        const prev = Array.isArray(state.renderedLogLines) ? state.renderedLogLines : [];
+        const canAppend =
+          prev.length > 0 &&
+          filtered.length >= prev.length &&
+          prev.every((v, i) => v === filtered[i]);
+
+        if (canAppend) {
+          const delta = filtered.slice(prev.length);
+          if (delta.length > 0) {
+            view.insertAdjacentHTML('beforeend', delta.map(lineToHtml).join(''));
+          }
+        } else {
+          view.innerHTML = filtered.map(lineToHtml).join('');
+        }
+
+        state.renderedLogLines = filtered.slice();
+        if (wasNearBottom) {
+          view.scrollTop = view.scrollHeight;
+        }
+      },
+
+      setLoading(elementId, isLoading) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+
+        if (isLoading) {
+          el.classList.add('loading');
+        } else {
+          el.classList.remove('loading');
+        }
+      }
+    };
+
+    // ===== Data Refresh Functions =====
+    const refresh = {
+      async capabilities() {
+        try {
+          const caps = await api.get('/api/control/capabilities');
+          state.capabilities = caps;
+
+          const list = caps?.commands && Array.isArray(caps.commands) 
+            ? caps.commands 
+            : [];
+
+          const el = document.getElementById('capabilities');
+          if (el) {
+            if (list.length > 0) {
+              el.className = 'badge text-bg-success';
+              el.textContent = `${list.length} cmds`;
+              el.title = list.join(', ');
+            } else {
+              el.className = 'badge text-bg-secondary';
+              el.textContent = 'No capabilities';
+              el.title = '';
+            }
+          }
+        } catch (err) {
+          console.error('Failed to refresh capabilities:', err);
+          const el = document.getElementById('capabilities');
+          if (el) {
+            el.className = 'badge text-bg-danger';
+            el.textContent = 'Capabilities error';
+            el.title = err.message || 'unknown';
+          }
+        }
+      },
+
+      async status() {
+        try {
+          const status = await api.get('/api/control/status');
+          state.status = status;
+          state.lastRefresh = Date.now();
+
+          ui.updateDaemonBadge(status);
+
+          // Update stats
+          const updates = {
+            daemonPid: Number.isFinite(status.daemon_pid) ? status.daemon_pid : '-',
+            serverPid: Number.isFinite(status.server_pid) ? status.server_pid : '-',
+            dbPath: status.db_path || '-',
+            logPath: status.log_path || '-',
+            dbSize: utils.formatBytes(status.db?.size_bytes || 0)
+          };
+
+          Object.entries(updates).forEach(([id, value]) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+          });
+
+          ui.renderWorkers(status);
+        } catch (err) {
+          console.error('Failed to refresh status:', err);
+          ui.updateDaemonBadge(null);
+          throw err;
+        }
+      },
+
+      async logs() {
+        try {
+          const linesInput = document.getElementById('logsLines');
+          const linesRaw = parseInt(linesInput?.value || '200', 10);
+          const lines = Number.isFinite(linesRaw) 
+            ? Math.min(4000, Math.max(20, linesRaw)) 
+            : 200;
+
+          if (linesInput) linesInput.value = String(lines);
+
+          const payload = await api.get(`/api/control/logs?lines=${lines}`);
+
+          if (payload?.entries && Array.isArray(payload.entries)) {
+            state.logLines = payload.entries;
+          } else if (typeof payload?.tail === 'string') {
+            state.logLines = payload.tail
+              .split('\n')
+              .filter(ln => ln.trim().length > 0);
+          } else {
+            state.logLines = [];
+          }
+
+          ui.applyLogFilter();
+        } catch (err) {
+          console.error('Failed to refresh logs:', err);
+          const view = document.getElementById('logsView');
+          if (view) {
+            view.textContent = `Error loading logs: ${err.message}`;
+          }
+          throw err;
+        }
+      },
+
+      async config() {
+        try {
+          const cfg = await api.get('/api/control/config');
+          const text = JSON.stringify(cfg, null, 2);
+          const editor = document.getElementById('configEditor');
+          if (editor) editor.value = text;
+        } catch (err) {
+          console.error('Failed to refresh config:', err);
+          throw err;
+        }
+      },
+
+      async all() {
+        if (state.isRefreshing) {
+          console.log('Refresh already in progress, skipping...');
+          return;
+        }
+
+        state.isRefreshing = true;
+
+        try {
+          await Promise.all([
+            this.capabilities(),
+            this.status(),
+            this.logs()
+          ]);
+        } catch (err) {
+          console.error('Refresh failed:', err);
+          toast.show(`Refresh failed: ${err.message}`, 'error');
+        } finally {
+          state.isRefreshing = false;
+        }
+      }
+    };
+
+    // ===== Action Handlers =====
+    const actions = {
+      async postCommand(url, showSuccess = true) {
+        try {
+          await api.post(url, {});
+          
+          if (showSuccess) {
+            const cmdName = url.split('/').pop() || 'command';
+            toast.show(`Command "${cmdName}" executed successfully`, 'success');
+          }
+
+          if (url === '/api/control/clean_restart') {
+            state.pauseAutoRefreshUntilMs = Date.now() + 30000;
+            toast.show('Auto refresh paused for 30s during clean restart', 'info');
+          }
+
+          // Refresh status after command
+          await refresh.status();
+          await refresh.logs();
+        } catch (err) {
+          console.error('Command failed:', err);
+          throw err;
+        }
+      },
+
+      async saveConfig() {
+        const editor = document.getElementById('configEditor');
+        if (!editor) return;
+
+        const raw = editor.value;
+        let parsed;
+
+        try {
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          toast.show(`Invalid JSON: ${err.message}`, 'error');
+          return;
+        }
+
+        try {
+          await api.post('/api/control/config', parsed);
+          toast.show('Configuration saved and reload requested', 'success');
+          await refresh.status();
+        } catch (err) {
+          toast.show(`Failed to save config: ${err.message}`, 'error');
+        }
+      },
+
+      async workerAction(action, worker) {
+        if (!worker || !worker.trim()) {
+          toast.show('Please select a worker first', 'warn');
+          return;
+        }
+
+        try {
+          const url = `/api/control/worker/${action}`;
+          await api.post(url, { worker: worker.trim() });
+          toast.show(`Worker "${worker}" ${action} requested`, 'success');
+          await refresh.status();
+        } catch (err) {
+          toast.show(`Worker ${action} failed: ${err.message}`, 'error');
+        }
+      },
+
+      setupAutoRefresh() {
+        if (state.autoTimer) {
+          clearInterval(state.autoTimer);
+        }
+
+        state.autoTimer = setInterval(async () => {
+          const checkbox = document.getElementById('autoRefresh');
+          if (!checkbox?.checked) return;
+          if (Date.now() < state.pauseAutoRefreshUntilMs) return;
+
+          try {
+            await refresh.status();
+            await refresh.logs();
+          } catch (err) {
+            console.error('Auto-refresh failed:', err);
+          }
+        }, 5000);
+      }
+    };
+
+    // ===== Event Bindings =====
+    const events = {
+      bindCommandButtons() {
+        document.querySelectorAll('[data-cmd]').forEach(btn => {
+          btn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            const cmd = btn.getAttribute('data-cmd');
+            if (!cmd) return;
+
+            const confirmCommands = ['/api/control/stop', '/api/control/flush_db', '/api/control/clear_logs', '/api/control/clean_restart'];
+            if (confirmCommands.includes(cmd)) {
+              const action = cmd.split('/').pop();
+              if (!confirm(`Are you sure you want to ${action}?`)) {
+                return;
+              }
+            }
+
+            btn.disabled = true;
+            
+            try {
+              await actions.postCommand(cmd);
+            } catch (err) {
+              toast.show(`Command failed: ${err.message}`, 'error');
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+      },
+
+      bindWorkerControls() {
+        ['workerStart', 'workerRestart', 'workerStop'].forEach(btnId => {
+          const btn = document.getElementById(btnId);
+          if (!btn) return;
+
+          const action = btnId.replace('worker', '').toLowerCase();
+
+          btn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            const select = document.getElementById('workerSelect');
+            const worker = select?.value;
+
+            btn.disabled = true;
+            
+            try {
+              await actions.workerAction(action, worker);
+            } catch (err) {
+              console.error('Worker action failed:', err);
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+
+        // Worker table inline actions
+        const workersBody = document.getElementById('workersBody');
+        if (workersBody) {
+          workersBody.addEventListener('click', async (evt) => {
+            const btn = evt.target.closest('button[data-worker-action]');
+            const row = evt.target.closest('tr[data-worker-name]');
+            if (!btn && row) {
+              evt.preventDefault();
+              state.logWorkerFilter = row.getAttribute('data-worker-name') || 'all';
+              document.querySelectorAll('[data-worker-log-filter]').forEach((b) => {
+                b.classList.toggle('active', b.getAttribute('data-worker-log-filter') === state.logWorkerFilter);
+              });
+              ui.applyLogFilter();
+              return;
+            }
+            if (!btn) return;
+
+            evt.preventDefault();
+
+            const action = btn.getAttribute('data-worker-action');
+            const worker = btn.getAttribute('data-worker');
+
+            btn.disabled = true;
+
+            try {
+              await actions.workerAction(action, worker);
+            } catch (err) {
+              console.error('Worker inline action failed:', err);
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        }
+      },
+
+      bindApiControls() {
+        const applyBtn = document.getElementById('applyApiBase');
+        const input = document.getElementById('apiBaseInput');
+
+        if (applyBtn && input) {
+          const applyHandler = async () => {
+            state.apiBase = utils.normalizeApiBase(input.value || '');
+            input.value = state.apiBase;
+
+            try {
+              if (state.apiBase) {
+                localStorage.setItem('sunspots_api_base', state.apiBase);
+              } else {
+                localStorage.removeItem('sunspots_api_base');
+              }
+            } catch (err) {
+              console.warn('Failed to update localStorage:', err);
+            }
+
+            ui.renderApiCurrent();
+            toast.show(`API base set to: ${state.apiBase || 'same origin'}`, 'success');
+
+            await refresh.all();
+          };
+
+          applyBtn.addEventListener('click', applyHandler);
+          
+          input.addEventListener('keydown', (evt) => {
+            if (evt.key === 'Enter') {
+              evt.preventDefault();
+              applyHandler();
+            }
+          });
+        }
+      },
+
+      bindLogControls() {
+        const refreshBtn = document.getElementById('refreshLogs');
+        if (refreshBtn) {
+          refreshBtn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            refreshBtn.disabled = true;
+            
+            try {
+              await refresh.logs();
+            } catch (err) {
+              toast.show(`Failed to refresh logs: ${err.message}`, 'error');
+            } finally {
+              refreshBtn.disabled = false;
+            }
+          });
+        }
+
+        // Line count preset buttons
+        document.querySelectorAll('[data-lines]').forEach(btn => {
+          btn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            const lines = parseInt(btn.getAttribute('data-lines') || '200', 10);
+            const input = document.getElementById('logsLines');
+            
+            if (input) {
+              input.value = String(Number.isFinite(lines) ? lines : 200);
+            }
+
+            btn.disabled = true;
+            
+            try {
+              await refresh.logs();
+            } catch (err) {
+              toast.show(`Failed to refresh logs: ${err.message}`, 'error');
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+
+        // Log filter buttons
+        document.querySelectorAll('[data-log-filter]').forEach(btn => {
+          btn.addEventListener('click', (evt) => {
+            evt.preventDefault();
+            
+            state.logFilter = btn.getAttribute('data-log-filter') || 'all';
+            
+            document.querySelectorAll('[data-log-filter]').forEach(b => {
+              b.classList.remove('active');
+            });
+            
+            btn.classList.add('active');
+            ui.applyLogFilter();
+          });
+        });
+
+        // Worker log filter buttons
+        document.getElementById('workerLogFilters')?.addEventListener('click', (evt) => {
+          const btn = evt.target.closest('button[data-worker-log-filter]');
+          if (!btn) return;
+          evt.preventDefault();
+          state.logWorkerFilter = btn.getAttribute('data-worker-log-filter') || 'all';
+          document.querySelectorAll('[data-worker-log-filter]').forEach((b) => {
+            const isActive = b === btn;
+            b.classList.toggle('active', isActive);
+            b.classList.toggle('btn-light', isActive);
+            b.classList.toggle('btn-outline-light', !isActive);
+          });
+          ui.applyLogFilter();
+        });
+      },
+
+      bindConfigControls() {
+        const reloadBtn = document.getElementById('reloadConfig');
+        const saveBtn = document.getElementById('saveConfig');
+
+        if (reloadBtn) {
+          reloadBtn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            reloadBtn.disabled = true;
+            
+            try {
+              await refresh.config();
+              toast.show('Configuration reloaded', 'success');
+            } catch (err) {
+              toast.show(`Failed to reload config: ${err.message}`, 'error');
+            } finally {
+              reloadBtn.disabled = false;
+            }
+          });
+        }
+
+        if (saveBtn) {
+          saveBtn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            saveBtn.disabled = true;
+            
+            try {
+              await actions.saveConfig();
+            } catch (err) {
+              console.error('Save config failed:', err);
+            } finally {
+              saveBtn.disabled = false;
+            }
+          });
+        }
+      },
+
+      bindRefreshButton() {
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) {
+          refreshBtn.addEventListener('click', async (evt) => {
+            evt.preventDefault();
+            
+            refreshBtn.disabled = true;
+            
+            try {
+              await refresh.all();
+              toast.show('Dashboard refreshed', 'success');
+            } catch (err) {
+              console.error('Manual refresh failed:', err);
+            } finally {
+              refreshBtn.disabled = false;
+            }
+          });
+        }
+      },
+
+      bindAll() {
+        this.bindCommandButtons();
+        this.bindWorkerControls();
+        this.bindApiControls();
+        this.bindLogControls();
+        this.bindConfigControls();
+        this.bindRefreshButton();
+
+        // Prevent form submissions
+        document.addEventListener('submit', (evt) => evt.preventDefault());
+      }
+    };
+
+    // ===== Initialization =====
+    const app = {
+      initApiBase() {
+        const qs = new URLSearchParams(window.location.search);
+        const fromQuery = utils.normalizeApiBase(qs.get('api') || '');
+        
+        let stored = '';
+        try {
+          stored = localStorage.getItem('sunspots_api_base') || '';
+        } catch (err) {
+          console.warn('Failed to read from localStorage:', err);
+        }
+        
+        const fromStorage = utils.normalizeApiBase(stored);
+        
+        // Auto-detect Live Server
+        const liveServerDefault = window.location.port === '5500' 
+          ? `${window.location.protocol}//${window.location.hostname}:8080` 
+          : '';
+
+        state.apiBase = fromQuery || fromStorage || liveServerDefault || '';
+
+        if (fromQuery) {
+          try {
+            localStorage.setItem('sunspots_api_base', fromQuery);
+          } catch (err) {
+            console.warn('Failed to save API base to localStorage:', err);
+          }
+        }
+
+        const input = document.getElementById('apiBaseInput');
+        if (input) {
+          input.value = state.apiBase;
+        }
+
+        ui.renderApiCurrent();
+      },
+
+      async init() {
+        try {
+          console.log('Initializing Sunspots Control Dashboard...');
+
+          this.initApiBase();
+          events.bindAll();
+
+          // Initial data load
+          await refresh.all();
+          
+          // Load config
+          try {
+            await refresh.config();
+          } catch (err) {
+            console.warn('Failed to load initial config:', err);
+            toast.show('Config load failed - check API connection', 'warn');
+          }
+
+          // Setup auto-refresh
+          actions.setupAutoRefresh();
+
+          console.log('Sunspots Control Dashboard initialized successfully');
+        } catch (err) {
+          console.error('Dashboard initialization failed:', err);
+          
+          const badge = document.getElementById('daemonHealth');
+          if (badge) {
+            badge.className = 'badge text-bg-danger';
+            badge.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Init error: ${err.message}`;
+          }
+
+          toast.show(`Initialization failed: ${err.message}`, 'error');
+        }
+      }
+    };
+
+    // Start the application when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => app.init());
+    } else {
+      app.init();
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (state.autoTimer) {
+        clearInterval(state.autoTimer);
+      }
+    });
+  </script>
+</body>
+</html>
