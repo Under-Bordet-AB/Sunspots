@@ -9,82 +9,25 @@
 #ifndef DAEMON_H
 #define DAEMON_H
 
-/*
- * DAEMONIZE() - Detach process from terminal and run as daemon
- *
- * This macro performs the double-fork technique to properly daemonize a process:
- * 1. First fork() - parent exits, child continues in background
- * 2. setsid() - child becomes session leader, detaches from controlling terminal
- * 3. Second fork() - ensures process can never reacquire a controlling terminal
- * 4. Cleanup - set umask, chdir to /, redirect stdio to /dev/null
- *
- * NOTE: Wrapped in do-while(0) to ensure macro behaves as a single statement.
- * This prevents bugs when used in if/else chains or other control flow contexts.
- * Example of the problem without do-while(0):
- *
- *   if (condition)
- *       DAEMONIZE();  // Multiple statements without braces
- *   else
- *       other_code(); // Would bind to wrong 'if', causing compile error
- *
- * The do-while(0) forces the macro to be a single compound statement that
- * requires a semicolon, making it behave like a function call.
- */
+
 #define DAEMONIZE() \
 do { \
-    /* THE DAEMON DETACHMENT RITUAL */ \
-    /* Step 1: First fork to get our child to run in the background */ \
     pid_t init_pid = fork(); \
-    if (init_pid < 0) \
-    { \
-        perror(" !! 1st fork failed"); \
-        exit(EXIT_FAILURE); \
-    } \
-    if (init_pid > 0) \
-    { \
-        printf(" >> Daemon is now running in the background.\n"); \
-        exit(EXIT_SUCCESS); \
-    } \
-    /* Step 2: We are now the first child. Become session leader, closing the shell won't kill us now */ \
-    else \
-    { \
-        if (setsid() < 0) \
-        { \
-            perror(" !! setsid failed"); \
-            exit(EXIT_FAILURE); \
-        } \
-        pid_t second_pid = fork(); \
-        if (second_pid < 0) \
-        { \
-            perror(" !! 2th fork failed"); \
-            exit(EXIT_FAILURE); \
-        } \
-        else if (second_pid > 0) \
-        { \
-            /* Step 3: Our child is not a session leader and can not be re-acquired by a terminal. */ \
-            exit(EXIT_SUCCESS); \
-        } \
-        /* Step 4: Send the daemon into the void */ \
-        else \
-        { \
-            printf(" >> Daemon cannot be re-aqcuired by terminal.\n" \
+    if (init_pid < 0) { perror(" !! 1st fork failed"); exit(EXIT_FAILURE); } \
+    if (init_pid > 0) { printf(" >> Daemon is now running in the background.\n"); exit(EXIT_SUCCESS);} \
+    else { if (setsid() < 0) { perror(" !! setsid failed"); exit(EXIT_FAILURE); } \
+    pid_t second_pid = fork(); \
+    if (second_pid < 0) { perror(" !! 2th fork failed"); exit(EXIT_FAILURE); } \
+    else if (second_pid > 0) { exit(EXIT_SUCCESS); } \
+    else {  printf(" >> Daemon cannot be re-aqcuired by terminal.\n" \
                    " >> Daemon is now entering the dark and empty void.\n" \
                    " !! USE 'kill -SIGINT %i' TO KILL IT!\n", getpid()); \
-            umask(0);                       /* Daemon has many rights */ \
-            if (chdir("/") != 0)            /* Change wd to root */ \
-            { \
-                perror(" !! chdir failed"); \
-                exit(EXIT_FAILURE); \
-            } \
-            close(STDIN_FILENO); \
-            close(STDOUT_FILENO); \
-            close(STDERR_FILENO); \
-            int scream_into_the_void = open("/dev/null", O_RDWR); \
-            dup2(scream_into_the_void, STDIN_FILENO); \
-            dup2(scream_into_the_void, STDOUT_FILENO); \
-            dup2(scream_into_the_void, STDERR_FILENO); \
-        } \
-    } \
+    umask(0); \
+    if (chdir("/") != 0) { exit(EXIT_FAILURE); } \
+    close(STDIN_FILENO); close(STDOUT_FILENO); close(STDERR_FILENO); \
+    int scream_into_the_void = open("/dev/null", O_RDWR); \
+    dup2(scream_into_the_void, STDIN_FILENO); dup2(scream_into_the_void, STDOUT_FILENO); \
+    dup2(scream_into_the_void, STDERR_FILENO);} } \
 } while (0)
 
 #include "../../src/libs/json/cJSON.h"
@@ -101,7 +44,6 @@ do { \
 #include <limits.h>
 #include <libgen.h>
 #include <sys/file.h>
-#include <sys/syslog.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -112,72 +54,52 @@ do { \
 
 #define MAX_PATH 512
 #define MAX_EVENTS 10
-#define MAX_CHILDREN 4
 #define HEALTH_CHECKUP_INTERVAL 5
+/** acts as default for heartbeats */
 #define HEARTBEAT_SPEED 2
-
-/** * @brief Real-Time signal (SIGRTMIN) used for heartbeats.
- * Real-time signals are queued by the kernel, preventing lost pulses.
- */
+#define DAY_IN_SEC 86400
+/** acts as default for rel-time */
+#define ONE_MINUTE 60
 #define HEARTBEAT_SIG SIGRTMIN
 
-/**
- * @struct watch_entry
- * @brief The "Medical Chart" for a monitored process.
- */
+typedef enum{
+	MODE_HEARTBEAT = 0,
+	MODE_RELTIME,
+	MODE_ABSTIME
+} module_timer_mode_t;
+
 typedef struct watch_entry
 {
-    pid_t pid;                      /**< The OS-assigned Process ID. */
-	const char* name;               /**< Human-readable label for logs. */
-    const char* path;               /**< Full path to the worker binary. */
-    int heartbeat_speed;            /**< Expected pulse frequency. */
-	const char* config;
-    volatile sig_atomic_t alive;    /**< 1 if a pulse was received, 0 otherwise. */
+	/** Module specific */
+    pid_t pid;                      /* PID of process */
+	const char* name;               /* Name for logs etc */
+    const char* path;               /* Binary path  */
+	const char* config;             /* JSON config blob */
+	/** Timer specific **/
+	module_timer_mode_t timertype;  /* Enum describing type */
+	char *abs_target_time;    /* Absolute target */
+	long relative_target_time;      /* Time interval to next run */
+	int timer_fd;               	/* Timer filedescriptor  */
+	/** Heartbeat specific **/
+	int heartbeat_speed;            /* Heartbeat signal speed */
+    volatile sig_atomic_t alive;    /* Flag for alive or dead */			
 } watch_entry_t;
 
-/** @brief Shared table of all monitored child processes. */
+
 extern watch_entry_t *watch_table;
-
-/** @brief The number of slots currently occupied in the watch_table. */
 extern int g_active_proc;
-
-/** @brief Global flag to control the daemon's lifecycle. */
 extern volatile sig_atomic_t g_daemon_running;
-
 extern char g_prj_root[];
 
-/**
- * @brief Signal handler that identifies a worker pulse via its PID.
- * @param sig The signal number (HEARTBEAT_SIG).
- * @param info Kernel-provided info containing the sender's PID.
- * @param context Unused signal context.
- */
+void daemon_signal_setup();
 void daemon_heartbeat_handler(int sig, siginfo_t *info, void *context);
-
-/**
- * @brief Standard termination handler to trigger a graceful shutdown.
- * @param sig Signal received (SIGTERM or SIGINT).
- */
+void deamon_sigchld_handler(int sig);
 void daemon_shutdown_handler(int sig);
 
-/**
- * @brief Sets up the signal infrastructure for the supervisor.
- */
-void daemon_signal_setup();
-
-/**
- * @brief Spawns a new worker by forking and executing a separate binary.
- * @param index The slot in the watch_table to occupy.
- * @param path Path to the executable.
- * @param name Friendly name for the process.
- * @param speed Frequency of heartbeats expected from this child.
- */
-void daemon_spawn_process(int idx, const char *path, const char *name, int speed, const char *wd);
-
-/* Needs desc */
+void daemon_reload_config(const char *full_path, const char *prj_path, int epoll_fd);
+void daemon_module_timer_config(watch_entry_t *module, int epoll_fd);
 char *daemon_read_conf(const char *filepath);
-void daemon_reload_config(const char *full_path, const char *prj_path);
-void daemon_set_env(char **config);
+void daemon_spawn_process(int idx, const char *prj_path);
 void daemon_perform_health_check(const char *prj_path);
 void daemon_resolve_project_root();
 
