@@ -1,10 +1,13 @@
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
+#include <libgen.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <syslog.h>
@@ -29,10 +32,13 @@ api g_apis[MAX_APIS];
 
 pid_t g_parent_pid = 0;
 int g_heartbeat_freq = 0;
+char g_exec_dir[PATH_MAX];
 
 void* heartbeat();
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context);
 int load_apis_from_json(const char* path);
+int resolve_exec_dir(const char* argv0);
+int resolve_api_path(const char* raw_path, char* out, size_t out_size);
 void cleanup(void);
 
 int main(int argc, char* argv[]) {
@@ -58,8 +64,17 @@ int main(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // setup();
-    if (load_apis_from_json("fetch_manager_config.json") < 0) {
+    if (resolve_exec_dir(argv[0]) < 0) {
+        syslog(LOG_ERR, "Fetch Manager - Could not resolve executable directory");
+        exit(EXIT_FAILURE);
+    }
+
+    const char* config_path = getenv("SUNSPOTS_FETCH_MANAGER_CONFIG");
+    if (!config_path || config_path[0] == '\0') {
+        config_path = "config/fetch_manager_config.json";
+    }
+
+    if (load_apis_from_json(config_path) < 0) {
         syslog(LOG_ERR, "Fetch Manager - Couldn't load config file.");
         exit(EXIT_FAILURE);
     }
@@ -160,7 +175,12 @@ int load_apis_from_json(const char* path) {
         }
 
         g_apis[out].name = strdup(name->valuestring);
-        g_apis[out].path = strdup(bin->valuestring);
+        char full_path[PATH_MAX];
+        if (resolve_api_path(bin->valuestring, full_path, sizeof(full_path)) < 0) {
+            syslog(LOG_WARNING, "Fetch Manager - Invalid or missing API path: %s", bin->valuestring);
+            continue;
+        }
+        g_apis[out].path = strdup(full_path);
         g_apis[out].interval = interval->valueint;
         g_apis[out].pid = 0;
         g_apis[out].last_heartbeat = time(NULL);
@@ -172,6 +192,48 @@ int load_apis_from_json(const char* path) {
 
     cJSON_Delete(root);
 
+    return 0;
+}
+
+int resolve_exec_dir(const char* argv0) {
+    char resolved[PATH_MAX];
+    if (!realpath(argv0, resolved)) {
+        return -1;
+    }
+
+    char dir_buf[PATH_MAX];
+    strncpy(dir_buf, resolved, sizeof(dir_buf) - 1);
+    dir_buf[sizeof(dir_buf) - 1] = '\0';
+
+    char* dir = dirname(dir_buf);
+    if (!dir) {
+        return -1;
+    }
+
+    strncpy(g_exec_dir, dir, sizeof(g_exec_dir) - 1);
+    g_exec_dir[sizeof(g_exec_dir) - 1] = '\0';
+    return 0;
+}
+
+int resolve_api_path(const char* raw_path, char* out, size_t out_size) {
+    if (!raw_path || !out || out_size == 0) {
+        return -1;
+    }
+
+    char candidate[PATH_MAX];
+    if (raw_path[0] == '/') {
+        snprintf(candidate, sizeof(candidate), "%s", raw_path);
+    } else {
+        snprintf(candidate, sizeof(candidate), "%s/%s", g_exec_dir, raw_path);
+    }
+
+    char* resolved = realpath(candidate, NULL);
+    if (!resolved) {
+        return -1;
+    }
+
+    snprintf(out, out_size, "%s", resolved);
+    free(resolved);
     return 0;
 }
 
@@ -189,6 +251,8 @@ void* heartbeat() {
 }
 
 void handle_child_heartbeat(int sig, siginfo_t* info, void* context) {
+    (void)sig;
+    (void)context;
     for (int i = 0; i < g_api_count; i++) {
         if (info->si_pid == g_apis[i].pid) {
             g_apis[i].last_heartbeat = time(NULL);

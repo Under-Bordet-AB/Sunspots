@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#define _XOPEN_SOURCE 700
 #include <time.h>
 #include "unit_utils.h"
 
