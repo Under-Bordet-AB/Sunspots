@@ -12,6 +12,20 @@
             "heartbeat_interval": 2,
             "source_url": "https://api.sunspots.io/v1/data",
             "retry_limit": 3
+        },
+		{
+            "name": "Frontend",
+            "bin_path": "./src/frontend/frontend",
+            "heartbeat_interval": 2,
+            "source_url": "https://api.sunspots.io/v1/data",
+            "retry_limit": 3
+        },
+		{
+            "name": "Compute",
+            "bin_path": "./src/compute/compute_manager",
+            "heartbeat_interval": 2,
+            "source_url": "https://api.sunspots.io/v1/data",
+            "retry_limit": 3
         }
     ]
 }
