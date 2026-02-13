@@ -63,11 +63,7 @@ static char* read_file_to_string(const char* path) {
     if (len < 0 || fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
     char* buf = malloc((size_t)len + 1);
     if (!buf) { fclose(f); return NULL; }
-    if (fread(buf, 1, (size_t)len, f) != (size_t)len) {
-        fclose(f);
-        free(buf);
-        return NULL;
-    }
+    if (fread(buf, 1, (size_t)len, f) != (size_t)len) { fclose(f); free(buf); }
     buf[len] = '\0';
     fclose(f);
     return buf;

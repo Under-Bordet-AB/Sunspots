@@ -84,50 +84,12 @@ char* af_read(size_t* out_size);
 // --- Implementation ---
 #if defined(ATOMIC_FILE_RW_IMPLEMENTATION)
 
-static int af_ensure_parent_dir(const char* filename) {
-    if (!filename) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    const char* slash = strrchr(filename, '/');
-    if (!slash) {
-        return 0;
-    }
-
-    size_t dir_len = (size_t)(slash - filename);
-    if (dir_len == 0) {
-        return 0;
-    }
-
-    char* dir = (char*)malloc(dir_len + 1);
-    if (!dir) {
-        errno = ENOMEM;
-        return -1;
-    }
-    memcpy(dir, filename, dir_len);
-    dir[dir_len] = '\0';
-
-    if (mkdir(dir, 0775) == -1 && errno != EEXIST) {
-        int saved = errno;
-        free(dir);
-        errno = saved;
-        return -1;
-    }
-
-    free(dir);
-    return 0;
-}
-
 int af_save(const char* source, const char* type, const char* data) {
     if (!source || !type || !data) {
         errno = EINVAL;
         return -1;
     }
     const char* filename = ATOMIC_FILE_DEFAULT_PATH;
-    if (af_ensure_parent_dir(filename) < 0) {
-        return -1;
-    }
 
     // Format using cJSON
     cJSON* root = cJSON_CreateObject();

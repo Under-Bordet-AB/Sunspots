@@ -38,7 +38,6 @@ make test-unit
 make test-integration
 make test-component COMPONENT=sample
 make bench
-make smoke
 make valgrind
 make run COMPONENT=sunspots_frontend
 make run COMPONENT=sunspots_daemon ARGS="daemon"
@@ -77,5 +76,4 @@ Current test/benchmark files are intentionally named as placeholders:
 ## Documentation
 
 - `docs/manual/build_and_quality_book.md`
-- `docs/manual/startup_issues_and_fixes.md`
 - Existing component docs remain under `docs/manual/`

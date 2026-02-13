@@ -16,7 +16,7 @@ CMAKE_FLAGS := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
-.PHONY: configure build rebuild test test-unit test-integration test-component run bench smoke valgrind tidy clean deepclean
+.PHONY: configure build rebuild test test-unit test-integration test-component run bench valgrind tidy clean deepclean
 
 configure:
 	@$(CMAKE) $(CMAKE_FLAGS)
@@ -56,34 +56,6 @@ bench: build
 		echo "bench: benchmark executable not found (build first)"; \
 		exit 1; \
 	fi
-
-smoke: build
-	@bash -eu -o pipefail -c '\
-		manager_path="$(BUILD_DIR)/src/fetch/sunspots_fetch_manager"; \
-		api_openmeteo_path="$(BUILD_DIR)/src/fetch/apis/sunspots_fetch_openmeteo"; \
-		api_elpris_path="$(BUILD_DIR)/src/fetch/apis/sunspots_fetch_elprisjustnu"; \
-		if [ ! -x "$$manager_path" ]; then echo "smoke: missing $$manager_path"; exit 1; fi; \
-		if [ ! -x "$$api_openmeteo_path" ]; then echo "smoke: missing $$api_openmeteo_path"; exit 1; fi; \
-		if [ ! -x "$$api_elpris_path" ]; then echo "smoke: missing $$api_elpris_path"; exit 1; fi; \
-		mkdir -p .db; \
-		rm -f .db/database.jsonl; \
-		cleanup() { \
-			if [ -n "$${manager_pid:-}" ] && kill -0 "$$manager_pid" 2>/dev/null; then \
-				for cpid in $$(ps -o pid= --ppid "$$manager_pid" 2>/dev/null); do kill "$$cpid" 2>/dev/null || true; done; \
-				kill "$$manager_pid" 2>/dev/null || true; \
-			fi; \
-			if [ -n "$${parent_pid:-}" ] && kill -0 "$$parent_pid" 2>/dev/null; then kill "$$parent_pid" 2>/dev/null || true; fi; \
-		}; \
-		trap cleanup EXIT; \
-		bash -c '\''trap "" 34; sleep 30'\'' & parent_pid=$$!; \
-		"$$manager_path" "$$parent_pid" 2 >/dev/null 2>&1 & manager_pid=$$!; \
-		sleep 4; \
-		if ! kill -0 "$$manager_pid" 2>/dev/null; then echo "smoke: fetch manager died at startup"; exit 1; fi; \
-		if ! pgrep -f "$$api_openmeteo_path" >/dev/null; then echo "smoke: openmeteo worker not running"; exit 1; fi; \
-		if ! pgrep -f "$$api_elpris_path" >/dev/null; then echo "smoke: elpris worker not running"; exit 1; fi; \
-		if [ ! -s .db/database.jsonl ]; then echo "smoke: no database writes detected"; exit 1; fi; \
-		echo "smoke: fetch manager + API workers started and wrote data"; \
-	'
 
 valgrind:
 	@$(CMAKE) -G "$(GENERATOR)" -S . -B "$(VALGRIND_BUILD_DIR)" \

@@ -299,14 +299,10 @@ void daemon_reload_config(const char *full_path, const char *prj_path, int epoll
 			exit(EXIT_FAILURE);
 		}
 		char *resolved_path = realpath(raw_path, NULL);
-		if (!resolved_path)
+		if (resolved_path)
 		{
-			syslog(LOG_ERR, "Module %s path could not be resolved: %s", n->valuestring, raw_path);
-			free((void*)new_table[i].name);
-			new_table[i].name = NULL;
-			continue;
+			new_table[i].path = resolved_path;
 		}
-		new_table[i].path = resolved_path;
 		new_table[i].config = cJSON_PrintUnformatted(module);
 		new_table[i].timer_fd = -1;
 
@@ -606,58 +602,31 @@ char *daemon_read_conf(const char *filepath)
 
 void daemon_resolve_project_root()
 {
+	/* readlink()  places  the  contents of the symbolic link pathname in the buffer
+	 * /proc/self/exe: A special symlink in Linux that points to the actual executable
+	 * file of the current process.
+	 */
 	char exe_path[PATH_MAX];
-	ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+	ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path));
 	if (len == -1)
 	{
 		perror(" !! FATAL: Cannot read /proc/self/exe");
 		exit(EXIT_FAILURE);
 	}
 	exe_path[len] = '\0';
-
-	char current[PATH_MAX];
-	char dir_buf[PATH_MAX];
-	snprintf(dir_buf, sizeof(dir_buf), "%s", exe_path);
-	snprintf(current, sizeof(current), "%s", dirname(dir_buf));
-
-	while (1)
+	/* add directory of binary */
+	char *bin_dir = dirname(exe_path);
+	char path_to_root[PATH_MAX];
+	snprintf(path_to_root, sizeof(path_to_root), "%s/../..", bin_dir);
+	/* realpath() expands all symbolic links and resolves references to /./, /../
+	 * and extra '/' characters in the null-terminated string named by path to produce
+	 * a canonicalized absolute pathname.
+	 */
+	if (realpath(path_to_root, g_prj_root) == NULL)
 	{
-		char candidate[PATH_MAX];
-		if (snprintf(candidate, sizeof(candidate), "%s/config/sunspots.json", current) < 0)
-		{
-			break;
-		}
-		if (access(candidate, R_OK) == 0)
-		{
-			if (realpath(current, g_prj_root) != NULL)
-			{
-				return;
-			}
-			break;
-		}
-
-		if (strcmp(current, "/") == 0)
-		{
-			break;
-		}
-
-		char* last_slash = strrchr(current, '/');
-		if (!last_slash)
-		{
-			break;
-		}
-		if (last_slash == current)
-		{
-			current[1] = '\0';
-		}
-		else
-		{
-			*last_slash = '\0';
-		}
+		fprintf(stderr," !! FATAL: Could not resolve project root from %s: %s\n",
+				path_to_root, strerror(errno));
 	}
-
-	fprintf(stderr, " !! FATAL: Could not locate project root containing config/sunspots.json\n");
-	exit(EXIT_FAILURE);
 }
 
 /** Signal handling */
