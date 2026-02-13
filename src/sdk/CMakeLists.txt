@@ -4,6 +4,10 @@ add_library(sunspots_sdk STATIC
   internal/db/ss_db_internal.c
   internal/log/ss_log_internal.c
 )
+target_link_libraries(sunspots_sdk
+  PUBLIC
+    sunspots_cjson
+)
 target_include_directories(sunspots_sdk
   PUBLIC
     ${CMAKE_SOURCE_DIR}/src

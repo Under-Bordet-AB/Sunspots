@@ -1,5 +1,6 @@
 #include "sdk/ss_sdk.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "sdk/internal/db/ss_db_internal.h"
@@ -61,6 +62,10 @@ static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *rec)
     }
 
     if (rec->value_type == SS_SDK_VALUE_STR && rec->value.str == NULL) {
+        return SS_SDK_ERR_VALIDATION;
+    }
+    /* BUGFIX(#29): reject NaN/Inf before persistence so DB data stays canonical. */
+    if (rec->value_type == SS_SDK_VALUE_F64 && !isfinite(rec->value.f64)) {
         return SS_SDK_ERR_VALIDATION;
     }
 

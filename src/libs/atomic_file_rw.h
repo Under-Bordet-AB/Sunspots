@@ -84,6 +84,64 @@ char* af_read(size_t* out_size);
 // --- Implementation ---
 #if defined(ATOMIC_FILE_RW_IMPLEMENTATION)
 
+/* BUGFIX(#12): create parent directories before opening default DB path. */
+static int af_ensure_parent_dirs(const char* path) {
+    char* tmp = NULL;
+    char* p = NULL;
+
+    if (!path) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    tmp = strdup(path);
+    if (!tmp) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    p = tmp;
+    while (*p != '\0') {
+        if (*p == '/') {
+            *p = '\0';
+            if (tmp[0] != '\0' && mkdir(tmp, 0775) != 0 && errno != EEXIST) {
+                int saved_errno = errno;
+                free(tmp);
+                errno = saved_errno;
+                return -1;
+            }
+            *p = '/';
+        }
+        ++p;
+    }
+
+    free(tmp);
+    return 0;
+}
+
+/* BUGFIX(#12): handle partial writes until all bytes are persisted. */
+static int af_write_all(int fd, const char* data, size_t len) {
+    size_t off = 0;
+
+    while (off < len) {
+        ssize_t nw = write(fd, data + off, len - off);
+        if (nw < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        /* BUGFIX(#12): treat zero-byte write as failure to avoid false success. */
+        if (nw == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)nw;
+    }
+
+    return 0;
+}
+
 int af_save(const char* source, const char* type, const char* data) {
     if (!source || !type || !data) {
         errno = EINVAL;
@@ -121,6 +179,12 @@ int af_save(const char* source, const char* type, const char* data) {
     final_str[len + 1] = '\0';
     free(json_str);
 
+    /* BUGFIX(#12): avoid failing writes when `.db/` does not already exist. */
+    if (af_ensure_parent_dirs(filename) == -1) {
+        free(final_str);
+        return -1;
+    }
+
     // 1. Open with O_APPEND
     int fd = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (fd == -1) {
@@ -138,13 +202,14 @@ int af_save(const char* source, const char* type, const char* data) {
     }
 
     // 3. Write Data
-    ssize_t written = write(fd, final_str, len + 1);
+    /* BUGFIX(#12): avoid one-shot write assumptions on constrained I/O. */
+    const int write_rc = af_write_all(fd, final_str, len + 1);
 
     // 4. Close (Releases Lock)
     close(fd);
     free(final_str);
 
-    if (written == -1)
+    if (write_rc == -1)
         return -1;
     return 0;
 }
@@ -170,8 +235,6 @@ char* af_read(size_t* out_size) {
         return NULL;
     }
     size_t size = st.st_size;
-    if (out_size)
-        *out_size = size;
 
     if (size == 0) {
         close(fd);
@@ -205,6 +268,8 @@ char* af_read(size_t* out_size) {
         total_read += r;
     }
     buffer[total_read] = '\0';
+    if (out_size)
+        *out_size = (size_t)total_read;
 
     // 6. Close (Unlocks)
     close(fd);

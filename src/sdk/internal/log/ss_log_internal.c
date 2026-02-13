@@ -1,8 +1,8 @@
 #include "sdk/internal/log/ss_log_internal.h"
 
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +12,19 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "libs/json/cJSON.h"
+
+static int ss_checked_add(size_t *current_size, size_t add)
+{
+    /* BUGFIX(#34): explicit overflow guard in escape buffer sizing. */
+    if (*current_size > SIZE_MAX - add) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    *current_size += add;
+    return 0;
+}
 
 static char *ss_strdup_local(const char *s)
 {
@@ -86,6 +99,11 @@ static int ss_write_all(int fd, const char *buf, size_t len)
             }
             return -1;
         }
+        /* BUGFIX(#24): zero-byte write is treated as hard I/O failure. */
+        if (nw == 0) {
+            errno = EIO;
+            return -1;
+        }
         off += (size_t)nw;
     }
 
@@ -105,13 +123,19 @@ static char *ss_escape_text(const char *s)
 
     for (i = 0; s[i] != '\0'; ++i) {
         if (s[i] == '"' || s[i] == '\\' || s[i] == '\n' || s[i] == '\t') {
-            n += 2;
-        } else {
-            n += 1;
+            if (ss_checked_add(&n, 2U) != 0) {
+                return NULL;
+            }
+        } else if (ss_checked_add(&n, 1U) != 0) {
+            return NULL;
         }
     }
 
-    out = (char *)malloc(n + 1U);
+    if (ss_checked_add(&n, 1U) != 0) {
+        return NULL;
+    }
+
+    out = (char *)malloc(n);
     if (out == NULL) {
         return NULL;
     }
@@ -140,58 +164,46 @@ static char *ss_escape_text(const char *s)
 
 static int ss_extract_json_log_path(const char *json, char *out_path, size_t out_sz)
 {
-    const char *key = "\"log_path\"";
-    const char *p;
-    const char *q;
-    size_t n;
+    cJSON *root = NULL;
+    cJSON *item = NULL;
+    const char *path = NULL;
+    size_t n = 0;
 
     if (json == NULL || out_path == NULL || out_sz == 0) {
         return -1;
     }
 
-    /* Lightweight extraction from SUNSPOTS_CONFIG payload without JSON dependency. */
-    p = strstr(json, key);
-    if (p == NULL) {
+    /* BUGFIX(#39/#40): parse config with cJSON; avoid naive substring matching. */
+    root = cJSON_Parse(json);
+    if (root == NULL) {
         return -1;
     }
 
-    p += strlen(key);
-    while (*p != '\0' && *p != ':') {
-        ++p;
+    item = cJSON_GetObjectItemCaseSensitive(root, "log_path");
+    if (item == NULL) {
+        out_path[0] = '\0';
+        cJSON_Delete(root);
+        return 0;
     }
-    if (*p != ':') {
+    if (!cJSON_IsString(item) || item->valuestring == NULL) {
+        cJSON_Delete(root);
         return -1;
     }
-    ++p;
-
-    while (*p != '\0' && isspace((unsigned char)*p)) {
-        ++p;
+    path = item->valuestring;
+    if (path[0] == '\0') {
+        out_path[0] = '\0';
+        cJSON_Delete(root);
+        return 0;
     }
-
-    if (*p != '"') {
-        return -1;
-    }
-    ++p;
-
-    q = p;
-    while (*q != '\0') {
-        if (*q == '"' && q > p && q[-1] != '\\') {
-            break;
-        }
-        ++q;
-    }
-
-    if (*q != '"') {
-        return -1;
-    }
-
-    n = (size_t)(q - p);
+    n = strlen(path);
     if (n >= out_sz) {
-        n = out_sz - 1;
+        cJSON_Delete(root);
+        return -1;
     }
-
-    memcpy(out_path, p, n);
+    memcpy(out_path, path, n);
     out_path[n] = '\0';
+
+    cJSON_Delete(root);
     return 0;
 }
 
@@ -205,8 +217,8 @@ static int ss_get_log_path(char *out_path, size_t out_sz)
     }
 
     if (ss_extract_json_log_path(cfg, out_path, out_sz) != 0) {
-        out_path[0] = '\0';
-        return 0;
+        /* BUGFIX(#30): malformed logging config is an explicit error, not silent no-op. */
+        return -1;
     }
 
     return 0;
@@ -245,6 +257,12 @@ static ss_sdk_status ss_log_write_line(const char *line)
         close(fd);
         return SS_SDK_ERR_INTERNAL;
     }
+    /* BUGFIX(#35): durable log write acknowledgement by default. */
+    if (fsync(fd) != 0) {
+        flock(fd, LOCK_UN);
+        close(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
 
     flock(fd, LOCK_UN);
     close(fd);
@@ -263,7 +281,7 @@ static ss_sdk_status ss_log_write_common(
     char ts[32];
     time_t now;
     struct tm tmv;
-    struct tm *tmp_tm;
+    struct tm tmv_buf;
     const char *level_s;
     char *event_e;
     char *msg_e;
@@ -285,11 +303,11 @@ static ss_sdk_status ss_log_write_common(
     }
 
     now = time(NULL);
-    tmp_tm = gmtime(&now);
-    if (tmp_tm == NULL) {
+    /* BUGFIX(#32): gmtime_r avoids races on shared libc time buffers. */
+    if (gmtime_r(&now, &tmv_buf) == NULL) {
         return SS_SDK_ERR_INTERNAL;
     }
-    tmv = *tmp_tm;
+    tmv = tmv_buf;
     if (strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tmv) == 0) {
         return SS_SDK_ERR_INTERNAL;
     }

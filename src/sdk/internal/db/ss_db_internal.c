@@ -2,7 +2,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
+#include <locale.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,6 +49,17 @@ static const char *ss_db_path(void)
         return override;
     }
     return SS_SDK_DB_DEFAULT_PATH;
+}
+
+static int ss_checked_add(size_t *current_size, size_t add)
+{
+    /* BUGFIX(#34): explicit overflow guard in escape/serialization sizing. */
+    if (*current_size > SIZE_MAX - add) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    *current_size += add;
+    return 0;
 }
 
 static int ss_ensure_parent_dirs(const char *path)
@@ -137,6 +150,11 @@ static int ss_write_all(int fd, const char *buf, size_t len)
             }
             return -1;
         }
+        /* BUGFIX(#24): zero-byte write is treated as hard I/O failure. */
+        if (nw == 0) {
+            errno = EIO;
+            return -1;
+        }
         off += (size_t)nw;
     }
 
@@ -157,13 +175,19 @@ static char *ss_escape(const char *s)
     /* On-disk format is tab-separated; escape separators/control chars. */
     for (i = 0; s[i] != '\0'; ++i) {
         if (s[i] == '\\' || s[i] == '\t' || s[i] == '\n') {
-            n += 2;
-        } else {
-            n += 1;
+            if (ss_checked_add(&n, 2U) != 0) {
+                return NULL;
+            }
+        } else if (ss_checked_add(&n, 1U) != 0) {
+            return NULL;
         }
     }
 
-    out = (char *)malloc(n + 1U);
+    if (ss_checked_add(&n, 1U) != 0) {
+        return NULL;
+    }
+
+    out = (char *)malloc(n);
     if (out == NULL) {
         return NULL;
     }
@@ -293,16 +317,77 @@ static int ss_parse_int(const char *s, int *out)
 
 static int ss_parse_double(const char *s, double *out)
 {
+    locale_t old_loc;
+    locale_t c_loc;
     char *end;
     double v;
+    int saved_errno;
+
+    /* BUGFIX(#38): parse legacy decimal floats in a forced C locale. */
+    c_loc = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    if (c_loc == (locale_t)0) {
+        return -1;
+    }
+    old_loc = uselocale(c_loc);
 
     errno = 0;
     v = strtod(s, &end);
-    if (errno != 0 || end == s || *end != '\0') {
+    saved_errno = errno;
+
+    (void)uselocale(old_loc);
+    freelocale(c_loc);
+
+    if (saved_errno != 0 || end == s || *end != '\0') {
         return -1;
     }
     *out = v;
     return 0;
+}
+
+static bool ss_is_valid_metric(ss_metric_id metric)
+{
+    return ss_metric_meta_get(metric) != NULL;
+}
+
+static bool ss_is_valid_value_type(ss_sdk_value_type value_type)
+{
+    return value_type == SS_SDK_VALUE_I64 ||
+           value_type == SS_SDK_VALUE_F64 ||
+           value_type == SS_SDK_VALUE_STR ||
+           value_type == SS_SDK_VALUE_BOOL;
+}
+
+static bool ss_is_valid_data_kind(ss_sdk_data_kind data_kind)
+{
+    return data_kind == SS_SDK_DATA_OBSERVATION ||
+           data_kind == SS_SDK_DATA_FORECAST;
+}
+
+static int ss_parse_f64_bits(const char *s, double *out)
+{
+    uint64_t bits;
+    char *end;
+
+    /* BUGFIX(#38): canonical float format is raw IEEE-754 bits in hex. */
+    if (strncmp(s, "0x", 2) != 0 && strncmp(s, "0X", 2) != 0) {
+        return -1;
+    }
+
+    errno = 0;
+    bits = strtoull(s + 2, &end, 16);
+    if (errno != 0 || end == s + 2 || *end != '\0') {
+        return -1;
+    }
+
+    memcpy(out, &bits, sizeof(bits));
+    return 0;
+}
+
+static uint64_t ss_f64_to_bits(double value)
+{
+    uint64_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
 }
 
 static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings)
@@ -327,11 +412,19 @@ static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings)
         return -1;
     }
     out->metric = (ss_metric_id)tmp_int;
+    /* BUGFIX(#33): reject invalid enum values from on-disk corruption. */
+    if (!ss_is_valid_metric(out->metric)) {
+        return -1;
+    }
 
     if (ss_parse_int(fields[1], &tmp_int) != 0) {
         return -1;
     }
     out->value_type = (ss_sdk_value_type)tmp_int;
+    /* BUGFIX(#33): reject invalid enum values from on-disk corruption. */
+    if (!ss_is_valid_value_type(out->value_type)) {
+        return -1;
+    }
 
     if (ss_parse_i64(fields[3], &tmp_i64) != 0) {
         return -1;
@@ -347,6 +440,10 @@ static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings)
         return -1;
     }
     out->data_kind = (ss_sdk_data_kind)tmp_int;
+    /* BUGFIX(#33): reject invalid enum values from on-disk corruption. */
+    if (!ss_is_valid_data_kind(out->data_kind)) {
+        return -1;
+    }
 
     if (ss_parse_i64(fields[10], &tmp_i64) != 0) {
         return -1;
@@ -365,7 +462,9 @@ static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings)
             }
             break;
         case SS_SDK_VALUE_F64:
-            if (ss_parse_double(fields[2], &out->value.f64) != 0) {
+            /* BUGFIX(#38): accept canonical bit format + legacy decimal fallback. */
+            if (ss_parse_f64_bits(fields[2], &out->value.f64) != 0 &&
+                ss_parse_double(fields[2], &out->value.f64) != 0) {
                 return -1;
             }
             break;
@@ -421,12 +520,34 @@ static bool ss_string_equal_nullable(const char *a, const char *b)
 
 static bool ss_record_identity_equal(const ss_sdk_record *a, const ss_sdk_record *b)
 {
-    return a->metric == b->metric &&
-           a->ts_start_utc == b->ts_start_utc &&
-           a->data_kind == b->data_kind &&
-           a->issued_at_utc == b->issued_at_utc &&
-           ss_string_equal_nullable(a->model_id, b->model_id) &&
-           ss_string_equal_nullable(a->source_api, b->source_api);
+    /* BUGFIX(#28): dedupe on full logical identity, not a weak partial key. */
+    if (a->metric != b->metric ||
+        a->value_type != b->value_type ||
+        a->ts_start_utc != b->ts_start_utc ||
+        a->ts_end_utc != b->ts_end_utc ||
+        a->data_kind != b->data_kind ||
+        a->model_run_utc != b->model_run_utc ||
+        a->issued_at_utc != b->issued_at_utc ||
+        !ss_string_equal_nullable(a->source_api, b->source_api) ||
+        !ss_string_equal_nullable(a->source_field, b->source_field) ||
+        !ss_string_equal_nullable(a->source_tz, b->source_tz) ||
+        !ss_string_equal_nullable(a->model_id, b->model_id)) {
+        return false;
+    }
+
+    switch (a->value_type) {
+        case SS_SDK_VALUE_I64:
+            return a->value.i64 == b->value.i64;
+        case SS_SDK_VALUE_F64:
+            /* Compare float payload by bits so -0.0 and +0.0 stay distinct. */
+            return ss_f64_to_bits(a->value.f64) == ss_f64_to_bits(b->value.f64);
+        case SS_SDK_VALUE_BOOL:
+            return a->value.boolean == b->value.boolean;
+        case SS_SDK_VALUE_STR:
+            return ss_string_equal_nullable(a->value.str, b->value.str);
+        default:
+            return false;
+    }
 }
 
 static char *ss_record_to_line(const ss_sdk_record *rec)
@@ -449,7 +570,8 @@ static char *ss_record_to_line(const ss_sdk_record *rec)
             e_value = ss_escape(i64_buf);
             break;
         case SS_SDK_VALUE_F64:
-            snprintf(f64_buf, sizeof(f64_buf), "%.17g", rec->value.f64);
+            /* BUGFIX(#38): write locale-stable float encoding. */
+            snprintf(f64_buf, sizeof(f64_buf), "0x%016" PRIx64, ss_f64_to_bits(rec->value.f64));
             e_value = ss_escape(f64_buf);
             break;
         case SS_SDK_VALUE_BOOL:
@@ -625,6 +747,10 @@ ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record)
         goto done;
     }
     if (ss_write_all(fd, line, strlen(line)) != 0) {
+        goto done;
+    }
+    /* BUGFIX(#35): DB write acknowledgement is durable by default. */
+    if (fsync(fd) != 0) {
         goto done;
     }
 

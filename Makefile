@@ -12,7 +12,7 @@ COMPONENT ?=
 ARGS ?=
 FUZZ_ENGINE ?= libfuzzer
 FUZZ_TIME ?= 60
-FUZZ_TARGETS ?= http_request_fuzzer openmeteo_transform_fuzzer config_args_fuzzer compute_calculator_fuzzer fetch_manager_config_fuzzer
+FUZZ_TARGETS ?= http_request_fuzzer openmeteo_transform_fuzzer config_args_fuzzer compute_calculator_fuzzer fetch_manager_config_fuzzer sdk_db_fuzzer
 FUZZ_CORPUS_DIR ?= fuzz/corpus
 FUZZ_LOG_DIR ?= build/fuzz-logs
 FUZZ_ARTIFACT_DIR ?= build/fuzz-artifacts
@@ -24,7 +24,7 @@ CMAKE_FLAGS := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
-.PHONY: configure build rebuild test test-unit test-integration test-component run bench valgrind tidy fuzz-configure fuzz-build fuzz-run fuzz-all fuzz clean deepclean
+.PHONY: configure build rebuild test test-unit test-integration test-component run bench valgrind tidy fuzz-configure fuzz-build fuzz-run fuzz-all fuzz check-code clean deepclean
 
 configure:
 	@$(CMAKE) $(CMAKE_FLAGS)
@@ -69,12 +69,12 @@ run: build
 	"$$component_bin" $(ARGS)
 
 bench: build
-	@if [ -x "$(BUILD_DIR)/benchmarks/sample_benchmark" ]; then \
-		"$(BUILD_DIR)/benchmarks/sample_benchmark" --benchmark_min_time=0.01 --benchmark_repetitions=1; \
-	else \
+	@if [ ! -x "$(BUILD_DIR)/benchmarks/sample_benchmark" ] || [ ! -x "$(BUILD_DIR)/benchmarks/sdk_db_benchmark" ]; then \
 		echo "bench: benchmark executable not found (build first)"; \
 		exit 1; \
 	fi
+	@"$(BUILD_DIR)/benchmarks/sample_benchmark" --benchmark_min_time=0.01 --benchmark_repetitions=1
+	@"$(BUILD_DIR)/benchmarks/sdk_db_benchmark" --benchmark_min_time=0.01 --benchmark_repetitions=1
 
 valgrind:
 	@$(CMAKE) -G "$(GENERATOR)" -S . -B "$(VALGRIND_BUILD_DIR)" \
@@ -163,6 +163,12 @@ fuzz-all: fuzz-build
 	done
 
 fuzz: fuzz-all
+
+check-code:
+	@python3 scripts/check_code.py \
+		--out scripts/check_code_out.md \
+		--unsafe-rules scripts/unsafe.md \
+		--unsafe-out scripts/check_code_unsafe_out.md
 
 clean:
 	@for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)" "$(FUZZ_BUILD_DIR)" "build/tidy"; do \

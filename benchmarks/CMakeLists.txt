@@ -12,3 +12,14 @@ target_link_libraries(sample_benchmark
 )
 target_compile_features(sample_benchmark PRIVATE cxx_std_11)
 sunspots_apply_target_defaults(sample_benchmark)
+
+add_executable(sdk_db_benchmark
+  sdk_db_benchmark.cpp
+)
+target_link_libraries(sdk_db_benchmark
+  PRIVATE
+    benchmark::benchmark
+    sunspots_sdk
+)
+target_compile_features(sdk_db_benchmark PRIVATE cxx_std_11)
+sunspots_apply_target_defaults(sdk_db_benchmark)

@@ -50,7 +50,8 @@ endif()
 if(SUNSPOTS_BUILD_BENCHMARKS)
   add_custom_target(bench
     COMMAND $<TARGET_FILE:sample_benchmark> --benchmark_min_time=0.01 --benchmark_repetitions=1
-    DEPENDS sample_benchmark
+    COMMAND $<TARGET_FILE:sdk_db_benchmark> --benchmark_min_time=0.01 --benchmark_repetitions=1
+    DEPENDS sample_benchmark sdk_db_benchmark
     USES_TERMINAL
   )
 endif()

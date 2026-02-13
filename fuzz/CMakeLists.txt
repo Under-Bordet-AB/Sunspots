@@ -55,6 +55,12 @@ target_link_libraries(compute_calculator_fuzzer
     sunspots_compute
 )
 
+sunspots_add_fuzzer(sdk_db_fuzzer sdk_db_fuzzer.cpp)
+target_link_libraries(sdk_db_fuzzer
+  PRIVATE
+    sunspots_sdk
+)
+
 add_library(sunspots_fetch_manager_fuzz_obj OBJECT
   ${CMAKE_SOURCE_DIR}/src/fetch/fetch_manager.c
 )

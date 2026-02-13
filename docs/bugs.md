@@ -107,6 +107,10 @@ Repro: set different `interval` values in `config/fetch_manager_config.json`; ru
 File refs: `src/fetch/fetch_manager.c:56`, `src/fetch/fetch_manager.c:57`, `src/fetch/fetch_manager.c:185`  
 Repro: start fetch manager with heartbeat arg `0` or negative; `sleep(g_heartbeat_freq)` no longer provides safe pacing.
 
+5. `[#41][High]` `fetch_manager_config_fuzzer` cannot link under libFuzzer configuration  
+File refs: `src/fetch/fetch_manager.c:38`, `fuzz/fetch_manager_config_fuzzer.cpp:38`, `fuzz/CMakeLists.txt:58`  
+Repro: `make fuzz-build FUZZ_ENGINE=libfuzzer` (reports multiple `main` definition plus missing `fetch_manager_reset_apis` symbol).
+
 ## Config Module (`src/config` and `config/`)
 
 1. `[#7][High]` Use-after-free in config merge path  
@@ -192,3 +196,31 @@ Repro: signal-heavy runtime.
 3. `[#9][Medium]` Build is not warning-clean across modules  
 File refs: `src/frontend/endpoints.c:65`, `src/fetch/fetch_manager.c:191`, `src/fetch/apis/fetch_openmeteo.c:96`, `src/fetch/apis/fetch_elprisjustnu.c:106`, `src/core/main.c:45`  
 Repro: `make build`.
+
+## Status Snapshot (Current Branch)
+
+### SDK Module (`src/sdk`)
+
+- `#24` Fixed in current branch (`write(...) == 0` now returns error in DB/log write loops).
+- `#28` Fixed in current branch (dedupe identity now uses full canonical tuple + value payload).
+- `#29` Fixed in current branch (`isfinite` validation added for `SS_SDK_VALUE_F64`).
+- `#30` Fixed in current branch (malformed `SUNSPOTS_CONFIG` now returns internal error).
+- `#31` Fixed in current branch (overlong `log_path` now errors instead of truncating).
+- `#32` Fixed in current branch (`gmtime_r` replaces `gmtime`).
+- `#33` Fixed in current branch (read path validates metric/value_type/data_kind enums).
+- `#34` Fixed in current branch (overflow-checked escape size accounting in DB/log paths).
+- `#35` Fixed in current branch (DB/log writes call `fsync` before returning success).
+- `#38` Fixed in current branch (F64 persisted as locale-stable hex bits, parser supports legacy decimal fallback).
+- `#39` Fixed in current branch (`log_path` extraction uses cJSON object parsing).
+- `#40` Fixed in current branch (JSON string unescape semantics handled by cJSON parser).
+
+### Libraries Module (`src/libs`)
+
+- `#12` Fixed in current branch (`af_save` now ensures parent dirs and uses write-all loop with short-write guards).
+
+### Validation Notes
+
+- Scoped regression passed:
+  - `ctest --test-dir build/debug -L component:sdk`
+  - `ctest --test-dir build/debug -L component:libs`
+- Full `make test` is still blocked by existing config bug `#7` (ASan use-after-free in `config.module.test`).
