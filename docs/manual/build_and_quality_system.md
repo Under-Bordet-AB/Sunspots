@@ -182,16 +182,40 @@ Benchmark results are comparative, and they are contextual. If the machine is un
 
 ## Chapter 13: Extending the system correctly
 
-When you add a new module, follow the stable pattern:
+When you add a new module, the most important design decision is where the logic lives. In a C project it is tempting to put behavior directly in `main.c`, but that makes the code hard to test and hard to reuse. In this build system we treat `main` as an entrypoint and we treat most behavior as a library.
 
-- add or update `src/<component>/CMakeLists.txt`
-- define a library target for reusable logic
-- define an executable target for the entrypoint
-- link explicit dependencies
-- add real tests by copying the structure of `tests/unit/sample_test.cpp`
-- add benchmarks by copying the structure of `benchmarks/sample_benchmark.cpp` when performance is a risk
+In CMake terms, “define a library target for reusable logic” means: create an `add_library(...)` target that compiles the `.c` files containing the module’s actual behavior, exports the module’s include path, and links the dependencies that the behavior needs. Then every executable, test, or benchmark that uses that behavior links the library target instead of re-compiling the same sources or copying code around.
 
-If you follow this pattern, the build system stays readable and the quality tools stay usable.
+There are three practical benefits:
+
+First, it makes linkage explicit. If the reusable logic needs `pthread` or `curl` or `cJSON`, you express that once on the library target and consumers inherit the correct link flags.
+
+Second, it makes testing and benchmarking natural. A unit test can link the library and call functions directly, without having to run a long-lived daemon or parse syslog output just to verify a calculation.
+
+Third, it keeps compile settings consistent. Include paths, compile definitions, sanitizer flags, and clang-tidy scope are applied to targets; when logic is a target, it automatically stays within the same policies as the rest of the repo.
+
+You can see the pattern in this repository already. The compute module is split into a library and an executable:
+
+- `sunspots_compute` is a library target that compiles `compute.c` and exports its include directory.
+- `sunspots_compute_manager` is the process entrypoint that links `sunspots_compute` and adds runtime concerns (threads, signals, IO).
+
+The frontend is similar:
+
+- `sunspots_frontend_core` is the reusable server logic.
+- `sunspots_frontend` is the `main` that starts the process.
+
+In plain terms: if a function could be called from a test, it probably belongs in a library target. If a file’s job is “parse argv, start threads, run loop, shut down”, it probably belongs in an executable target.
+
+When you add a new module, follow this stable pattern:
+
+1. Add or update `src/<component>/CMakeLists.txt`.
+2. Create `add_library(sunspots_<component> ...)` for the reusable logic (no `main`).
+3. Create `add_executable(sunspots_<component>_<role> ...)` for the entrypoint.
+4. `target_link_libraries(...)` on the executable to link the library target and any extra runtime dependencies.
+5. Add tests by copying the structure of `tests/unit/sample_test.cpp` and linking your library target.
+6. If performance is a risk, add benchmarks by copying `benchmarks/sample_benchmark.cpp` and linking your library target.
+
+If you follow this pattern, the build system stays readable, your modules stay testable, and quality tools stay usable.
 
 ## Chapter 14: A practical self-study path
 
@@ -219,16 +243,3 @@ make bench
 ```
 
 After that sequence, you will have exercised the main development loop.
-
-## Chapter 15: What “done” means
-
-You understand the system when you can explain these without guessing:
-
-- where targets are declared
-- where dependencies are linked
-- where warning/sanitizer policy is defined
-- how a test executable becomes a CTest test
-- why benchmarks are separate from tests
-- when to use clean vs deepclean
-
-That is the point where the build and quality system stops being a black box.

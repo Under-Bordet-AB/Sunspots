@@ -2,6 +2,9 @@ option(SUNSPOTS_ENABLE_SANITIZERS "Enable address+undefined sanitizers in Debug 
 option(SUNSPOTS_ENABLE_CLANG_TIDY "Enable clang-tidy checks for project targets" OFF)
 option(SUNSPOTS_BUILD_BENCHMARKS "Build benchmark targets" ON)
 option(SUNSPOTS_ENABLE_VALGRIND "Enable valgrind-backed test targets when valgrind is available" ON)
+option(SUNSPOTS_BUILD_FUZZERS "Build fuzzing harness targets" OFF)
+set(SUNSPOTS_FUZZ_ENGINE "libfuzzer" CACHE STRING "Fuzzing engine to use for harness targets")
+set_property(CACHE SUNSPOTS_FUZZ_ENGINE PROPERTY STRINGS libfuzzer afl)
 
 if(SUNSPOTS_ENABLE_CLANG_TIDY)
   find_program(SUNSPOTS_CLANG_TIDY_BIN NAMES clang-tidy)
@@ -35,7 +38,7 @@ function(sunspots_apply_target_defaults target_name)
     set(_sunspots_tidy_args
       ${SUNSPOTS_CLANG_TIDY_BIN}
       -p=${CMAKE_BINARY_DIR}
-      "-header-filter=^${CMAKE_SOURCE_DIR}/(src|tests|benchmarks)/"
+      "-header-filter=^${CMAKE_SOURCE_DIR}/(src/(compute|config|core|fetch|frontend|sdk|transform|utils)|tests|benchmarks)/"
     )
     set_target_properties(${target_name} PROPERTIES
       C_CLANG_TIDY "${_sunspots_tidy_args}"

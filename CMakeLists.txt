@@ -26,6 +26,10 @@ if(SUNSPOTS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
+if(SUNSPOTS_BUILD_FUZZERS)
+  add_subdirectory(fuzz)
+endif()
+
 if(BUILD_TESTING)
   add_custom_target(test-all
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
@@ -45,7 +49,8 @@ endif()
 
 if(SUNSPOTS_BUILD_BENCHMARKS)
   add_custom_target(bench
-    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -L perf
+    COMMAND $<TARGET_FILE:sample_benchmark> --benchmark_min_time=0.01 --benchmark_repetitions=1
+    DEPENDS sample_benchmark
     USES_TERMINAL
   )
 endif()
