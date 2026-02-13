@@ -29,7 +29,7 @@
  */
 
 // Default file location (Project Root relative)
-#define ATOMIC_FILE_DEFAULT_PATH ".db/database.jsonl"
+#define ATOMIC_FILE_DEFAULT_PATH "./src/db/database.jsonl"
 
 // --- Standardized Constants ---
 

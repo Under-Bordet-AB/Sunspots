@@ -96,11 +96,11 @@ void daemon_heartbeat_handler(int sig, siginfo_t *info, void *context);
 void deamon_sigchld_handler(int sig);
 void daemon_shutdown_handler(int sig);
 
-void daemon_reload_config(const char *full_path, const char *prj_path, int epoll_fd);
+void daemon_load_modules(const char *config_path, const char *prj_root_path, int epoll_fd);
 void daemon_module_timer_config(watch_entry_t *module, int epoll_fd);
 char *daemon_read_conf(const char *filepath);
-void daemon_spawn_process(int idx, const char *prj_path);
-void daemon_perform_health_check(const char *prj_path);
+void daemon_spawn_process(int idx, const char *prj_root_path);
+void daemon_perform_health_check(const char *prj_root_path);
 void daemon_resolve_project_root();
 
 #endif /* DAEMON_H */
