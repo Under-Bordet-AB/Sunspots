@@ -16,11 +16,12 @@ volatile sig_atomic_t g_daemon_running = 1;
 
 int main(int argc, char **argv)
 {
-    if (argc < 2 || strcmp(argv[1], "daemon") != 0)
-    {
-        printf(" !! Usage: %s daemon\n", argv[0]);
-        return EXIT_FAILURE;
-    }
+	(void)argc; (void)argv;
+    /* if (argc < 2 || strcmp(argv[1], "daemon") != 0)		 */
+    /* { */
+    /*     printf(" !! Usage: %s daemon\n", argv[0]); */
+    /*     return EXIT_FAILURE; */
+    /* } */
 
 	/**
 	 * DAEMON SETUP
@@ -113,7 +114,7 @@ int main(int argc, char **argv)
 	}
 	syslog(LOG_NOTICE, "SUNSPOTS daemon setup complete! Waiting for event...");
 
-	daemon_reload_config(config_path, g_prj_root, epoll_fd);
+	daemon_load_modules(config_path, g_prj_root, epoll_fd);
 
 	/**
 	 * MONITORING LOOP
@@ -161,7 +162,7 @@ int main(int argc, char **argv)
 							if (now - last_reload >= 1)
 							{
 								syslog(LOG_NOTICE, "Config change, performing hot-relead.");
-								daemon_reload_config(config_path, g_prj_root, epoll_fd);
+								daemon_load_modules(config_path, g_prj_root, epoll_fd);
 								last_reload = now;
 							}
 							else
@@ -252,9 +253,9 @@ int main(int argc, char **argv)
  * FUNCTIONS
  **/
 
-void daemon_reload_config(const char *full_path, const char *prj_path, int epoll_fd)	
+void daemon_load_modules(const char *config_path, const char *prj_root_path, int epoll_fd)	
 {
-	char *json_data = daemon_read_conf(full_path);
+	char *json_data = daemon_read_conf(config_path);
 	if (!json_data)
 	{
 		syslog(LOG_ERR, "daemon_read_conf failed.");
@@ -293,7 +294,7 @@ void daemon_reload_config(const char *full_path, const char *prj_path, int epoll
 		if (!cJSON_IsString(n) || !cJSON_IsString(p)) continue;
 		new_table[i].name = strdup(n->valuestring);
 		char raw_path[PATH_MAX];
-		if (snprintf(raw_path, sizeof(raw_path), "%s/%s", prj_path, p->valuestring) == -1)
+		if (snprintf(raw_path, sizeof(raw_path), "%s/%s", prj_root_path, p->valuestring) == -1)
 		{
 			syslog(LOG_CRIT, "snprintf failed: %m");
 			exit(EXIT_FAILURE);
@@ -394,7 +395,7 @@ void daemon_reload_config(const char *full_path, const char *prj_path, int epoll
 		}
 		if (watch_table[j].timertype == MODE_HEARTBEAT && watch_table[j].pid == 0)
 		{
-			daemon_spawn_process(j, prj_path);
+			daemon_spawn_process(j, prj_root_path);
 		}
 	}
 	cJSON_Delete(root);
@@ -481,7 +482,7 @@ void daemon_module_timer_config(watch_entry_t *module, int epoll_fd)
 	}	
 }
 
-void daemon_spawn_process(int idx, const char *prj_path)
+void daemon_spawn_process(int idx, const char *prj_root_path)
 {
 	int pipefd[2];
 	if (pipe2(pipefd, O_CLOEXEC) == -1)
@@ -501,7 +502,7 @@ void daemon_spawn_process(int idx, const char *prj_path)
     {		
         /* CHILD CONTEXT */
 		close(pipefd[0]);
-		if (chdir(prj_path) != 0)
+		if (chdir(prj_root_path) != 0)
 		{
 			syslog(LOG_CRIT, "FATAL ERROR: failed to change directory");
 			_exit(EXIT_FAILURE);
@@ -537,7 +538,7 @@ void daemon_spawn_process(int idx, const char *prj_path)
 	close(pipefd[0]);   
 }
 
-void daemon_perform_health_check(const char *prj_path)
+void daemon_perform_health_check(const char *prj_root_path)
 {
 	for (int i = 0; i < g_active_proc; i++)
 	{
@@ -545,7 +546,7 @@ void daemon_perform_health_check(const char *prj_path)
 		if (watch_table[i].pid <= 0)
 		{
 			syslog(LOG_ERR, "Process: %s PID: %d terminated. Restarting.", watch_table[i].name, watch_table[i].pid);
-			daemon_spawn_process(i, prj_path);
+			daemon_spawn_process(i, prj_root_path);
 		}
 		else if (!watch_table[i].alive)
 		{			
@@ -553,7 +554,7 @@ void daemon_perform_health_check(const char *prj_path)
 			kill(watch_table[i].pid, SIGKILL);
 			waitpid(watch_table[i].pid, NULL, 0);
 			watch_table[i].pid = 0;
-			daemon_spawn_process(i, prj_path);
+			daemon_spawn_process(i, prj_root_path);
 		}
 		else
 		{
