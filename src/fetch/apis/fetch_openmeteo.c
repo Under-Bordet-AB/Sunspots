@@ -7,8 +7,7 @@
 
 #include "../fetch_utils.h"
 #include "../../libs/curly.h"
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../../libs/atomic_file_rw.h"
+#include "../../databases/database_provider.h"
 
 #define API_NAME "Openmeteo"
 #define API_URL "https://api.open-meteo.com/v1/forecast?latitude=59.3293&longitude=18.0686&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
@@ -98,6 +97,23 @@ int normalize_data(char* raw, char** buffer) {
 }
 
 int save_to_database(char* buffer) {
+    const i_database* database = get_database(DB_MOCK);
+    if (database == NULL) {
+        return -1;
+    }
+
+    if (database->save_latest_temperature(21.5) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (database->save_latest_irradiance(650.0) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (database->save_latest_cloudiness(35.0) != DATABASE_OK) {
+        return -1;
+    }
+
     if (af_save("Openmeteo", "test", buffer) < 0) {
         return -1;
     }

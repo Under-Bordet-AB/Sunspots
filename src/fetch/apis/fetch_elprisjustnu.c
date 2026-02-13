@@ -8,8 +8,7 @@
 
 #include "../fetch_utils.h"
 #include "../../libs/curly.h"
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../../libs/atomic_file_rw.h"
+#include "../../databases/database_provider.h"
 
 #define API_NAME "Elprisjustnu"
 #define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
@@ -108,9 +107,15 @@ int normalize_data(char* raw, char** buffer) {
 }
 
 int save_to_database(char* buffer) {
-    if (af_save("Elprisjustnu", "test", buffer) < 0) {
+    const i_database* database = get_database(DB_MOCK);
+    if (database == NULL) {
         return -1;
     }
+
+    // if (database->save_elpris_24h() != DATABASE_OK) {
+    //     return -1;
+    // }
+
     return 0;
 }
 

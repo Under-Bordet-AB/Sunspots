@@ -10,10 +10,8 @@
 #include <unistd.h>
 #include <string.h>
 
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../libs/atomic_file_rw.h"
-
 #include "compute.h"
+#include "../databases/database_provider.h"
 
 #define DB_PATH "tester"
 
@@ -104,35 +102,71 @@ void* heartbeat() {
 }
 
 int load_data(data_t* data) {
-    int type = 1;
-
-    switch (type) {
-        case 0: // Database
-        break;
-        case 1: // Mock
-        data->irradiance = 650.0;
-        data->cloudiness = 0.2;
-        data->temperature = 12.0;
-        data->spot_price = 0.9;
-        data->battery_charge = 45.0;
-        break;
+    if (data == NULL) {
+        return -1;
     }
+
+    const i_database* database = get_database(DB_MOCK);
+    if (database == NULL) {
+        return -1;
+    }
+
+    if (database->get_latest_temperature == NULL ||
+        database->get_latest_irradiance == NULL ||
+        database->get_latest_cloudiness == NULL) {
+        return -1;
+    }
+
+    if (database->get_latest_temperature(&data->temperature) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (database->get_latest_irradiance(&data->irradiance) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (database->get_latest_cloudiness(&data->cloudiness) != DATABASE_OK) {
+        return -1;
+    }
+
+    data->spot_price = 0.0;
+    data->battery_charge = 0.0;
 
     return 0;
 }
 
 int save_result(result_t* result) {
-    (void)result;
-    int type = 1;
-
-    switch (type) {
-        case 0: // Database
-        //af_save("Compute", "Result", result);
-        break;
-        case 1: // Mock
-        break;
+    if (result == NULL) {
+        return -1;
     }
-    
+
+    const i_database* database = get_database(DB_MOCK);
+    if (database == NULL) {
+        return -1;
+    }
+
+    if (database->save_latest_temperature == NULL ||
+        database->save_latest_irradiance == NULL ||
+        database->save_latest_cloudiness == NULL) {
+        return -1;
+    }
+
+    if (database->save_latest_temperature((double)result->buy_electricity) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (database->save_latest_irradiance((double)result->use_solar) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (database->save_latest_cloudiness((double)result->charge_battery) != DATABASE_OK) {
+        return -1;
+    }
+
+    if (result->sell_excess != 0) {
+        return -1;
+    }
+
     return 0;
 }
 
