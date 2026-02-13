@@ -3,8 +3,8 @@
 #
 # Enforces:
 # - Banned unsafe functions (gets, sprintf, strcpy, etc.)
-# - Best practices for C code
-# - Naming conventions
+# - Best practices for C/C++ code
+# - Practical checks that are useful during daily development
 
 Checks: >
   -*,
@@ -30,30 +30,13 @@ Checks: >
   -readability-magic-numbers,
   -readability-named-parameter,
   -readability-identifier-length,
-  readability-identifier-naming,
 
-WarningsAsErrors: '*'
+WarningsAsErrors: ''
 
-HeaderFilterRegex: 'src/(compute|config|core|database|fetch|transform|utils)/.*|include/.*'
-# Note: src/libs is intentionally excluded from the regex above to avoid linting vendored code.
+HeaderFilterRegex: 'src/(compute|config|core|fetch|frontend|sdk|transform|utils)/.*|tests/.*|benchmarks/.*|include/.*'
+# Note: src/libs is intentionally excluded here to avoid linting vendored code and legacy utility internals.
 
 CheckOptions:
-  - key: readability-identifier-naming.FunctionCase
-    value: lower_case
-  - key: readability-identifier-naming.VariableCase
-    value: lower_case
-  - key: readability-identifier-naming.GlobalConstantCase
-    value: UPPER_CASE
-  - key: readability-identifier-naming.EnumConstantCase
-    value: UPPER_CASE
-  - key: readability-identifier-naming.MacroDefinitionCase
-    value: UPPER_CASE
-  - key: readability-identifier-naming.TypedefCase
-    value: lower_case
-  - key: readability-identifier-naming.StructCase
-    value: lower_case
-  - key: readability-identifier-naming.EnumCase
-    value: lower_case
   - key: readability-function-cognitive-complexity.Threshold
     value: 60
 

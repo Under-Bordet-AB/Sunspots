@@ -55,3 +55,12 @@ scripts/out/
 .notes/
 
 .cache/
+
+# Fuzzing generated artifacts and corpora
+crash-*
+leak-*
+oom-*
+timeout-*
+fuzz/corpus/**/*
+!fuzz/corpus/**/
+!fuzz/corpus/**/seed*

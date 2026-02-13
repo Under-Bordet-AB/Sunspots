@@ -1,0 +1,24 @@
+{
+  "current_units": {
+    "time": "iso8601",
+    "temperature_2m": "\u00b0C",
+    "cloud_cover": "%"
+  },
+  "current": {
+    "time": "2026-02-13T12:00",
+    "temperature_2m": 2.5,
+    "cloud_cover": 40
+  },
+  "hourly_units": {
+    "time": "iso8601",
+    "shortwave_radiation": "W/m\u00b2"
+  },
+  "hourly": {
+    "time": [
+      "2026-02-13T10:00",
+      "2026-02-13T11:00",
+      "2026-02-13T12:00"
+    ],
+    "shortwave_radiation": [50, 150, 300]
+  }
+}
