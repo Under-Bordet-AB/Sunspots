@@ -52,7 +52,7 @@ do { \
 #include <sys/inotify.h>
 #include <sys/timerfd.h>
 
-#define MAX_PATH 512
+#define MAX_PATH 4096
 #define MAX_EVENTS 10
 #define HEALTH_CHECKUP_INTERVAL 5
 /** acts as default for heartbeats */
