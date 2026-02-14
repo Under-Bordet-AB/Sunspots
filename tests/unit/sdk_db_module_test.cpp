@@ -296,3 +296,96 @@ TEST(sdk_db_module, reads_legacy_decimal_f64_rows_for_backwards_compatibility)
     remove_file_if_exists(db_path);
     remove_dir_if_exists(dir);
 }
+
+TEST(sdk_db_module, reader_skips_rows_with_metric_value_type_mismatch)
+{
+    ScopedEnvVar db_path_guard("SS_SDK_DB_PATH");
+
+    const std::string dir = make_temp_dir();
+    ASSERT_FALSE(dir.empty());
+    const std::string db_path = dir + "/sdk_db.tsv";
+    setenv("SS_SDK_DB_PATH", db_path.c_str(), 1);
+
+    const int64_t now = (int64_t)time(NULL);
+    const ss_sdk_record valid = make_base_record(9.5, now - 120, now - 60, "temperature_2m");
+    ASSERT_EQ(ss_sdk_db_write_record(&valid), SS_SDK_OK);
+
+    const std::string bad_metric_type =
+        "0\t0\t42\t" + std::to_string(now - 120) +
+        "\t" + std::to_string(now - 60) + "\t0\tlegacy\tbad_metric_type\tUTC\t\t0\t0\n";
+    ASSERT_EQ(append_text_file(db_path, bad_metric_type), 0);
+
+    ss_sdk_record *rows = NULL;
+    size_t count = 0;
+    ASSERT_EQ(ss_sdk_db_get_last_weeks(8, &rows, &count), SS_SDK_OK);
+    ASSERT_EQ(count, (size_t)1);
+    EXPECT_STREQ(rows[0].source_field, "temperature_2m");
+    ss_sdk_db_free_records(rows);
+
+    remove_file_if_exists(db_path);
+    remove_dir_if_exists(dir);
+}
+
+TEST(sdk_db_module, reader_skips_non_finite_f64_rows)
+{
+    ScopedEnvVar db_path_guard("SS_SDK_DB_PATH");
+
+    const std::string dir = make_temp_dir();
+    ASSERT_FALSE(dir.empty());
+    const std::string db_path = dir + "/sdk_db.tsv";
+    setenv("SS_SDK_DB_PATH", db_path.c_str(), 1);
+
+    const int64_t now = (int64_t)time(NULL);
+    const std::string finite_line =
+        "0\t1\t0x4029000000000000\t" + std::to_string(now - 120) +
+        "\t" + std::to_string(now - 60) + "\t0\tlegacy\tfinite\tUTC\t\t0\t0\n";
+    const std::string nan_line =
+        "0\t1\t0x7ff8000000000000\t" + std::to_string(now - 120) +
+        "\t" + std::to_string(now - 60) + "\t0\tlegacy\tnan\tUTC\t\t0\t0\n";
+
+    int fd = open(db_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0664);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(write(fd, finite_line.data(), finite_line.size()), (ssize_t)finite_line.size());
+    ASSERT_EQ(write(fd, nan_line.data(), nan_line.size()), (ssize_t)nan_line.size());
+    close(fd);
+
+    ss_sdk_record *rows = NULL;
+    size_t count = 0;
+    ASSERT_EQ(ss_sdk_db_get_last_weeks(8, &rows, &count), SS_SDK_OK);
+    ASSERT_EQ(count, (size_t)1);
+    EXPECT_STREQ(rows[0].source_field, "finite");
+    EXPECT_TRUE(std::isfinite(rows[0].value.f64));
+    ss_sdk_db_free_records(rows);
+
+    remove_file_if_exists(db_path);
+    remove_dir_if_exists(dir);
+}
+
+TEST(sdk_db_module, read_results_are_deterministically_sorted_by_timeseries_keys)
+{
+    ScopedEnvVar db_path_guard("SS_SDK_DB_PATH");
+
+    const std::string dir = make_temp_dir();
+    ASSERT_FALSE(dir.empty());
+    const std::string db_path = dir + "/sdk_db.tsv";
+    setenv("SS_SDK_DB_PATH", db_path.c_str(), 1);
+
+    const int64_t now = (int64_t)time(NULL);
+    const ss_sdk_record late = make_base_record(2.0, now - 120, now - 10, "temperature_2m_late");
+    const ss_sdk_record early = make_base_record(1.0, now - 120, now - 20, "temperature_2m_early");
+
+    ASSERT_EQ(ss_sdk_db_write_record(&late), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_write_record(&early), SS_SDK_OK);
+
+    ss_sdk_record *rows = NULL;
+    size_t count = 0;
+    ASSERT_EQ(ss_sdk_db_get_last_weeks(8, &rows, &count), SS_SDK_OK);
+    ASSERT_EQ(count, (size_t)2);
+    EXPECT_STREQ(rows[0].source_field, "temperature_2m_early");
+    EXPECT_STREQ(rows[1].source_field, "temperature_2m_late");
+    EXPECT_LT(rows[0].ts_end_utc, rows[1].ts_end_utc);
+    ss_sdk_db_free_records(rows);
+
+    remove_file_if_exists(db_path);
+    remove_dir_if_exists(dir);
+}

@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <locale.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -363,6 +364,54 @@ static bool ss_is_valid_data_kind(ss_sdk_data_kind data_kind)
            data_kind == SS_SDK_DATA_FORECAST;
 }
 
+static bool ss_is_nonempty(const char *s)
+{
+    return s != NULL && s[0] != '\0';
+}
+
+static int ss_validate_parsed_record(const ss_sdk_record *rec)
+{
+    const ss_metric_meta *meta;
+
+    if (!ss_is_valid_metric(rec->metric) ||
+        !ss_is_valid_value_type(rec->value_type) ||
+        !ss_is_valid_data_kind(rec->data_kind)) {
+        return -1;
+    }
+
+    meta = ss_metric_meta_get(rec->metric);
+    if (meta == NULL || meta->value_type != rec->value_type) {
+        return -1;
+    }
+
+    if (rec->ts_start_utc <= 0 || rec->ts_end_utc <= 0 || rec->ts_end_utc < rec->ts_start_utc) {
+        return -1;
+    }
+
+    if (!ss_is_nonempty(rec->source_api) || !ss_is_nonempty(rec->source_field)) {
+        return -1;
+    }
+
+    if (rec->data_kind == SS_SDK_DATA_FORECAST) {
+        if (!ss_is_nonempty(rec->model_id)) {
+            return -1;
+        }
+        if (rec->model_run_utc <= 0 || rec->issued_at_utc <= 0) {
+            return -1;
+        }
+    }
+
+    if (rec->value_type == SS_SDK_VALUE_STR && rec->value.str == NULL) {
+        return -1;
+    }
+
+    if (rec->value_type == SS_SDK_VALUE_F64 && !isfinite(rec->value.f64)) {
+        return -1;
+    }
+
+    return 0;
+}
+
 static int ss_parse_f64_bits(const char *s, double *out)
 {
     uint64_t bits;
@@ -388,6 +437,179 @@ static uint64_t ss_f64_to_bits(double value)
     uint64_t bits = 0;
     memcpy(&bits, &value, sizeof(bits));
     return bits;
+}
+
+static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings);
+
+static int ss_cmp_i64(int64_t a, int64_t b)
+{
+    if (a < b) {
+        return -1;
+    }
+    if (a > b) {
+        return 1;
+    }
+    return 0;
+}
+
+static int ss_cmp_u64(uint64_t a, uint64_t b)
+{
+    if (a < b) {
+        return -1;
+    }
+    if (a > b) {
+        return 1;
+    }
+    return 0;
+}
+
+static int ss_cmp_int(int a, int b)
+{
+    if (a < b) {
+        return -1;
+    }
+    if (a > b) {
+        return 1;
+    }
+    return 0;
+}
+
+static int ss_cmp_nullable_str(const char *a, const char *b)
+{
+    const char *x = (a == NULL) ? "" : a;
+    const char *y = (b == NULL) ? "" : b;
+    const int cmp = strcmp(x, y);
+
+    if (cmp < 0) {
+        return -1;
+    }
+    if (cmp > 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int ss_cmp_bool(bool a, bool b)
+{
+    if (a == b) {
+        return 0;
+    }
+    return a ? 1 : -1;
+}
+
+static int ss_record_value_cmp(const ss_sdk_record *a, const ss_sdk_record *b)
+{
+    int cmp;
+
+    switch (a->value_type) {
+        case SS_SDK_VALUE_I64:
+            return ss_cmp_i64(a->value.i64, b->value.i64);
+        case SS_SDK_VALUE_F64:
+            return ss_cmp_u64(ss_f64_to_bits(a->value.f64), ss_f64_to_bits(b->value.f64));
+        case SS_SDK_VALUE_BOOL:
+            return ss_cmp_bool(a->value.boolean, b->value.boolean);
+        case SS_SDK_VALUE_STR:
+            return ss_cmp_nullable_str(a->value.str, b->value.str);
+        default:
+            cmp = 0;
+            break;
+    }
+
+    return cmp;
+}
+
+static char *ss_next_line(char **cursor)
+{
+    char *line;
+    char *nl;
+
+    if (cursor == NULL || *cursor == NULL || **cursor == '\0') {
+        return NULL;
+    }
+
+    line = *cursor;
+    nl = strchr(line, '\n');
+    if (nl != NULL) {
+        *nl = '\0';
+        *cursor = nl + 1;
+    } else {
+        *cursor = NULL;
+    }
+
+    return line;
+}
+
+static void ss_free_record_array(ss_sdk_record *records, size_t count)
+{
+    size_t i;
+
+    if (records == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        ss_record_free_strings(&records[i]);
+    }
+    free(records);
+}
+
+static int ss_append_owned_record(
+    ss_sdk_record **records,
+    size_t *count,
+    size_t *cap,
+    const ss_sdk_record *record)
+{
+    ss_sdk_record *grown;
+    size_t next_cap;
+
+    if (*count == *cap) {
+        next_cap = (*cap == 0) ? 64 : (*cap * 2);
+        if (next_cap < *cap || next_cap > SIZE_MAX / sizeof(ss_sdk_record)) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+        grown = (ss_sdk_record *)realloc(*records, next_cap * sizeof(ss_sdk_record));
+        if (grown == NULL) {
+            return -1;
+        }
+        *records = grown;
+        *cap = next_cap;
+    }
+
+    (*records)[*count] = *record;
+    *count += 1;
+    return 0;
+}
+
+static int ss_collect_records_in_window(char *all, int64_t from_ts, ss_sdk_record **out_records, size_t *out_count)
+{
+    char *p = all;
+    char *line;
+    ss_sdk_record *tmp = NULL;
+    size_t cap = 0;
+    size_t count = 0;
+
+    while ((line = ss_next_line(&p)) != NULL) {
+        ss_sdk_record rec;
+
+        if (ss_parse_line(line, &rec, true) != 0) {
+            continue;
+        }
+
+        if (rec.ts_start_utc < from_ts) {
+            ss_record_free_strings(&rec);
+            continue;
+        }
+
+        if (ss_append_owned_record(&tmp, &count, &cap, &rec) != 0) {
+            ss_record_free_strings(&rec);
+            ss_free_record_array(tmp, count);
+            return -1;
+        }
+    }
+
+    *out_records = tmp;
+    *out_count = count;
+    return 0;
 }
 
 static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings)
@@ -506,6 +728,13 @@ static int ss_parse_line(char *line, ss_sdk_record *out, bool duplicate_strings)
         out->source_field = fields[7];
         out->source_tz = fields[8];
         out->model_id = fields[9];
+    }
+
+    if (ss_validate_parsed_record(out) != 0) {
+        if (duplicate_strings) {
+            ss_record_free_strings(out);
+        }
+        return -1;
     }
 
     return 0;
@@ -651,44 +880,43 @@ static int ss_record_cmp(const void *lhs, const void *rhs)
 {
     const ss_sdk_record *a = (const ss_sdk_record *)lhs;
     const ss_sdk_record *b = (const ss_sdk_record *)rhs;
+    int cmp;
 
-    if (a->ts_start_utc < b->ts_start_utc) {
-        return -1;
-    }
-    if (a->ts_start_utc > b->ts_start_utc) {
-        return 1;
-    }
-    if (a->issued_at_utc < b->issued_at_utc) {
-        return -1;
-    }
-    if (a->issued_at_utc > b->issued_at_utc) {
-        return 1;
-    }
-    if (a->metric < b->metric) {
-        return -1;
-    }
-    if (a->metric > b->metric) {
-        return 1;
-    }
-    return 0;
+    cmp = ss_cmp_i64(a->ts_start_utc, b->ts_start_utc);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_i64(a->ts_end_utc, b->ts_end_utc);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_i64(a->issued_at_utc, b->issued_at_utc);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_i64(a->model_run_utc, b->model_run_utc);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_int((int)a->data_kind, (int)b->data_kind);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_int((int)a->metric, (int)b->metric);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_int((int)a->value_type, (int)b->value_type);
+    if (cmp != 0) return cmp;
+
+    cmp = ss_cmp_nullable_str(a->source_api, b->source_api);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_nullable_str(a->source_field, b->source_field);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_nullable_str(a->source_tz, b->source_tz);
+    if (cmp != 0) return cmp;
+    cmp = ss_cmp_nullable_str(a->model_id, b->model_id);
+    if (cmp != 0) return cmp;
+
+    return ss_record_value_cmp(a, b);
 }
 
 static int ss_line_is_duplicate(char *all, const ss_sdk_record *record)
 {
     char *p = all;
+    char *line;
     ss_sdk_record parsed;
 
     /* v1 dedupe strategy: linear scan across file snapshot under write lock. */
-    while (p != NULL && *p != '\0') {
-        char *line = p;
-        char *nl = strchr(p, '\n');
-        if (nl != NULL) {
-            *nl = '\0';
-            p = nl + 1;
-        } else {
-            p = NULL;
-        }
-
+    while ((line = ss_next_line(&p)) != NULL) {
         if (ss_parse_line(line, &parsed, false) == 0) {
             if (ss_record_identity_equal(&parsed, record)) {
                 return 1;
@@ -771,14 +999,11 @@ ss_sdk_status ss_sdk_internal_db_get_last_weeks(int weeks, ss_sdk_record **out_r
     int fd;
     char *all = NULL;
     size_t size = 0;
-    char *p;
     ss_sdk_record *tmp = NULL;
-    size_t cap = 0;
     size_t count = 0;
     int eff_weeks;
     time_t now;
     int64_t from_ts;
-    size_t i;
     ss_db_result_block *block;
 
     *out_records = NULL;
@@ -817,44 +1042,10 @@ ss_sdk_status ss_sdk_internal_db_get_last_weeks(int weeks, ss_sdk_record **out_r
         return SS_SDK_ERR_INTERNAL;
     }
 
-    p = all;
-    while (p != NULL && *p != '\0') {
-        char *line = p;
-        char *nl = strchr(p, '\n');
-        ss_sdk_record rec;
-
-        if (nl != NULL) {
-            *nl = '\0';
-            p = nl + 1;
-        } else {
-            p = NULL;
-        }
-
-        if (ss_parse_line(line, &rec, true) == 0) {
-            if (rec.ts_start_utc >= from_ts) {
-                if (count == cap) {
-                    size_t next_cap = (cap == 0) ? 64 : cap * 2;
-                    ss_sdk_record *grown = (ss_sdk_record *)realloc(tmp, next_cap * sizeof(ss_sdk_record));
-                    if (grown == NULL) {
-                        ss_record_free_strings(&rec);
-                        for (i = 0; i < count; ++i) {
-                            ss_record_free_strings(&tmp[i]);
-                        }
-                        free(tmp);
-                        free(all);
-                        return SS_SDK_ERR_INTERNAL;
-                    }
-                    tmp = grown;
-                    cap = next_cap;
-                }
-                tmp[count++] = rec;
-            } else {
-                ss_record_free_strings(&rec);
-            }
-        }
-
+    if (ss_collect_records_in_window(all, from_ts, &tmp, &count) != 0) {
+        free(all);
+        return SS_SDK_ERR_INTERNAL;
     }
-
     free(all);
 
     if (count == 0) {
@@ -866,10 +1057,7 @@ ss_sdk_status ss_sdk_internal_db_get_last_weeks(int weeks, ss_sdk_record **out_r
 
     block = (ss_db_result_block *)malloc(sizeof(ss_db_result_block) + count * sizeof(ss_sdk_record));
     if (block == NULL) {
-        for (i = 0; i < count; ++i) {
-            ss_record_free_strings(&tmp[i]);
-        }
-        free(tmp);
+        ss_free_record_array(tmp, count);
         return SS_SDK_ERR_INTERNAL;
     }
 

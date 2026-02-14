@@ -1,273 +1,222 @@
-# Database SDK API Design
+# Database SDK API Design (Minimal V1)
 
-## 1. Purpose
+## 1. Goal
 
-Define a stable, backend-neutral database API for the SDK so module developers do not need code changes when storage implementation changes.
+Define the smallest useful SDK DB API for calculator and fetcher modules.
 
-Current reality:
-- Write rate is low (about once per 1 to 15 minutes).
-- Blocking calls are acceptable.
-- File locking is desired.
-- Compute module currently prefers `atomic_file_rw` style calls.
+## 2. Fixed Decisions
 
-Primary goal:
-- Freeze API contract now.
-- Keep backend replaceable later (file -> SQLite -> Postgres) with no caller changes.
+1. SQLite only.
+2. WAL mode enabled.
+3. Lazy init on first SDK DB call (no module init call).
+4. Only runtime config is `sdk_db.db_path` from daemon env config.
+5. Calculator data model is UTC 15-minute slots.
+6. Public read path is multi-canonical first.
+7. Default read behavior is now-slot plus forecast horizon.
+8. Keep forecast vintages in storage, but default reads return one selected value per slot.
+9. Public V1 keeps minimal knobs and minimal parameter count.
+10. Any function that is not part of an exposed header must be `static` (file-local).
 
-## 2. Design Principles
-
-1. Blocking by default.
-2. Explicit lock behavior.
-3. Canonical record contract in one place.
-4. Backend details hidden from callers.
-5. Strong correctness over throughput.
-6. Compatibility path for legacy `atomic_file_rw` callers.
-
-## 3. Backend Recommendation
-
-### MVP recommendation
-Use file backend first.
-
-Why this is acceptable now:
-- Very low write volume.
-- Simpler deployment.
-- Fast implementation and easy debugging.
-
-### Next backend
-SQLite should be the first "real DB" backend.
-
-Why SQLite first:
-- Embedded, no separate server.
-- ACID semantics and indexes.
-- Good fit for SDK/library shape.
-
-### Future backend
-Postgres can be added later as another backend implementation if multi-host or centralized storage is needed.
-
-## 4. API Stability Contract
-
-Public API must not expose:
-- TSV/JSON/file layout
-- SQL strings
-- Backend-specific handles
-
-Public API must define:
-- Open/close lifecycle
-- Write semantics
-- Read/query semantics
-- Error model
-- Durability options
-- Ordering guarantees
-
-## 5. Proposed Public API (Low-Level First)
+## 3. Public SDK API (Minimal)
 
 ```c
-// ss_db_api.h (public for now)
+typedef int32_t ss_sdk_canonical_code;
+typedef uint8_t ss_sdk_sample_flags;
 
-#ifndef SS_DB_API_H
-#define SS_DB_API_H
+#define SS_SDK_DEFAULT_HORIZON_SLOTS 96u  /* 24h * 4 slots/hour */
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-
-#include "sdk/ss_sdk.h" // ss_sdk_record, status, enums
-
-typedef struct ss_db ss_db; // opaque handle
-
-typedef enum {
-    SS_DB_BACKEND_FILE = 0,
-    SS_DB_BACKEND_SQLITE = 1,
-    SS_DB_BACKEND_POSTGRES = 2
-} ss_db_backend;
-
-typedef enum {
-    SS_DB_DURABILITY_BEST_EFFORT = 0, // no fsync guarantee
-    SS_DB_DURABILITY_FLUSH = 1        // fsync/full durability intent
-} ss_db_durability;
+enum {
+    SS_SDK_SAMPLE_OBSERVED     = 1u << 0,
+    SS_SDK_SAMPLE_FORECAST     = 1u << 1,
+    SS_SDK_SAMPLE_INTERPOLATED = 1u << 2
+};
 
 typedef struct {
-    ss_db_backend backend;
-    const char *path_or_dsn;      // file path or DB DSN
-    ss_db_durability durability;
-    bool blocking_locks;          // true for MVP
-} ss_db_options;
+    int64_t ts_utc;                 /* 15m slot start, UTC epoch seconds */
+    ss_sdk_canonical_code canonical;
+    double value;
+    ss_sdk_sample_flags flags;
+    uint8_t reserved[3];            /* explicit padding + forward growth */
+} ss_sdk_sample_f64;
 
 typedef struct {
-    int64_t ts_start_from_utc;    // inclusive
-    int64_t ts_start_to_utc;      // inclusive, 0 means open-ended
-    const ss_metric_id *metrics;  // optional filter
-    size_t metric_count;
-    const char *source_api;       // optional filter
-    size_t limit;                 // 0 means no limit
-    size_t offset;
-} ss_db_query;
+    int64_t hole_start_utc;         /* inclusive */
+    int64_t hole_end_utc;           /* exclusive */
+    uint64_t missing_buckets;
+    uint64_t reserved0;             /* forward growth / explicit 8-byte align */
+} ss_sdk_time_hole;
 
-typedef int (*ss_db_record_cb)(const ss_sdk_record *rec, void *ctx);
+typedef struct {
+    uint64_t size_bytes;            /* must be sizeof(ss_sdk_samples_out) */
+    ss_sdk_sample_f64 *samples;
+    size_t count;
+    uint64_t reserved[4];           /* consume before adding new fields */
+} ss_sdk_samples_out;
 
-ss_sdk_status ss_db_open(const ss_db_options *opts, ss_db **out_db);
-void ss_db_close(ss_db **db);
+typedef struct {
+    uint64_t size_bytes;            /* must be sizeof(ss_sdk_holes_out) */
+    ss_sdk_time_hole *holes;
+    size_t count;
+    uint64_t reserved[4];           /* consume before adding new fields */
+} ss_sdk_holes_out;
 
-ss_sdk_status ss_db_write_record(ss_db *db, const ss_sdk_record *record);
-ss_sdk_status ss_db_write_records(ss_db *db, const ss_sdk_record *records, size_t count);
+ss_sdk_status ss_sdk_db_write_record(const ss_sdk_record *record);
 
-ss_sdk_status ss_db_read_records(ss_db *db, const ss_db_query *query, ss_db_record_cb cb, void *ctx);
+ss_sdk_status ss_sdk_db_get_canonical(
+    int64_t from_utc,               /* 0 => resolve to current 15m slot */
+    ss_sdk_canonical_code canonical,
+    ss_sdk_samples_out *out
+);
 
-ss_sdk_status ss_db_delete_before(ss_db *db, int64_t ts_utc);
+ss_sdk_status ss_sdk_db_get_canonicals(
+    int64_t from_utc,               /* 0 => resolve to current 15m slot */
+    const ss_sdk_canonical_code *canonicals,
+    uint32_t canonical_count,
+    ss_sdk_samples_out *out
+);
 
-// Optional transaction controls for future DB backends.
-ss_sdk_status ss_db_begin(ss_db *db);
-ss_sdk_status ss_db_commit(ss_db *db);
-ss_sdk_status ss_db_rollback(ss_db *db);
+ss_sdk_status ss_sdk_db_get_holes_15m(
+    int64_t from_utc,               /* 0 => resolve to current 15m slot */
+    const ss_sdk_canonical_code *canonicals,
+    uint32_t canonical_count,
+    ss_sdk_holes_out *out
+);
 
-#endif
+void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
+void ss_sdk_db_free_holes(ss_sdk_holes_out *out);
+void ss_sdk_shutdown(void);
 ```
 
-Notes:
-- This is intentionally low-level and explicit.
-- Ergonomic wrappers can be added later without changing this core API.
+## 4. Default Behavior (No Extra Knobs)
 
-## 6. Canonical Record Rules
+1. `from_utc=0` means current UTC 15m slot (`:00`, `:15`, `:30`, `:45`).
+2. Non-zero `from_utc` must be 15m aligned, else `SS_SDK_ERR_INVALID_ARG`.
+3. Window is `[from_slot, from_slot + SS_SDK_DEFAULT_HORIZON_SLOTS*900)`.
+4. First slot selection order is observed, else forecast, else interpolation if allowed.
+5. Future slots use latest-issued forecast.
+6. Continuous canonicals can be interpolated.
+7. Hourly electricity prices are step-expanded to 15m (not linear interpolation).
+8. Output sort order is deterministic: `(ts_utc ASC, canonical ASC)`.
+9. Caller initializes `out->size_bytes`; SDK validates it and fills `out->samples/out->holes` and `out->count`.
 
-For write path (`ss_db_write_record`):
+## 5. Error Contract
 
-1. Reject non-finite floating values (`NaN`, `+Inf`, `-Inf`).
-2. Validate `metric`, `value_type`, and `data_kind` enum ranges.
-3. Validate canonical type matches metric metadata.
-4. Validate timestamps and forecast requirements.
-5. Define record identity key clearly.
+`ss_sdk_db_write_record`:
+1. `SS_SDK_OK`
+2. `SS_SDK_ERR_INVALID_ARG`
+3. `SS_SDK_ERR_VALIDATION`
+4. `SS_SDK_ERR_INTERNAL`
 
-### Identity recommendation
-Do not use weak dedupe identity.
+`ss_sdk_db_get_canonical`, `ss_sdk_db_get_canonicals`, `ss_sdk_db_get_holes_15m`:
+1. `SS_SDK_OK`
+2. `SS_SDK_ERR_PARTIAL_DATA`
+3. `SS_SDK_ERR_INVALID_ARG`
+4. `SS_SDK_ERR_VALIDATION`
+5. `SS_SDK_ERR_INTERNAL`
 
-Use either:
-- Full identity tuple (all fields that define unique observation/forecast record), or
-- Canonical hash of full identity tuple.
+## 6. Internal Primitive API (Minimal)
 
-Suggested identity fields:
-- `metric`
-- `value_type`
-- value payload
-- `ts_start_utc`
-- `ts_end_utc`
-- `data_kind`
-- `source_api`
-- `source_field`
-- `source_tz`
-- `model_id`
-- `model_run_utc`
-- `issued_at_utc`
-
-## 7. Blocking and Locking Semantics
-
-For MVP file backend:
-
-1. Every DB call is blocking.
-2. Acquire lock at call entry, release before return.
-3. Reads use shared lock.
-4. Writes use exclusive lock.
-5. No busy spin loops.
-
-Implementation note:
-- Use `flock` or `fcntl` locks consistently.
-- If blocking lock is enabled, wait until lock acquired or signal/error.
-
-## 8. Durability Semantics
-
-Expose durability as API option, not implicit backend behavior.
-
-- `BEST_EFFORT`: write and return, no forced flush.
-- `FLUSH`: write + flush (`fsync` for file backend, equivalent for DB backend).
-
-Callers choose durability based on operational needs.
-
-## 9. Query Model
-
-Replace "weeks" as core primitive with explicit time-range query.
-
-Keep weeks wrapper only as convenience:
+Keep the engine layer small and not module-facing:
 
 ```c
-ss_sdk_status ss_sdk_db_get_last_weeks(int weeks, ss_sdk_record **out_records, size_t *out_count);
+typedef struct ss_db_engine ss_db_engine;
+
+ss_sdk_status ss_db_engine_open(const char *db_path, ss_db_engine **out_engine);
+void ss_db_engine_close(ss_db_engine **engine);
+
+ss_sdk_status ss_db_engine_write_one(ss_db_engine *engine, const ss_sdk_record *row);
+
+ss_sdk_status ss_db_engine_read_window_15m(
+    ss_db_engine *engine,
+    const ss_sdk_canonical_code *canonicals,
+    uint32_t canonical_count,
+    int64_t start_utc,
+    int64_t end_utc,
+    ss_sdk_samples_out *out
+);
+
+ss_sdk_status ss_db_engine_get_holes_window_15m(
+    ss_db_engine *engine,
+    const ss_sdk_canonical_code *canonicals,
+    uint32_t canonical_count,
+    int64_t start_utc,
+    int64_t end_utc,
+    ss_sdk_holes_out *out
+);
 ```
 
-Wrapper behavior:
-- Convert weeks -> `ss_db_query`.
-- Call `ss_db_read_records`.
+Visibility rules:
+1. Only functions declared in `src/sdk/ss_sdk.h` are public SDK symbols.
+2. Internal engine entrypoints may be non-`static` only when shared across internal translation units.
+3. All other internal helpers must be `static` in their `.c` files.
+4. Do not leak helper symbols with external linkage.
 
-Benefits:
-- No API redesign when query requirements grow.
-- Backend remains swappable.
+## 7. Schema Essentials
 
-## 10. `atomic_file_rw` Compatibility Strategy
+1. One canonical `records` table.
+2. `UNIQUE` on full logical identity for dedupe.
+3. Required indexes are `(canonical, data_kind, ts_start_utc)`.
+4. Required indexes are `(canonical, ts_start_utc, issued_at_utc DESC)`.
+5. Keep forecast and observation rows separate via `data_kind`.
 
-Goal: let compute module keep current style while moving storage authority into SDK.
+## 8. Non-Goals for V1
 
-### Step A
-Keep existing `af_save` and `af_read` exported.
+1. No multi-backend DB abstraction.
+2. No public batch-write API.
+3. No public "all forecast vintages" API in default calculator path.
+4. No per-call source filter, per-call `as_of`, or per-call policy knobs.
 
-### Step B
-Re-implement internals as thin adapter:
-- `af_save(source, type, data)`
-  -> map to one or more `ss_sdk_record`
-  -> call `ss_db_write_record`
-- `af_read(...)`
-  -> call `ss_db_read_records`
-  -> format output in legacy format expected by compute module.
+## 9. Future V2 Extension Path
 
-### Step C
-Mark `atomic_file_rw` as compatibility frontend in docs.
+If needed later, add one advanced query API with an options struct. Keep V1 minimal API stable.
 
-Result:
-- Compute team does not need immediate rewrite.
-- SDK becomes single storage authority.
+## 10. ABI Notes
 
-## 11. Suggested Layered Structure
+1. Public output structs use `size_bytes` and `reserved[]` for forward-compatible growth.
+2. Caller must zero-init output structs and set `size_bytes` before calling read APIs.
+3. Free helpers release owned buffers and reset pointers/count to zero.
+4. Symbol visibility is strict: public API symbols are intentional; non-public helpers are `static`.
 
-Layer 1: public low-level DB API (`ss_db_*`)  
-Layer 2: SDK domain wrappers (`ss_sdk_db_*`, logs, metric helpers)  
-Layer 3: legacy compatibility frontends (`atomic_file_rw` adapter)
+## 11. Usage Example
 
-This layering supports your "build up from raw API" approach.
+```c
+/* Single canonical: TEMP_C from current 15m slot forward. */
+ss_sdk_samples_out out = {0};
+out.size_bytes = sizeof(out);
 
-## 12. Migration Plan
+ss_sdk_status st = ss_sdk_db_get_canonical(
+    0,                  /* from_utc: 0 => now slot */
+    SS_CANONICAL_TEMP_C,
+    &out
+);
 
-### Phase 1 (now)
-- Implement stable low-level API with file backend.
-- Fix correctness issues in current file implementation:
-  - weak dedupe
-  - non-finite float acceptance
-  - zero-write loop handling
-  - malformed config silent success
+if (st == SS_SDK_OK || st == SS_SDK_ERR_PARTIAL_DATA) {
+    for (size_t i = 0; i < out.count; ++i) {
+        const ss_sdk_sample_f64 *s = &out.samples[i];
+        /* use s->ts_utc, s->value, s->flags */
+    }
+}
 
-### Phase 2
-- Move current `ss_sdk_db_*` to call `ss_db_*` API internally.
-- Add `atomic_file_rw` adapter mode.
+ss_sdk_db_free_samples(&out);
 
-### Phase 3
-- Add SQLite backend behind same `ss_db_*` API.
-- No caller changes.
+/* Multi-canonical: TEMP_C + WIND_MS from explicit aligned start time. */
+ss_sdk_canonical_code wanted[] = { SS_CANONICAL_TEMP_C, SS_CANONICAL_WIND_MS };
+ss_sdk_samples_out out_multi = {0};
+out_multi.size_bytes = sizeof(out_multi);
 
-### Phase 4 (optional)
-- Add Postgres backend if deployment needs centralized DB.
+st = ss_sdk_db_get_canonicals(
+    aligned_from_utc,
+    wanted,
+    2u,
+    &out_multi
+);
 
-## 13. What "done" looks like
+if (st == SS_SDK_OK || st == SS_SDK_ERR_PARTIAL_DATA) {
+    for (size_t i = 0; i < out_multi.count; ++i) {
+        const ss_sdk_sample_f64 *s = &out_multi.samples[i];
+        /* deterministic order: ts_utc ASC, canonical ASC */
+    }
+}
 
-1. Module callers use stable SDK DB API only.
-2. Backend can be switched by configuration.
-3. Compute module still works via compatibility adapter.
-4. Record correctness and lock semantics are deterministic.
-5. Public API docs make no assumptions about file vs SQL backend.
-
-## 14. My opinion for this project
-
-For this workload, file backend is acceptable for MVP if API is designed correctly and correctness bugs are fixed.
-
-If your goal is learning "proper DB" and production-grade internals:
-- Keep the stable API above.
-- Implement SQLite as the first backend upgrade.
-- Keep Postgres as a later backend, not the first step.
-
-That path gives you both:
-- Immediate progress with low risk.
-- A clean long-term architecture with no downstream breakage.
+ss_sdk_db_free_samples(&out_multi);
+```

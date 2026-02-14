@@ -1,8 +1,8 @@
 # Sunspots Code Spotlight Report
 
-- Generated: `2026-02-13T21:02:31`
+- Generated: `2026-02-13T21:45:15`
 - Branch: `56-bug-fixes-sdk-and-atomic_file_rw`
-- Commit: `4c02cba02b53f950c81a2cc52a53dcedc871b9af`
+- Commit: `f4991852ba96c7192db550f65893dc69a8fc54a9`
 
 ## Legend
 
@@ -14,7 +14,7 @@
 |---:|---|---:|---|---|
 | 1 | `main` | 233 | `core` | `core/main.c:17-249` |
 | 2 | `http_parse_request` | 227 | `frontend` | `frontend/http_parser.c:123-349` |
-| 3 | `ss_log_write_common` | 161 | `sdk` | `sdk/internal/log/ss_log_internal.c:272-432` |
+| 3 | `daemon_load_modules` | 148 | `core` | `core/main.c:256-403` |
 
 ## Low-Hanging Fruit Spotlight (Top 10 by Risk Score)
 
@@ -22,14 +22,14 @@
 |---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|
 | 1 | 227 | 36 | 5 | 2 | 6 | 20 | 1 | `frontend` | `http_parse_request` (`frontend/http_parser.c:123-349`) | `LONG,BRANCHY,DEEP_NEST,NESTED_LOOPS,ALLOC_HEAVY,MANY_RETURNS,PUBLIC` |
 | 2 | 233 | 30 | 7 | 2 | 0 | 3 | 2 | `core` | `main` (`core/main.c:17-249`) | `LONG,BRANCHY,DEEP_NEST,NESTED_LOOPS,PUBLIC` |
-| 3 | 161 | 20 | 2 | 0 | 1 | 9 | 7 | `sdk` | `ss_log_write_common` (`sdk/internal/log/ss_log_internal.c:272-432`) | `LONG,BRANCHY,MANY_RETURNS,MANY_PARAMS` |
-| 4 | 148 | 28 | 4 | 0 | 3 | 3 | 3 | `core` | `daemon_load_modules` (`core/main.c:256-403`) | `LONG,BRANCHY,DEEP_NEST,ALLOC_HEAVY,PUBLIC` |
-| 5 | 120 | 30 | 3 | 1 | 0 | 18 | 3 | `sdk` | `ss_parse_line` (`sdk/internal/db/ss_db_internal.c:393-512`) | `LONG,BRANCHY,MANY_RETURNS` |
-| 6 | 134 | 19 | 4 | 2 | 0 | 1 | 1 | `frontend` | `http_worker_thread` (`frontend/http_worker.c:15-148`) | `LONG,BRANCHY,DEEP_NEST,NESTED_LOOPS,PUBLIC` |
-| 7 | 117 | 18 | 6 | 2 | 2 | 8 | 3 | `sdk` | `ss_sdk_internal_db_get_last_weeks` (`sdk/internal/db/ss_db_internal.c:768-884`) | `LONG,BRANCHY,DEEP_NEST,NESTED_LOOPS,MANY_RETURNS,PUBLIC` |
-| 8 | 103 | 15 | 2 | 0 | 2 | 9 | 1 | `libs` | `curly_init` (`libs/curly.c:37-139`) | `LONG,MANY_RETURNS,PUBLIC` |
-| 9 | 96 | 17 | 1 | 0 | 1 | 2 | 1 | `sdk` | `ss_record_to_line` (`sdk/internal/db/ss_db_internal.c:553-648`) | `LONG` |
-| 10 | 84 | 13 | 5 | 2 | 0 | 1 | 2 | `fetch` | `main` (`fetch/fetch_manager.c:38-121`) | `LONG,DEEP_NEST,NESTED_LOOPS,PUBLIC` |
+| 3 | 148 | 28 | 4 | 0 | 3 | 3 | 3 | `core` | `daemon_load_modules` (`core/main.c:256-403`) | `LONG,BRANCHY,DEEP_NEST,ALLOC_HEAVY,PUBLIC` |
+| 4 | 127 | 32 | 3 | 1 | 0 | 19 | 3 | `sdk` | `ss_parse_line` (`sdk/internal/db/ss_db_internal.c:615-741`) | `LONG,BRANCHY,MANY_RETURNS` |
+| 5 | 134 | 19 | 4 | 2 | 0 | 1 | 1 | `frontend` | `http_worker_thread` (`frontend/http_worker.c:15-148`) | `LONG,BRANCHY,DEEP_NEST,NESTED_LOOPS,PUBLIC` |
+| 6 | 103 | 15 | 2 | 0 | 2 | 9 | 1 | `libs` | `curly_init` (`libs/curly.c:37-139`) | `LONG,MANY_RETURNS,PUBLIC` |
+| 7 | 96 | 17 | 1 | 0 | 1 | 2 | 1 | `sdk` | `ss_record_to_line` (`sdk/internal/db/ss_db_internal.c:782-877`) | `LONG` |
+| 8 | 84 | 13 | 5 | 2 | 0 | 1 | 2 | `fetch` | `main` (`fetch/fetch_manager.c:38-121`) | `LONG,DEEP_NEST,NESTED_LOOPS,PUBLIC` |
+| 9 | 87 | 12 | 4 | 1 | 0 | 2 | 2 | `frontend` | `main` (`frontend/frontend_main.c:19-105`) | `LONG,DEEP_NEST,PUBLIC` |
+| 10 | 77 | 9 | 2 | 0 | 1 | 8 | 3 | `sdk` | `ss_sdk_internal_db_get_last_weeks` (`sdk/internal/db/ss_db_internal.c:996-1072`) | `MANY_RETURNS,PUBLIC` |
 
 ## Function Lengths Per Module
 
@@ -52,28 +52,29 @@
 | 4 | `compute/compute_manager.c:205-208` | `cleanup` |
 
 ### `config`
-- Function count: **17**
-- Average length: **21.24** lines
+- Function count: **18**
+- Average length: **22.56** lines
 
 | Length | Location | Function |
 |---:|---|---|
+| 49 | `config/config.c:300-348` | `config_load_env` |
 | 46 | `config/config.c:38-83` | `read_file_to_string` |
-| 42 | `config/config.c:165-206` | `json_set_at_path` |
-| 36 | `config/config.c:89-124` | `json_merge` |
-| 34 | `config/config.c:269-302` | `config_load_env` |
-| 34 | `config/config.c:304-337` | `config_load_args` |
-| 31 | `config/config.c:129-159` | `resolve_path` |
-| 25 | `config/config.c:243-267` | `config_load_file` |
-| 22 | `config/config.c:423-444` | `config_get_string` |
-| 16 | `config/config.c:211-226` | `parse_arg_value` |
-| 16 | `config/config.c:363-378` | `config_get_bool_or` |
-| 13 | `config/config.c:395-407` | `config_get_int` |
-| 13 | `config/config.c:409-421` | `config_get_bool` |
-| 10 | `config/config.c:352-361` | `config_get_int_or` |
-| 10 | `config/config.c:380-389` | `config_get_string_or` |
-| 6 | `config/config.c:236-241` | `config_destroy` |
-| 4 | `config/config.c:343-346` | `config_get_subtree` |
-| 3 | `config/config.c:232-234` | `config_create` |
+| 42 | `config/config.c:89-130` | `json_merge` |
+| 42 | `config/config.c:196-237` | `json_set_at_path` |
+| 34 | `config/config.c:350-383` | `config_load_args` |
+| 31 | `config/config.c:160-190` | `resolve_path` |
+| 25 | `config/config.c:274-298` | `config_load_file` |
+| 24 | `config/config.c:132-155` | `json_set_top_level_item` |
+| 22 | `config/config.c:469-490` | `config_get_string` |
+| 16 | `config/config.c:242-257` | `parse_arg_value` |
+| 16 | `config/config.c:409-424` | `config_get_bool_or` |
+| 13 | `config/config.c:441-453` | `config_get_int` |
+| 13 | `config/config.c:455-467` | `config_get_bool` |
+| 10 | `config/config.c:398-407` | `config_get_int_or` |
+| 10 | `config/config.c:426-435` | `config_get_string_or` |
+| 6 | `config/config.c:267-272` | `config_destroy` |
+| 4 | `config/config.c:389-392` | `config_get_subtree` |
+| 3 | `config/config.c:263-265` | `config_create` |
 
 ### `core`
 - Function count: **11**
@@ -178,60 +179,77 @@
 | 5 | `libs/linked_list/linked_list.c:147-151` | `LinkedList_dispose` |
 
 ### `sdk`
-- Function count: **52**
-- Average length: **27.13** lines
+- Function count: **69**
+- Average length: **23.26** lines
 
 | Length | Location | Function |
 |---:|---|---|
-| 161 | `sdk/internal/log/ss_log_internal.c:272-432` | `ss_log_write_common` |
-| 120 | `sdk/internal/db/ss_db_internal.c:393-512` | `ss_parse_line` |
-| 117 | `sdk/internal/db/ss_db_internal.c:768-884` | `ss_sdk_internal_db_get_last_weeks` |
-| 96 | `sdk/internal/db/ss_db_internal.c:553-648` | `ss_record_to_line` |
-| 65 | `sdk/internal/db/ss_db_internal.c:702-766` | `ss_sdk_internal_db_write_record` |
+| 127 | `sdk/internal/db/ss_db_internal.c:615-741` | `ss_parse_line` |
+| 96 | `sdk/internal/db/ss_db_internal.c:782-877` | `ss_record_to_line` |
+| 81 | `sdk/internal/log/ss_log_internal.c:343-423` | `ss_log_format_line` |
+| 77 | `sdk/internal/db/ss_db_internal.c:996-1072` | `ss_sdk_internal_db_get_last_weeks` |
+| 65 | `sdk/internal/db/ss_db_internal.c:930-994` | `ss_sdk_internal_db_write_record` |
 | 53 | `sdk/ss_sdk.c:30-82` | `ss_sdk_validate_record` |
 | 51 | `sdk/internal/log/ss_log_internal.c:113-163` | `ss_escape_text` |
-| 48 | `sdk/internal/db/ss_db_internal.c:164-211` | `ss_escape` |
-| 47 | `sdk/internal/db/ss_db_internal.c:92-138` | `ss_read_all_fd` |
+| 48 | `sdk/internal/db/ss_db_internal.c:165-212` | `ss_escape` |
+| 47 | `sdk/internal/db/ss_db_internal.c:93-139` | `ss_read_all_fd` |
 | 44 | `sdk/internal/log/ss_log_internal.c:165-208` | `ss_extract_json_log_path` |
 | 44 | `sdk/internal/log/ss_log_internal.c:227-270` | `ss_log_write_line` |
-| 31 | `sdk/internal/db/ss_db_internal.c:521-551` | `ss_record_identity_equal` |
-| 29 | `sdk/internal/db/ss_db_internal.c:213-241` | `ss_unescape_inplace` |
-| 28 | `sdk/internal/db/ss_db_internal.c:318-345` | `ss_parse_double` |
-| 26 | `sdk/internal/db/ss_db_internal.c:65-90` | `ss_ensure_parent_dirs` |
+| 43 | `sdk/internal/log/ss_log_internal.c:425-467` | `ss_log_write_common` |
+| 42 | `sdk/internal/db/ss_db_internal.c:372-413` | `ss_validate_parsed_record` |
+| 32 | `sdk/internal/db/ss_db_internal.c:879-910` | `ss_record_cmp` |
+| 31 | `sdk/internal/db/ss_db_internal.c:583-613` | `ss_collect_records_in_window` |
+| 31 | `sdk/internal/db/ss_db_internal.c:750-780` | `ss_record_identity_equal` |
+| 29 | `sdk/internal/db/ss_db_internal.c:214-242` | `ss_unescape_inplace` |
+| 28 | `sdk/internal/db/ss_db_internal.c:319-346` | `ss_parse_double` |
+| 27 | `sdk/internal/db/ss_db_internal.c:555-581` | `ss_append_owned_record` |
+| 26 | `sdk/internal/db/ss_db_internal.c:66-91` | `ss_ensure_parent_dirs` |
 | 26 | `sdk/internal/log/ss_log_internal.c:46-71` | `ss_ensure_parent_dirs` |
-| 25 | `sdk/internal/db/ss_db_internal.c:650-674` | `ss_record_cmp` |
-| 25 | `sdk/internal/db/ss_db_internal.c:676-700` | `ss_line_is_duplicate` |
-| 23 | `sdk/internal/db/ss_db_internal.c:140-162` | `ss_write_all` |
-| 23 | `sdk/internal/db/ss_db_internal.c:248-270` | `ss_record_free_strings` |
+| 23 | `sdk/internal/db/ss_db_internal.c:141-163` | `ss_write_all` |
+| 23 | `sdk/internal/db/ss_db_internal.c:249-271` | `ss_record_free_strings` |
 | 23 | `sdk/internal/log/ss_log_internal.c:89-111` | `ss_write_all` |
-| 19 | `sdk/internal/db/ss_db_internal.c:366-384` | `ss_parse_f64_bits` |
-| 17 | `sdk/internal/db/ss_db_internal.c:272-288` | `ss_split_fields` |
-| 16 | `sdk/internal/db/ss_db_internal.c:28-43` | `ss_strdup_local` |
+| 20 | `sdk/internal/db/ss_db_internal.c:500-519` | `ss_record_value_cmp` |
+| 20 | `sdk/internal/db/ss_db_internal.c:521-540` | `ss_next_line` |
+| 19 | `sdk/internal/db/ss_db_internal.c:415-433` | `ss_parse_f64_bits` |
+| 17 | `sdk/internal/db/ss_db_internal.c:273-289` | `ss_split_fields` |
+| 17 | `sdk/internal/db/ss_db_internal.c:912-928` | `ss_line_is_duplicate` |
+| 16 | `sdk/internal/db/ss_db_internal.c:29-44` | `ss_strdup_local` |
 | 16 | `sdk/internal/log/ss_log_internal.c:29-44` | `ss_strdup_local` |
 | 16 | `sdk/internal/log/ss_log_internal.c:210-225` | `ss_get_log_path` |
-| 15 | `sdk/internal/db/ss_db_internal.c:886-900` | `ss_sdk_internal_db_free_records` |
+| 16 | `sdk/internal/log/ss_log_internal.c:311-326` | `ss_log_escape_base_fields` |
+| 15 | `sdk/internal/db/ss_db_internal.c:1074-1088` | `ss_sdk_internal_db_free_records` |
 | 15 | `sdk/internal/log/ss_log_internal.c:73-87` | `ss_level_to_string` |
+| 15 | `sdk/internal/log/ss_log_internal.c:295-309` | `ss_log_format_utc_timestamp` |
 | 15 | `sdk/ss_sdk.c:9-23` | `ss_sdk_is_valid_value_type` |
-| 13 | `sdk/internal/db/ss_db_internal.c:290-302` | `ss_parse_i64` |
-| 13 | `sdk/internal/db/ss_db_internal.c:304-316` | `ss_parse_int` |
-| 11 | `sdk/internal/log/ss_log_internal.c:445-455` | `ss_sdk_internal_log_write_fields` |
+| 14 | `sdk/internal/db/ss_db_internal.c:477-490` | `ss_cmp_nullable_str` |
+| 14 | `sdk/internal/log/ss_log_internal.c:328-341` | `ss_log_escape_optional_fields` |
+| 13 | `sdk/internal/db/ss_db_internal.c:291-303` | `ss_parse_i64` |
+| 13 | `sdk/internal/db/ss_db_internal.c:305-317` | `ss_parse_int` |
+| 13 | `sdk/internal/log/ss_log_internal.c:281-293` | `ss_log_escaped_fields_free` |
+| 12 | `sdk/internal/db/ss_db_internal.c:542-553` | `ss_free_record_array` |
+| 11 | `sdk/internal/log/ss_log_internal.c:480-490` | `ss_sdk_internal_log_write_fields` |
 | 11 | `sdk/ss_sdk.c:117-127` | `ss_sdk_log_write_fields` |
-| 10 | `sdk/internal/db/ss_db_internal.c:54-63` | `ss_checked_add` |
+| 10 | `sdk/internal/db/ss_db_internal.c:55-64` | `ss_checked_add` |
+| 10 | `sdk/internal/db/ss_db_internal.c:444-453` | `ss_cmp_i64` |
+| 10 | `sdk/internal/db/ss_db_internal.c:455-464` | `ss_cmp_u64` |
+| 10 | `sdk/internal/db/ss_db_internal.c:466-475` | `ss_cmp_int` |
 | 10 | `sdk/internal/log/ss_log_internal.c:18-27` | `ss_checked_add` |
-| 10 | `sdk/internal/log/ss_log_internal.c:434-443` | `ss_sdk_internal_log_write_auto` |
+| 10 | `sdk/internal/log/ss_log_internal.c:469-478` | `ss_sdk_internal_log_write_auto` |
 | 10 | `sdk/ss_canonical.c:11-20` | `ss_metric_meta_get` |
 | 10 | `sdk/ss_sdk.c:106-115` | `ss_sdk_log_write_auto` |
-| 8 | `sdk/internal/db/ss_db_internal.c:45-52` | `ss_db_path` |
+| 8 | `sdk/internal/db/ss_db_internal.c:46-53` | `ss_db_path` |
 | 8 | `sdk/ss_canonical.c:22-29` | `ss_metric_name` |
 | 8 | `sdk/ss_sdk.c:84-91` | `ss_sdk_db_write_record` |
-| 7 | `sdk/internal/db/ss_db_internal.c:352-358` | `ss_is_valid_value_type` |
+| 7 | `sdk/internal/db/ss_db_internal.c:353-359` | `ss_is_valid_value_type` |
+| 7 | `sdk/internal/db/ss_db_internal.c:492-498` | `ss_cmp_bool` |
 | 7 | `sdk/ss_sdk.c:93-99` | `ss_sdk_db_get_last_weeks` |
-| 6 | `sdk/internal/db/ss_db_internal.c:386-391` | `ss_f64_to_bits` |
-| 6 | `sdk/internal/db/ss_db_internal.c:514-519` | `ss_string_equal_nullable` |
-| 5 | `sdk/internal/db/ss_db_internal.c:360-364` | `ss_is_valid_data_kind` |
-| 4 | `sdk/internal/db/ss_db_internal.c:243-246` | `ss_record_reset` |
-| 4 | `sdk/internal/db/ss_db_internal.c:347-350` | `ss_is_valid_metric` |
-| 4 | `sdk/internal/log/ss_log_internal.c:457-460` | `ss_sdk_internal_log_shutdown` |
+| 6 | `sdk/internal/db/ss_db_internal.c:435-440` | `ss_f64_to_bits` |
+| 6 | `sdk/internal/db/ss_db_internal.c:743-748` | `ss_string_equal_nullable` |
+| 5 | `sdk/internal/db/ss_db_internal.c:361-365` | `ss_is_valid_data_kind` |
+| 4 | `sdk/internal/db/ss_db_internal.c:244-247` | `ss_record_reset` |
+| 4 | `sdk/internal/db/ss_db_internal.c:348-351` | `ss_is_valid_metric` |
+| 4 | `sdk/internal/db/ss_db_internal.c:367-370` | `ss_is_nonempty` |
+| 4 | `sdk/internal/log/ss_log_internal.c:492-495` | `ss_sdk_internal_log_shutdown` |
 | 4 | `sdk/ss_sdk.c:25-28` | `ss_sdk_is_nonempty` |
 | 4 | `sdk/ss_sdk.c:101-104` | `ss_sdk_db_free_records` |
 | 4 | `sdk/ss_sdk.c:129-132` | `ss_sdk_shutdown` |
@@ -269,15 +287,15 @@
 | 14 | 2 | 1 | 0 | `data_init` (`compute/compute.c:3-16`) | `PUBLIC` |
 
 ### `config`
-- Function count: **17**
+- Function count: **18**
 
 | Len | Dec | Nest | Loops | Function | Tags |
 |---:|---:|---:|---:|---|---|
-| 42 | 10 | 3 | 1 | `json_set_at_path` (`config/config.c:165-206`) | `` |
+| 49 | 12 | 3 | 0 | `config_load_env` (`config/config.c:300-348`) | `MANY_RETURNS,PUBLIC` |
+| 42 | 11 | 4 | 1 | `json_merge` (`config/config.c:89-130`) | `DEEP_NEST` |
+| 42 | 10 | 3 | 1 | `json_set_at_path` (`config/config.c:196-237`) | `` |
 | 46 | 8 | 1 | 0 | `read_file_to_string` (`config/config.c:38-83`) | `MANY_RETURNS` |
-| 34 | 9 | 4 | 1 | `config_load_args` (`config/config.c:304-337`) | `DEEP_NEST,PUBLIC` |
-| 36 | 9 | 3 | 1 | `json_merge` (`config/config.c:89-124`) | `` |
-| 31 | 7 | 2 | 1 | `resolve_path` (`config/config.c:129-159`) | `` |
+| 34 | 9 | 4 | 1 | `config_load_args` (`config/config.c:350-383`) | `DEEP_NEST,PUBLIC` |
 
 ### `core`
 - Function count: **11**
@@ -324,14 +342,14 @@
 | 39 | 8 | 1 | 0 | `curly_cleanup` (`libs/curly.c:226-264`) | `PUBLIC` |
 
 ### `sdk`
-- Function count: **52**
+- Function count: **69**
 
 | Len | Dec | Nest | Loops | Function | Tags |
 |---:|---:|---:|---:|---|---|
-| 161 | 20 | 2 | 0 | `ss_log_write_common` (`sdk/internal/log/ss_log_internal.c:272-432`) | `LONG,BRANCHY,MANY_RETURNS,MANY_PARAMS` |
-| 120 | 30 | 3 | 1 | `ss_parse_line` (`sdk/internal/db/ss_db_internal.c:393-512`) | `LONG,BRANCHY,MANY_RETURNS` |
-| 117 | 18 | 6 | 2 | `ss_sdk_internal_db_get_last_weeks` (`sdk/internal/db/ss_db_internal.c:768-884`) | `LONG,BRANCHY,DEEP_NEST,NESTED_LOOPS,MANY_RETURNS,PUBLIC` |
-| 96 | 17 | 1 | 0 | `ss_record_to_line` (`sdk/internal/db/ss_db_internal.c:553-648`) | `LONG` |
+| 127 | 32 | 3 | 1 | `ss_parse_line` (`sdk/internal/db/ss_db_internal.c:615-741`) | `LONG,BRANCHY,MANY_RETURNS` |
+| 96 | 17 | 1 | 0 | `ss_record_to_line` (`sdk/internal/db/ss_db_internal.c:782-877`) | `LONG` |
+| 77 | 9 | 2 | 0 | `ss_sdk_internal_db_get_last_weeks` (`sdk/internal/db/ss_db_internal.c:996-1072`) | `MANY_RETURNS,PUBLIC` |
+| 81 | 4 | 1 | 0 | `ss_log_format_line` (`sdk/internal/log/ss_log_internal.c:343-423`) | `LONG,MANY_PARAMS` |
 | 53 | 19 | 2 | 0 | `ss_sdk_validate_record` (`sdk/ss_sdk.c:30-82`) | `BRANCHY,MANY_RETURNS` |
 
 ### `transform`
@@ -375,11 +393,11 @@
 | `compute` | `compute/compute.c:55` | `calculate_simple` | `data` (`data_t* data`) | consider `const` on pointee |
 | `compute` | `compute/compute_manager.c:27` | `main` | `argv` (`char* argv[]`) | consider `const` on pointee |
 | `compute` | `compute/compute_manager.c:124` | `save_result` | `result` (`result_t* result`) | consider `const` on pointee |
-| `config` | `config/config.c:243` | `config_load_file` | `cfg` (`config* cfg`) | consider `const` on pointee |
-| `config` | `config/config.c:269` | `config_load_env` | `cfg` (`config* cfg`) | consider `const` on pointee |
-| `config` | `config/config.c:304` | `config_load_args` | `argv` (`char** argv`) | consider `const` on pointee |
-| `config` | `config/config.c:304` | `config_load_args` | `cfg` (`config* cfg`) | consider `const` on pointee |
-| `config` | `config/config.c:423` | `config_get_string` | `out` (`char* out`) | consider `const` on pointee |
+| `config` | `config/config.c:274` | `config_load_file` | `cfg` (`config* cfg`) | consider `const` on pointee |
+| `config` | `config/config.c:300` | `config_load_env` | `cfg` (`config* cfg`) | consider `const` on pointee |
+| `config` | `config/config.c:350` | `config_load_args` | `argv` (`char** argv`) | consider `const` on pointee |
+| `config` | `config/config.c:350` | `config_load_args` | `cfg` (`config* cfg`) | consider `const` on pointee |
+| `config` | `config/config.c:469` | `config_get_string` | `out` (`char* out`) | consider `const` on pointee |
 | `core` | `core/main.c:17` | `main` | `argv` (`char **argv`) | consider `const` on pointee |
 | `core` | `core/main.c:635` | `daemon_heartbeat_handler` | `context` (`void *context`) | consider `const` on pointee |
 | `core` | `core/main.c:635` | `daemon_heartbeat_handler` | `info` (`siginfo_t *info`) | consider `const` on pointee |
@@ -412,15 +430,18 @@
 | `libs` | `libs/linked_list/linked_list.c:39` | `LinkedList_append` | `item` (`void *item`) | consider `const` on pointee |
 | `libs` | `libs/linked_list/linked_list.c:60` | `LinkedList_insert` | `item` (`void *item`) | consider `const` on pointee |
 | `libs` | `libs/linked_list/linked_list.c:123` | `LinkedList_pop` | `list` (`LinkedList *list`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:54` | `ss_checked_add` | `current_size` (`size_t *current_size`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:213` | `ss_unescape_inplace` | `s` (`char *s`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:243` | `ss_record_reset` | `rec` (`ss_sdk_record *rec`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:272` | `ss_split_fields` | `line` (`char *line`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:366` | `ss_parse_f64_bits` | `out` (`double *out`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:393` | `ss_parse_line` | `line` (`char *line`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:676` | `ss_line_is_duplicate` | `all` (`char *all`) | consider `const` on pointee |
-| `sdk` | `sdk/internal/db/ss_db_internal.c:886` | `ss_sdk_internal_db_free_records` | `records` (`ss_sdk_record *records`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:55` | `ss_checked_add` | `current_size` (`size_t *current_size`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:214` | `ss_unescape_inplace` | `s` (`char *s`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:244` | `ss_record_reset` | `rec` (`ss_sdk_record *rec`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:273` | `ss_split_fields` | `line` (`char *line`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:415` | `ss_parse_f64_bits` | `out` (`double *out`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:542` | `ss_free_record_array` | `records` (`ss_sdk_record *records`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:583` | `ss_collect_records_in_window` | `all` (`char *all`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:615` | `ss_parse_line` | `line` (`char *line`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:912` | `ss_line_is_duplicate` | `all` (`char *all`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/db/ss_db_internal.c:1074` | `ss_sdk_internal_db_free_records` | `records` (`ss_sdk_record *records`) | consider `const` on pointee |
 | `sdk` | `sdk/internal/log/ss_log_internal.c:18` | `ss_checked_add` | `current_size` (`size_t *current_size`) | consider `const` on pointee |
+| `sdk` | `sdk/internal/log/ss_log_internal.c:281` | `ss_log_escaped_fields_free` | `escaped` (`ss_log_escaped_fields *escaped`) | consider `const` on pointee |
 | `sdk` | `sdk/ss_sdk.c:93` | `ss_sdk_db_get_last_weeks` | `out_count` (`size_t *out_count`) | consider `const` on pointee |
 | `sdk` | `sdk/ss_sdk.c:93` | `ss_sdk_db_get_last_weeks` | `out_records` (`ss_sdk_record **out_records`) | consider `const` on pointee |
 | `sdk` | `sdk/ss_sdk.c:101` | `ss_sdk_db_free_records` | `records` (`ss_sdk_record *records`) | consider `const` on pointee |
