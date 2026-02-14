@@ -2,12 +2,12 @@
     "apis": [
         {
             "name": "Openmeteo",
-            "bin_path": "build/debug/src/fetch/apis/sunspots_fetch_openmeteo",
+            "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo",
             "interval": 900
         },
         {
             "name": "Elprisjustnu",
-            "bin_path": "build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
+            "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
             "interval": 86400
         }
     ]
