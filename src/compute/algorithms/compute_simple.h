@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-typedef struct data_t {
+typedef struct data_simple_t {
     double irradiance;
     double cloudiness;
     double temperature;
@@ -11,21 +11,22 @@ typedef struct data_t {
     double spot_price;
 
     double battery_charge;
-} data_t;
+} data_simple_t;
 
-typedef struct result_t {
+typedef struct result_simple_t {
     int buy_electricity; // 0 = Don't buy, 1 = Buy
     int use_solar; // 0 = Don't use solar, 1 = Use solar
     int charge_battery; // 0 = Don't charge battery, 1 = Charge battery, 2 = Discharge battery
     int sell_excess; // 0 = Don't sell excess, 1 = Sell excess
-} result_t;
+} result_simple_t;
 
-int data_init(data_t** data);
-int result_init(result_t** result);
-int data_dispose(data_t** data);
-int result_dispose(result_t** result);
+int data_init(data_simple_t** data);
+int data_dispose(data_simple_t** data);
 
-int calculate_simple(data_t* data, result_t* result);
+int result_init(result_simple_t** result);
+int result_dispose(result_simple_t** result);
+
+int calculate_simple(data_simple_t* data, result_simple_t* result);
 
 /*
 LEOP-systemet ska tillhandahålla följande funktionalitet för energioptimering.

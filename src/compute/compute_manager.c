@@ -10,17 +10,16 @@
 #include <unistd.h>
 #include <string.h>
 
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../libs/atomic_file_rw.h"
+#include "algorithms/compute_simple.h"
 
-#include "compute.h"
-
-#define DB_PATH "tester"
+#define DUMMY_TRIGGER "DUMMY_TRIGGER"
+#define DB_PATH "db_path" // Not implemented yet
 
 pid_t g_ppid = 0;
 int g_heartbeat_freq;
 
 void* heartbeat();
+int inotify_watch();
 int compute_work();
 void cleanup(void);
 
@@ -59,38 +58,11 @@ int main(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Heartbeat
-    pthread_t thread_hb;
-    pthread_create(&thread_hb, NULL, heartbeat, NULL);
-    pthread_detach(thread_hb);
+    // Inotify watcher
+    pthread_t thread_inotify_watch;
+    pthread_create(&thread_inotify_watch, NULL, inotify_watch, NULL);
+    pthread_detach(thread_inotify_watch);
 
-    char buffer[4096];
-    while (1) {
-        int len = read(inotify_fd, buffer, sizeof(buffer));
-        if (len == -1) {
-            if (errno == EINTR) {
-                continue;
-            }
-            syslog(LOG_ERR, "Compute Manager - Error receiving inotify event.");
-            break;
-        }
-
-        if (len == 0) {
-            syslog(LOG_ERR, "Compute Manager - inotify fd closed (EOF)");
-            break;
-        }
-
-        if (compute_work() == 0) {
-            syslog(LOG_INFO, "Compute Manager - Successfully computed result!");
-        } else {
-            syslog(LOG_WARNING, "Compute Manager - Failed to compute results.");
-        }
-    }
-
-    exit(EXIT_FAILURE);
-}
-
-void* heartbeat() {
     while (1) {
         if (kill(g_ppid, SIGRTMIN) == -1) {
             perror("Could not signal daemon, terminating.\n");
@@ -100,7 +72,7 @@ void* heartbeat() {
         sleep(g_heartbeat_freq);
     }
 
-    return NULL;
+    exit(EXIT_FAILURE);
 }
 
 int load_data(data_t* data) {
@@ -134,6 +106,45 @@ int save_result(result_t* result) {
     }
     
     return 0;
+}
+
+int inotify_watch() {
+    int inotify_fd = inotify_init();
+    if (inotify_fd < 0) {
+        syslog(LOG_ERR, "Compute Manager - inotify_init failed.");
+        exit(EXIT_FAILURE);
+    }
+
+    const char* db_path = DB_PATH;
+    int watch_fd = inotify_add_watch(inotify_fd, db_path, IN_CLOSE_WRITE);
+    if (watch_fd < 0) {
+        syslog(LOG_ERR, "Compute Manager - inotify_add_watch failed.");
+        close(inotify_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    char buffer[4096];
+    while (1) {
+        int len = read(inotify_fd, buffer, sizeof(buffer));
+        if (len == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            syslog(LOG_ERR, "Compute Manager - Error receiving inotify event.");
+            break;
+        }
+
+        if (len == 0) {
+            syslog(LOG_ERR, "Compute Manager - inotify fd closed (EOF)");
+            break;
+        }
+
+        if (compute_work() == 0) {
+            syslog(LOG_INFO, "Compute Manager - Successfully computed result!");
+        } else {
+            syslog(LOG_WARNING, "Compute Manager - Failed to compute results.");
+        }
+    }
 }
 
 int compute_work() {

@@ -1,36 +1,21 @@
-#include "compute.h"
+#include "compute_simple.h"
 
-int data_init(data_t** data) {
+int data_init(data_simple_t** data) {
     if (!data) {
         return -1;
     }
 
-    *data = malloc(sizeof(data_t));
+    *data = malloc(sizeof(data_simple_t));
     if (!*data) {
         return -1;
     }
 
-    memset(*data, 0, sizeof(data_t));
+    memset(*data, 0, sizeof(data_simple_t));
 
     return 0;
 }
 
-int result_init(result_t** result) {
-    if (!result) {
-        return -1;
-    }
-
-    *result = malloc(sizeof(result_t));
-    if (!*result) {
-        return -1;
-    }
-
-    memset(*result, 0, sizeof(result_t));
-
-    return 0;
-}
-
-int data_dispose(data_t** data) {
+int data_dispose(data_simple_t** data) {
     if (!data || !*data) {
         return -1;
     }
@@ -41,7 +26,22 @@ int data_dispose(data_t** data) {
     return 0;
 }
 
-int result_dispose(result_t** result) {
+int result_init(result_simple_t** result) {
+    if (!result) {
+        return -1;
+    }
+
+    *result = malloc(sizeof(result_simple_t));
+    if (!*result) {
+        return -1;
+    }
+
+    memset(*result, 0, sizeof(result_simple_t));
+
+    return 0;
+}
+
+int result_dispose(result_simple_t** result) {
     if (!result || !*result) {
         return -1;
     }
@@ -52,7 +52,7 @@ int result_dispose(result_t** result) {
     return 0;
 }
 
-int calculate_simple(data_t* data, result_t* result) {
+int calculate_simple(data_simple_t* data, result_simple_t* result) {
     if (data == NULL || result == NULL) {
         return -1;
     }
