@@ -7,110 +7,94 @@
 #include <time.h>
 
 #include "../fetch_utils.h"
+
 #include "../../libs/curly.h"
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../../libs/atomic_file_rw.h"
+#include "../../libs/json/cJSON.h"
 
-#define API_NAME "Elprisjustnu"
+#include "../../transform/transform.h"
+#include "../../transform/price/price_model.h"
+#include "../../transform/price/price_transform.h"
+
 #define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
-#define INTERVAL 3600*24
 
-pid_t parent_ppid;
-
-void* heartbeat();
-int normalize_data(char* raw, char** buffer);
-int save_to_database(char* buffer);
+int normalize_data(char* raw_in, price_data_t** out);
+int save_to_database(price_data_t* price_data);
 void cleanup(void);
 
-int main(int argc, char* argv[]) {
+int main() {
     atexit(cleanup);
 
     openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID, LOG_DAEMON);
-    
-    if (argc < 2) {
-        syslog(LOG_ERR, "Fetch API - Elprisjustnu - Usage: ./path/to/bin <PPID>");
-        exit(EXIT_FAILURE);
-    }
 
     syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
 
-    char* endptr;
-    parent_ppid = (int)strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0') {
+    char* buffer = NULL;
+
+    char url[128];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+
+    if (fetch_from_url(url, &buffer, 30) < 0) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API.");
         exit(EXIT_FAILURE);
     }
 
-    pthread_t thread_heartbeat;
-    pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);
-    pthread_detach(thread_heartbeat);
-
-    while (1) {
-        char* buffer = NULL;
-
-        char url[128];
-        time_t now = time(NULL);
-        struct tm *t = localtime(&now);
-
-        snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
-
-        if (fetch_from_url(url, &buffer) < 0) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API.");
-            exit(EXIT_FAILURE);
-        }
-
-        if (!buffer) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL.");
-            exit(EXIT_FAILURE);
-        }
-
-        char* normalized_data = NULL;
-        if (normalize_data(buffer, &normalized_data) < 0) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data.");
-            free(buffer);
-            exit(EXIT_FAILURE);
-        }
-
-        if ((save_to_database(buffer) < 0)) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
-            free(normalized_data);
-            free(buffer);
-            exit(EXIT_FAILURE);
-        }
-
-        syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved!");
-        
-        if (normalized_data != NULL) free(normalized_data);
-        if (buffer != NULL) free(buffer);
-        
-        sleep(INTERVAL);
+    if (!buffer) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL.");
+        exit(EXIT_FAILURE);
     }
 
-    closelog();
+    price_data_t* price_data = NULL;
+    if (normalize_data(buffer, &price_data) < 0) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data.");
+        free(buffer);
+        exit(EXIT_FAILURE);
+    }
+
+    if ((save_to_database(price_data) < 0)) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
+        price_data_dispose(price_data);
+        free(buffer);
+        exit(EXIT_FAILURE);
+    }
+
+    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved!");
+    
+    if (price_data != NULL) price_data_dispose(price_data);
+    if (buffer != NULL) free(buffer);
 
     return 0;
 }
 
-void* heartbeat() {
-    while (1) {
-        if (kill(parent_ppid, SIGRTMIN) == -1) {
-            syslog(LOG_ERR, "Fetch API - Elprisjustnu - Couldn't signal daemon, terminating.");
-            exit(EXIT_FAILURE);
-        }
-        //syslog(LOG_INFO, "Fetch API - Elprisjustnu - Beating...");
-        sleep(2);
-    }
-
-    return NULL;
-}
-
-int normalize_data(char* raw, char** buffer) {
-    return 0;
-}
-
-int save_to_database(char* buffer) {
-    if (af_save("Elprisjustnu", "test", buffer) < 0) {
+int normalize_data(char* raw_in, price_data_t** out) {
+    if (!out || !out) {
         return -1;
     }
+
+    *out = malloc(sizeof(price_data_t));
+    if (!*out) {
+        return -1;
+    }
+
+    price_data_init(*out, 3);
+
+    cJSON* json_obj = cJSON_Parse(raw_in);
+    if (transform_elprisetjustnu_price(json_obj, *out) != TRANSFORM_OK) {
+        return -1;
+    }
+
+    cJSON_Delete(json_obj);
+
+    return 0;
+}
+
+int save_to_database(price_data_t* price_data) {
+    for (int i = 0; i < price_data->no_data_points, i++) {
+        // save each datapoint with its respective timestamp (in its timeslot database wise)
+    }
+
     return 0;
 }
 

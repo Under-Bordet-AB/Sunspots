@@ -4,104 +4,91 @@
 #include <syslog.h>
 #include <signal.h>
 #include <pthread.h>
+#include <time.h>
 
 #include "../fetch_utils.h"
+
 #include "../../libs/curly.h"
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "../../libs/atomic_file_rw.h"
+#include "../../libs/json/cJSON.h"
 
-#define API_NAME "Openmeteo"
-#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=59.3293&longitude=18.0686&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
-#define INTERVAL 900
+#include "../../transform/transform.h"
+#include "../../transform/weather/weather_model.h"
+#include "../../transform/weather/weather_transform.h"
 
-pid_t parent_ppid;
+#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current=temperature_2m,cloud_cover"
 
-void* heartbeat();
-int normalize_data(char* raw, char** buffer);
-int save_to_database(char* buffer);
+int normalize_data(char* raw_in, weather_data_t** out);
+int save_to_database(weather_data_t* price_data);
 void cleanup(void);
 
-int main(int argc, char* argv[]) {
+int main() {
     atexit(cleanup);
 
-    openlog("SUNSPOTS_FETCH_OPENMETEO", LOG_PID | LOG_CONS, LOG_DAEMON);
-    
-    if (argc < 2) {
-        syslog(LOG_ERR, "Fetch API - Openmeteo - Usage: ./path/to/bin <PPID>");
-        exit(EXIT_FAILURE);
-    }
+    openlog("SUNSPOTS_FETCH_OPENMETEO", LOG_PID, LOG_DAEMON);
 
     syslog(LOG_INFO, "Fetch API - Openmeteo - Starting...");
 
-    char* endptr;
-    parent_ppid = (int)strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0') {
+    char* buffer = NULL;
+
+    if (fetch_from_url(API_URL, &buffer, 30) < 0) {
+        syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't fetch from API.");
         exit(EXIT_FAILURE);
     }
 
-    pthread_t thread_heartbeat;
-    pthread_create(&thread_heartbeat, NULL, (void* (*) (void*)) heartbeat, NULL);
-    pthread_detach(thread_heartbeat);
-
-    while (1) {
-        char* buffer = NULL;
-        if (fetch_from_url(API_URL, &buffer) < 0) {
-            syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't fetch from API");
-            exit(EXIT_FAILURE);
-        }
-
-        if (!buffer) {
-            syslog(LOG_WARNING, "Fetch API - Openmeteo - Buffer is NULL");
-            exit(EXIT_FAILURE);
-        }
-
-        char* normalized_data = NULL;
-        if (normalize_data(buffer, &normalized_data) < 0) {
-            syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't normalize data.");
-            free(buffer);
-            exit(EXIT_FAILURE);
-        }
-
-        if ((save_to_database(buffer) < 0)) {
-            syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't save data to database");
-            free(normalized_data);
-            free(buffer);
-            exit(EXIT_FAILURE);
-        }
-        
-        if (normalized_data != NULL) free(normalized_data);
-        if (buffer != NULL) free(buffer);
-        
-        sleep(INTERVAL);
+    if (!buffer) {
+        syslog(LOG_WARNING, "Fetch API - Openmeteo - Buffer is NULL.");
+        exit(EXIT_FAILURE);
     }
 
-    closelog();
+    weather_data_t* weather_data = NULL;
+    if (normalize_data(buffer, &weather_data) < 0) {
+        syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't normalize data.");
+        free(buffer);
+        exit(EXIT_FAILURE);
+    }
+
+    if ((save_to_database(weather_data) < 0)) {
+        syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't save data to database.");
+        free(weather_data);
+        free(buffer);
+        exit(EXIT_FAILURE);
+    }
+
+    syslog(LOG_INFO, "Fetch API - Openmeteo - Data successfully normalized and saved!");
+    
+    if (weather_data != NULL) free(weather_data);
+    if (buffer != NULL) free(buffer);
 
     return 0;
 }
 
-void* heartbeat() {
-    while (1) {
-        if (kill(parent_ppid, SIGRTMIN) == -1) {
-            syslog(LOG_ERR, "Fetch API - Openmeteo - Couldn't signal daemon, terminating.");
-            exit(EXIT_FAILURE);
-        }
-        syslog(LOG_INFO, "Fetch API - Openmeteo - Beating...");
-        sleep(5);
-    }
-
-    return NULL;
-}
-
-int normalize_data(char* raw, char** buffer) {
-    return 0;
-}
-
-int save_to_database(char* buffer) {
-    if (af_save("Openmeteo", "test", buffer) < 0) {
+int normalize_data(char* raw_in, weather_data_t** out) {
+    if (!out || !out) {
         return -1;
     }
 
+    *out = malloc(sizeof(weather_data_t));
+    if (!*out) {
+        return -1;
+    }
+
+    weather_data_init(*out);
+
+    cJSON* json_obj = cJSON_Parse(raw_in);
+    if (transform_openmeteo_weather(json_obj, *out) != TRANSFORM_OK) {
+        return -1;
+    }
+
+    if (transform_openmeteo_solar(json_obj, *out) != TRANSFORM_OK) {
+        return -1;
+    }
+
+    cJSON_Delete(json_obj);
+
+    return 0;
+}
+
+int save_to_database(weather_data_t* price_data) {
     return 0;
 }
 
