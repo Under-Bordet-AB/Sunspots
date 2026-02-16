@@ -5,7 +5,6 @@
 #include "json_utils.h"
 #include "unit_utils.h"
 #include <string.h>
-#include <stdio.h>
 
 transform_status_t transform_openmeteo_weather(const cJSON *input, weather_data_t *out){
     JSON_REQUIRE(cJSON_IsObject(input), TRANSFORM_INVALID_INPUT);
