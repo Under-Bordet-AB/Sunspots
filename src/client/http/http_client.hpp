@@ -27,6 +27,8 @@ public:
 
 private:
     int fd;
+    std::string host;
+    std::string port;
 
     int connect(const std::string &host, const std::string &port);
     int write(const void *buffer, size_t length);

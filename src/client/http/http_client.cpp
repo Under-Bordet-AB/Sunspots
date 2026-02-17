@@ -1,8 +1,10 @@
 #include "http_client.hpp"
 
 HttpClient::HttpClient(const std::string& host, const std::string& port) 
-    : fd(-1) 
+    : fd(-1)
 {
+    this->host = host;
+    this->port = port;
     if (connect(host, port) < 0)
         perror("connect");
 }

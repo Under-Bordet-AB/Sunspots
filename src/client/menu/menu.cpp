@@ -2,13 +2,9 @@
 #include "../http/http_client.hpp"
 #include <iostream>
 
-Menu::Menu()
-    : selected(0)
-{
-    main();
-}
+Menu::Menu(){}
 
-void Menu::main()
+void Menu::mainMenu()
 {
     std::vector<std::string> options = { "Check health", "Option 2", "Option 3", "Option 4", "Exit" };
 
