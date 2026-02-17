@@ -70,36 +70,55 @@ void HttpClient::disconnect() {
     }
 }
 
+// Takes endpoint as argument, returns HTTP response
 std::string HttpClient::get(const std::string &path)
 {
     std::string request = buildHttpRequest("GET", HOST, path, "");
-    write(request.c_str(), request.length());
+    ssize_t bytesSent = write(request.c_str(), request.length());
+    if (bytesSent < 0 || bytesSent != (ssize_t)request.length())
+    {
+        perror("write");
+        std::cerr << "Failed to send HTTP request\n";
+    }
     
     char buffer[1024];
     std::string response;
+    int timeoutAttempts = 0;
 
-    ssize_t bytesReceived = 0;
     while(true)
     {
-        bytesReceived = read(buffer, sizeof(buffer) - 1);
+        ssize_t bytesReceived = read(buffer, sizeof(buffer) - 1);
         
         if(bytesReceived > 0) {
             buffer[bytesReceived] = '\0';
             response += buffer;
+            timeoutAttempts = 0;
         }
         else if(bytesReceived == 0) {
-            break; // Connection closed
+            break; // Success
         }
-        else if(errno == EAGAIN || errno == EWOULDBLOCK) {
+        else if(errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            if (++timeoutAttempts > MAX_TIMEOUT_ATTEMPTS)
+            {
+                std::cerr << "Read timeout\n";
+            }
             // No data, wait and try again
             usleep(1000); // 1 ms
             continue;
         }
-        else {
+        else 
+        {
             perror("read error");
+            std::cerr << "Read failed\n";
             break;
         }
     }
+
+    // if (response.empty())
+    // {
+    //     std::cerr << "Empty response from server\n";
+    // }
     
     return response;
 }

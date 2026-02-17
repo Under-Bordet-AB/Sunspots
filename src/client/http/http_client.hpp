@@ -14,6 +14,7 @@
 
 #define HOST "localhost"
 #define PORT "10480"
+#define MAX_TIMEOUT_ATTEMPTS 100
 
 class HttpClient
 {
