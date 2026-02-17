@@ -1,14 +1,19 @@
 #pragma once
 
-enum Key 
-{
-    KEY_NONE,
-    KEY_UP,
-    KEY_DOWN,
-    KEY_LEFT,
-    KEY_RIGHT,
-    KEY_ESCAPE,
-    KEY_ENTER
-};
+#include "input/input.hpp"
+#include <vector>
+#include <string>
 
-Key getArrowKey();
+class Menu
+{
+public:
+    Menu();
+
+    void main();
+
+private:
+    size_t selected;
+    void clearScreen();
+    int create(std::string title, std::vector<std::string> options);
+
+};
