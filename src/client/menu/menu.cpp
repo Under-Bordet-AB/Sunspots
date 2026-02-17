@@ -8,36 +8,42 @@ void Menu::mainMenu()
 {
     std::vector<std::string> options = { "Check health", "Option 2", "Option 3", "Option 4", "Exit" };
 
-    int selection = create("MAIN MENU", options);
-    switch (selection)
+    while (true)
     {
-        case 0:
+        int selection = create("MAIN MENU", options);
+        char buf;
+        switch (selection)
         {
-            HttpClient httpClient(HOST, PORT);
-            std::string response = httpClient.get("/health");
-            std::cout << response << "\n";
-            break;
-        }
-        case 1:
-        {
-            // Option 2
-            break;
-        }
-        case 2:
-        {
-            // Option 3
-            break;
-        }
-        case 3:
-        {
-            // Option 4
-            break;
-        }
-        case 4:
-        {
-            std::cout << "Exiting program...\n";
-            exit(EXIT_SUCCESS);
-            break;
+            case 0:
+            {
+                HttpClient httpClient(HOST, PORT);
+                std::string response = httpClient.get("/health");
+                std::cout << response << "\n";
+                std::cout << "Enter any key to continue" << std::endl;
+                std::cin >> buf;
+                break;
+            }
+            case 1:
+            {
+                // Option 2
+                break;
+            }
+            case 2:
+            {
+                // Option 3
+                break;
+            }
+            case 3:
+            {
+                // Option 4
+                break;
+            }
+            case 4:
+            {
+                std::cout << "Exiting program...\n";
+                exit(EXIT_SUCCESS);
+                break;
+            }
         }
     }
 }
@@ -62,7 +68,6 @@ int Menu::create(std::string title, std::vector<std::string> options)
                 std::cout << "* " << options[i] << "\n";
         }
         std::cout << "* * * * * * *" << std::endl;
-
 
         // Input handling
         Input::Key keyPressed = Input::getArrowKey();
