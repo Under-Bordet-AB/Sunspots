@@ -1,40 +1,57 @@
 #include "menu.hpp"
+#include "../http/http_client.hpp"
 #include <iostream>
 
 Menu::Menu()
     : selected(0)
-{}
+{
+    main();
+}
 
 void Menu::main()
 {
-    std::vector<std::string> options = { "Option 1", "Option 2", "Option 3", "Option 4", "Exit" };
+    std::vector<std::string> options = { "Check health", "Option 2", "Option 3", "Option 4", "Exit" };
 
     int selection = create("MAIN MENU", options);
     switch (selection)
     {
-    case 0:
-        /* code */
-        break;
-    case 1:
-        /* code */
-        break;
-    case 2:
-        /* code */
-        break;
-    case 3:
-        /* code */
-        break;
-    case 4:
-        /* code */
-        break;
+        case 0:
+        {
+            HttpClient httpClient(HOST, PORT);
+            std::string response = httpClient.get("/health");
+            std::cout << response << "\n";
+            break;
+        }
+        case 1:
+        {
+            // Option 2
+            break;
+        }
+        case 2:
+        {
+            // Option 3
+            break;
+        }
+        case 3:
+        {
+            // Option 4
+            break;
+        }
+        case 4:
+        {
+            std::cout << "Exiting program...\n";
+            exit(EXIT_SUCCESS);
+            break;
+        }
     }
 }
 
-// Creates an dynamic interactable list
+// Creates, displays and selects in a dynamic interactable list
 // Returns the index in the vector that was selected
 int Menu::create(std::string title, std::vector<std::string> options)
 {
     size_t selected = 0;
+
     while (true)
     {
         clearScreen();
@@ -50,6 +67,8 @@ int Menu::create(std::string title, std::vector<std::string> options)
         }
         std::cout << "* * * * * * *" << std::endl;
 
+
+        // Input handling
         Input::Key keyPressed = Input::getArrowKey();
 
         if (keyPressed == Input::Key::UP && selected > 0)
