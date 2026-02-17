@@ -5,11 +5,6 @@
 int main()
 {
     Menu menu;
-    menu.main();
-
-    HttpClient httpClient(HOST, PORT);
-    std::string response = httpClient.get("/option1.txt");
-    std::cout << response << "\n";
     
     return 0;
 }
