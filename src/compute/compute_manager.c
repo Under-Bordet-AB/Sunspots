@@ -37,7 +37,7 @@ int main() {
     // Compute
     // Save result
 
-    exit(EXIT_FAILURE);
+    exit(EXIT_SUCCESS);
 }
 
 void cleanup(void) {
