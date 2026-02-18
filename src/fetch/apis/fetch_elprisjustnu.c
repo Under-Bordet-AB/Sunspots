@@ -69,29 +69,41 @@ int main() {
 }
 
 int normalize_data(char* raw_in, price_data_t** out) {
-    if (!out || !out) {
+    if (!raw_in || !out) {
         return -1;
     }
 
-    *out = malloc(sizeof(price_data_t));
-    if (!*out) {
+    *out = NULL;
+
+    price_data_t* data = malloc(sizeof(price_data_t));
+    if (!data) {
         return -1;
     }
 
-    price_data_init(*out, 3);
+    price_data_init(data, 3);
 
     cJSON* json_obj = cJSON_Parse(raw_in);
-    if (transform_elprisetjustnu_price(json_obj, *out) != TRANSFORM_OK) {
+    if (!json_obj) {
+        price_data_dispose(data);
+        free(data);
+        return -1;
+    }
+
+    if (transform_elprisetjustnu_price(json_obj, data) != TRANSFORM_OK) {
+        cJSON_Delete(json_obj);
+        price_data_dispose(data);
+        free(data);
         return -1;
     }
 
     cJSON_Delete(json_obj);
+    *out = data;
 
     return 0;
 }
 
 int save_to_database(price_data_t* price_data) {
-    for (int i = 0; i < price_data->no_data_points, i++) {
+    for (int i = 0; i < price_data->no_data_points; i++) {
         // save each datapoint with its respective timestamp (in its timeslot database wise)
     }
 

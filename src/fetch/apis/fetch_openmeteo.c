@@ -63,28 +63,40 @@ int main() {
 }
 
 int normalize_data(char* raw_in, weather_data_t** out) {
-    if (!out || !out) {
+    if (!raw_in || !out) {
         return -1;
     }
 
-    *out = malloc(sizeof(weather_data_t));
-    if (!*out) {
+    *out = NULL;
+
+    weather_data_t* data = malloc(sizeof(weather_data_t));
+    if (!data) {
         return -1;
     }
 
-    weather_data_init(*out);
+    weather_data_init(data);
 
     cJSON* json_obj = cJSON_Parse(raw_in);
-    if (transform_openmeteo_weather(json_obj, *out) != TRANSFORM_OK) {
+    if (!json_obj) {
+        free(data);
         return -1;
     }
 
-    if (transform_openmeteo_solar(json_obj, *out) != TRANSFORM_OK) {
+    if (transform_openmeteo_weather(json_obj, data) != TRANSFORM_OK) {
+        cJSON_Delete(json_obj);
+        free(data);
+        return -1;
+    }
+
+    if (transform_openmeteo_solar(json_obj, data) != TRANSFORM_OK) {
+        cJSON_Delete(json_obj);
+        free(data);
         return -1;
     }
 
     cJSON_Delete(json_obj);
-
+    *out = data;
+    
     return 0;
 }
 
