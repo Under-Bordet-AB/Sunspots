@@ -28,6 +28,8 @@
 
 # Build directories
 build/
+build-cov/
+build-*/
 bin/
 out/
 
@@ -55,6 +57,17 @@ scripts/out/
 .notes/
 
 .cache/
+
+# Coverage artifacts
+coverage*.json
+coverage*.xml
+coverage*.html
+coverage/
+*.gcov
+*.gcda
+*.gcno
+*.profraw
+*.profdata
 
 # Fuzzing generated artifacts and corpora
 crash-*

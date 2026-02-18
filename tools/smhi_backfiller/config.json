@@ -1,0 +1,44 @@
+{
+    "tool": "smhi_backfiller",
+    "description": "SMHI Database Monitor - monitors comprehensive canonical records from SMHI source",
+    "enabled": true,
+    "database_path": "db/sdk_canonical.db",
+    "log_to_file": true,
+    "log_file": "logs/smhi_backfiller.log",
+    "monitor_interval_seconds": 60,
+    "supported_metrics": [
+        "weather.temperature.air.2m.c",
+        "weather.temperature.dew.point.c",
+        "weather.temperature.apparent.c",
+        "weather.humidity.relative.2m.pct",
+        "weather.wind.speed.10m.ms",
+        "weather.wind.gust.10m.ms",
+        "weather.wind.direction.10m.deg",
+        "weather.pressure.msl.hpa",
+        "weather.precip.amount.mm",
+        "weather.precip.probability.pct",
+        "weather.precip.thunderstorm.pct",
+        "weather.cloud.cover.total.pct",
+        "weather.visibility.km",
+        "weather.radiation.shortwave.wm2",
+        "weather.fog.probability.pct",
+        "weather.condition.symbol.code"
+    ],
+    "locations": [
+        {
+            "name": "Stockholm",
+            "latitude": 59.3293,
+            "longitude": 18.0686
+        },
+        {
+            "name": "Gothenburg",
+            "latitude": 57.7089,
+            "longitude": 11.9746
+        },
+        {
+            "name": "Malmö",
+            "latitude": 55.6050,
+            "longitude": 13.0038
+        }
+    ]
+}

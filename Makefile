@@ -17,6 +17,8 @@ FUZZ_CORPUS_DIR ?= fuzz/corpus
 FUZZ_LOG_DIR ?= build/fuzz-logs
 FUZZ_ARTIFACT_DIR ?= build/fuzz-artifacts
 FUZZ_AFL_OUT_DIR ?= build/afl-out
+COVERAGE_OUT_DIR ?= scripts/out/coverage
+COVERAGE_SRC_JSON ?= $(COVERAGE_OUT_DIR)/coverage_src_current.json
 
 CMAKE_FLAGS := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=$(CONFIG) \
@@ -24,7 +26,7 @@ CMAKE_FLAGS := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
-.PHONY: configure build rebuild test test-unit test-integration test-component run bench valgrind tidy fuzz-configure fuzz-build fuzz-run fuzz-all fuzz check-code clean deepclean
+.PHONY: configure build rebuild test test-unit test-integration test-component run stop bench valgrind tidy fuzz-configure fuzz-build fuzz-run fuzz-all fuzz check-code coverage-json check-scripts clean deepclean
 
 configure:
 	@$(CMAKE) $(CMAKE_FLAGS)
@@ -56,17 +58,20 @@ test-component: build
 	@$(CTEST) --test-dir "$(BUILD_DIR)" --output-on-failure --no-tests=error -L "component:$(COMPONENT)"
 
 run: build
-	@if [ -z "$(COMPONENT)" ]; then \
-		echo "Set COMPONENT=<target>, e.g. make run COMPONENT=sunspots_frontend"; \
-		exit 1; \
-	fi
-	@component_bin="$$(find "$(BUILD_DIR)" -type f -perm -111 -name "$(COMPONENT)" | head -n 1)"; \
+	@component="$${COMPONENT:-sunspots_daemon}"; \
+	component_bin="$$(find "$(BUILD_DIR)" -type f -perm -111 -name "$$component" | head -n 1)"; \
 	if [ -z "$$component_bin" ]; then \
-		echo "run: could not find executable named '$(COMPONENT)' under $(BUILD_DIR)"; \
+		echo "run: could not find executable named '$$component' under $(BUILD_DIR)"; \
 		echo "run: build with that target name first or pass the exact executable name"; \
+		echo "run: to override, use: make run COMPONENT=<name>"; \
 		exit 1; \
 	fi; \
 	"$$component_bin" $(ARGS)
+
+stop:
+	@pkill -SIGINT -f "$(BUILD_DIR)/src/core/sunspots_daemon" || echo "sunspots_daemon not running"; \
+	sleep 1; \
+	echo "Sent SIGINT to sunspots_daemon for graceful shutdown"
 
 bench: build
 	@if [ ! -x "$(BUILD_DIR)/benchmarks/sample_benchmark" ] || [ ! -x "$(BUILD_DIR)/benchmarks/sdk_db_benchmark" ]; then \
@@ -169,6 +174,19 @@ check-code:
 		--out scripts/check_code_out.md \
 		--unsafe-rules scripts/unsafe.md \
 		--unsafe-out scripts/check_code_unsafe_out.md
+
+coverage-json:
+	@mkdir -p "$(COVERAGE_OUT_DIR)"
+	@python3 -m gcovr -j 1 -r . build-cov --json "$(COVERAGE_SRC_JSON)" >/dev/null
+	@echo "Wrote coverage report: $(COVERAGE_SRC_JSON)"
+
+check-scripts: coverage-json
+	@python3 scripts/check_code.py \
+		--out scripts/check_code_out.md \
+		--unsafe-rules scripts/unsafe.md \
+		--unsafe-out scripts/check_code_unsafe_out.md
+	@python3 scripts/check_testability.py
+	@python3 scripts/check_modules_report.py --coverage-json "$(COVERAGE_SRC_JSON)"
 
 clean:
 	@for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)" "$(FUZZ_BUILD_DIR)" "build/tidy"; do \

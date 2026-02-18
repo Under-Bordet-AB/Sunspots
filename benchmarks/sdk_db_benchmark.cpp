@@ -6,7 +6,6 @@
 #include <ctime>
 #include <string>
 
-#include <fcntl.h>
 #include <unistd.h>
 
 extern "C" {
@@ -17,6 +16,14 @@ namespace {
 
 std::string g_db_dir;
 std::string g_db_path;
+
+int64_t align_slot(int64_t ts_utc)
+{
+    if (ts_utc < 0) {
+        return 0;
+    }
+    return ts_utc - (ts_utc % 900);
+}
 
 bool ensure_bench_db_path()
 {
@@ -31,7 +38,7 @@ bool ensure_bench_db_path()
     }
 
     g_db_dir = dir;
-    g_db_path = g_db_dir + "/sdk_bench.tsv";
+    g_db_path = g_db_dir + "/sdk_bench.db";
     if (setenv("SS_SDK_DB_PATH", g_db_path.c_str(), 1) != 0) {
         return false;
     }
@@ -39,21 +46,18 @@ bool ensure_bench_db_path()
     return true;
 }
 
-bool truncate_db_file()
+bool reset_db_file()
 {
     if (!ensure_bench_db_path()) {
         return false;
     }
 
-    const int fd = open(g_db_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0664);
-    if (fd < 0) {
-        return false;
-    }
-    close(fd);
+    ss_sdk_shutdown();
+    (void)unlink(g_db_path.c_str());
     return true;
 }
 
-ss_sdk_record make_record(int64_t ts_start, double value, const char *source_field)
+ss_sdk_record make_record(int64_t ts_start, double value)
 {
     ss_sdk_record rec;
     std::memset(&rec, 0, sizeof(rec));
@@ -61,24 +65,26 @@ ss_sdk_record make_record(int64_t ts_start, double value, const char *source_fie
     rec.value_type = SS_SDK_VALUE_F64;
     rec.value.f64 = value;
     rec.ts_start_utc = ts_start;
-    rec.ts_end_utc = ts_start + 60;
+    rec.ts_end_utc = ts_start + 900;
     rec.data_kind = SS_SDK_DATA_OBSERVATION;
-    rec.source_api = "benchmark";
-    rec.source_field = source_field;
-    rec.source_tz = "UTC";
-    rec.model_id = "";
     return rec;
 }
 
-bool seed_db_rows(int rows)
+bool seed_db_rows(int rows, int64_t *out_start)
 {
-    if (!truncate_db_file()) {
+    int64_t base;
+
+    if (!reset_db_file()) {
         return false;
     }
 
-    const int64_t base = (int64_t)time(NULL) - 3600;
+    base = align_slot((int64_t)time(NULL)) - (int64_t)rows * 900;
+    if (out_start != NULL) {
+        *out_start = base;
+    }
+
     for (int i = 0; i < rows; ++i) {
-        const ss_sdk_record rec = make_record(base + i * 60, 10.0 + (double)(i % 20), "temperature_2m");
+        const ss_sdk_record rec = make_record(base + (int64_t)i * 900, 10.0 + (double)(i % 20));
         if (ss_sdk_db_write_record(&rec) != SS_SDK_OK) {
             return false;
         }
@@ -98,15 +104,14 @@ static void BM_SdkDbWriteSingle(benchmark::State &state)
 
     int seq = 0;
     for (auto _ : state) {
-        state.PauseTiming();
-        if (!truncate_db_file()) {
-            state.SkipWithError("failed to truncate benchmark DB");
+        const int64_t now_slot = align_slot((int64_t)time(NULL));
+        const ss_sdk_record rec = make_record(now_slot + (int64_t)seq * 900, 7.5 + (double)(seq % 5));
+        ++seq;
+
+        if (!reset_db_file()) {
+            state.SkipWithError("failed to reset benchmark DB");
             return;
         }
-        const int64_t now = (int64_t)time(NULL);
-        const ss_sdk_record rec = make_record(now + seq, 7.5 + (double)(seq % 5), "temperature_2m");
-        ++seq;
-        state.ResumeTiming();
 
         const ss_sdk_status rc = ss_sdk_db_write_record(&rec);
         if (rc != SS_SDK_OK) {
@@ -125,20 +130,18 @@ static void BM_SdkDbWriteDuplicate(benchmark::State &state)
         return;
     }
 
-    const int64_t now = (int64_t)time(NULL);
-    const ss_sdk_record rec = make_record(now, 14.0, "temperature_2m");
+    const int64_t now_slot = align_slot((int64_t)time(NULL));
+    const ss_sdk_record rec = make_record(now_slot, 14.0);
 
     for (auto _ : state) {
-        state.PauseTiming();
-        if (!truncate_db_file()) {
-            state.SkipWithError("failed to truncate benchmark DB");
+        if (!reset_db_file()) {
+            state.SkipWithError("failed to reset benchmark DB");
             return;
         }
         if (ss_sdk_db_write_record(&rec) != SS_SDK_OK) {
             state.SkipWithError("failed to seed duplicate row");
             return;
         }
-        state.ResumeTiming();
 
         const ss_sdk_status rc = ss_sdk_db_write_record(&rec);
         if (rc != SS_SDK_OK) {
@@ -150,25 +153,29 @@ static void BM_SdkDbWriteDuplicate(benchmark::State &state)
 }
 BENCHMARK(BM_SdkDbWriteDuplicate);
 
-static void BM_SdkDbReadLastWeeks(benchmark::State &state)
+static void BM_SdkDbReadCanonical(benchmark::State &state)
 {
-    if (!seed_db_rows(256)) {
+    int64_t start_utc = 0;
+    if (!seed_db_rows(256, &start_utc)) {
         state.SkipWithError("failed to seed benchmark DB rows");
         return;
     }
 
     for (auto _ : state) {
-        ss_sdk_record *rows = NULL;
-        size_t count = 0;
-        const ss_sdk_status rc = ss_sdk_db_get_last_weeks(8, &rows, &count);
+        ss_sdk_samples_out out = {NULL, 0};
+        const ss_sdk_status rc = ss_sdk_db_get_canonical(
+            start_utc,
+            256,
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            &out);
         if (rc != SS_SDK_OK) {
-            state.SkipWithError("ss_sdk_db_get_last_weeks failed");
+            state.SkipWithError("ss_sdk_db_get_canonical failed");
             return;
         }
-        benchmark::DoNotOptimize(count);
-        ss_sdk_db_free_records(rows);
+        benchmark::DoNotOptimize(out.count);
+        ss_sdk_db_free_samples(&out);
     }
 }
-BENCHMARK(BM_SdkDbReadLastWeeks);
+BENCHMARK(BM_SdkDbReadCanonical);
 
 BENCHMARK_MAIN();

@@ -15,6 +15,7 @@ target_link_libraries(sunspots_compute_manager
   PRIVATE
     sunspots_compute
     sunspots_cjson
+    sunspots_sdk
     Threads::Threads
 )
 target_compile_features(sunspots_compute_manager PRIVATE c_std_99)

@@ -21,9 +21,9 @@ const ss_metric_meta *ss_metric_meta_get(ss_metric_id id)
 
 const char *ss_metric_name(ss_metric_id id)
 {
-    const ss_metric_meta *meta = ss_metric_meta_get(id);
-    if (meta == NULL) {
+    const ss_metric_meta *metric_metadata = ss_metric_meta_get(id);
+    if (metric_metadata == NULL) {
         return NULL;
     }
-    return meta->canonical_name;
+    return metric_metadata->canonical_name;
 }

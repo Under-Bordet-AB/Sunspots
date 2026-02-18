@@ -19,7 +19,7 @@ namespace {
 
 std::string g_db_path;
 
-bool write_all(int fd, const char *buf, size_t len)
+bool write_all(int fd, const uint8_t *buf, size_t len)
 {
     size_t off = 0;
     while (off < len) {
@@ -47,16 +47,24 @@ const std::string &fuzz_db_path()
     char tpl[] = "/tmp/sunspots_sdk_db_fuzz_XXXXXX";
     char *dir = mkdtemp(tpl);
     if (dir == NULL) {
-        g_db_path = "/tmp/sunspots_sdk_db_fuzz.tsv";
+        g_db_path = "/tmp/sunspots_sdk_db_fuzz.db";
     } else {
-        g_db_path = std::string(dir) + "/db.tsv";
+        g_db_path = std::string(dir) + "/db.sqlite";
     }
 
     (void)setenv("SS_SDK_DB_PATH", g_db_path.c_str(), 1);
     return g_db_path;
 }
 
-void write_mutated_text_rows(const uint8_t *data, size_t size)
+int64_t align_slot(int64_t ts)
+{
+    if (ts < 0) {
+        return 0;
+    }
+    return ts - (ts % 900);
+}
+
+void write_mutated_blob(const uint8_t *data, size_t size)
 {
     const std::string &path = fuzz_db_path();
     int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0664);
@@ -64,26 +72,8 @@ void write_mutated_text_rows(const uint8_t *data, size_t size)
         return;
     }
 
-    std::string text;
     const size_t cap = (size > 4096U) ? 4096U : size;
-    text.reserve(cap + 1U);
-
-    for (size_t i = 0; i < cap; ++i) {
-        const uint8_t b = data[i];
-        char ch = (char)((b % 95U) + 32U);
-        if ((b % 17U) == 0U) {
-            ch = '\t';
-        } else if ((b % 29U) == 0U) {
-            ch = '\n';
-        }
-        text.push_back(ch);
-    }
-
-    if (text.empty() || text[text.size() - 1] != '\n') {
-        text.push_back('\n');
-    }
-
-    (void)write_all(fd, text.data(), text.size());
+    (void)write_all(fd, data, cap);
     close(fd);
 }
 
@@ -100,19 +90,16 @@ ss_sdk_record make_record_from_bytes(const uint8_t *data, size_t size)
         }
     }
 
-    const int64_t now = (int64_t)time(NULL);
-    const int64_t offset = (size > 0U) ? (int64_t)(data[0] % 120U) : 0;
+    const int64_t now_utc = (int64_t)time(NULL);
+    const int64_t offset_slots = (size > 0U) ? (int64_t)(data[0] % 8U) : 0;
+    const int64_t slot = align_slot(now_utc) + offset_slots * 900;
 
     rec.metric = SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C;
     rec.value_type = SS_SDK_VALUE_F64;
     rec.value.f64 = value;
-    rec.ts_start_utc = now - offset;
-    rec.ts_end_utc = rec.ts_start_utc + 60;
-    rec.data_kind = SS_SDK_DATA_OBSERVATION;
-    rec.source_api = "sdk_db_fuzzer";
-    rec.source_field = "temperature_2m";
-    rec.source_tz = "UTC";
-    rec.model_id = "";
+    rec.ts_start_utc = slot;
+    rec.ts_end_utc = slot + 900;
+    rec.data_kind = (size > 1U && (data[1] & 1U)) ? SS_SDK_DATA_FORECAST : SS_SDK_DATA_OBSERVATION;
 
     return rec;
 }
@@ -125,20 +112,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         return 0;
     }
 
-    write_mutated_text_rows(data, size);
+    write_mutated_blob(data, size);
 
-    ss_sdk_record *rows = NULL;
-    size_t count = 0;
-    (void)ss_sdk_db_get_last_weeks(8, &rows, &count);
-    ss_sdk_db_free_records(rows);
+    ss_sdk_samples_out out = {NULL, 0};
+    (void)ss_sdk_db_get_canonical(0, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out);
+    ss_sdk_db_free_samples(&out);
 
     const ss_sdk_record rec = make_record_from_bytes(data, size);
     (void)ss_sdk_db_write_record(&rec);
 
-    rows = NULL;
-    count = 0;
-    (void)ss_sdk_db_get_last_weeks(8, &rows, &count);
-    ss_sdk_db_free_records(rows);
+    out.samples = NULL;
+    out.count = 0;
+    (void)ss_sdk_db_get_canonical(rec.ts_start_utc, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out);
+    ss_sdk_db_free_samples(&out);
 
     return 0;
 }

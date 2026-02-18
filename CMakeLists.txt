@@ -17,6 +17,7 @@ include(SunspotsOptions)
 include(SunspotsDependencies)
 
 add_subdirectory(src)
+add_subdirectory(tools)
 
 if(BUILD_TESTING)
   add_subdirectory(tests)

@@ -1,0 +1,2 @@
+add_subdirectory(sdk_db_test)
+add_subdirectory(smhi_backfiller)

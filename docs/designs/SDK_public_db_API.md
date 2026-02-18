@@ -12,12 +12,12 @@ Define the smallest useful SDK DB API for calculator and fetcher modules.
 4. Only runtime config is `sdk_db.db_path` from daemon env config.
 5. Calculator data model is UTC 15-minute slots.
 6. Public read API is single-canonical (`ss_sdk_db_get_canonical`).
-7. Default read behavior is now-slot only (one 15-minute slot).
+7. Typical bounded read behavior is one now-slot (`quarters_to_fetch=1`); `quarters_to_fetch=0` is forward horizon.
 8. Canonical DB stores canonical slot values only; source/provenance fields are not part of canonical schema.
 9. Read windows use half-open interval semantics: `[start_utc, end_utc)` (`end_utc` exclusive).
 10. V1 canonical payload types are limited to `i64` / `f64` / `bool` (no string canonical values in V1).
 11. `from_utc` normalization order is strict: validate `from_utc >= 0`; then `0 => current slot`; otherwise floor-align to 15-minute slot start (`aligned = ts - (ts % 900)`).
-12. `quarters_to_fetch` normalization is: `0` or `1` => fetch `1` quarter.
+12. `quarters_to_fetch` normalization is: `0` => forward horizon from start slot; non-zero => exact number of quarters.
 13. `quarters_to_fetch` hard cap is `672` quarters (7 days); larger values return `SS_SDK_ERR_INVALID_ARG`.
 14. Any function that is not part of an exposed header must be `static` (file-local).
 15. `src/sdk/ss_canonical.def` (X-macro catalog) is the single source of truth for canonical IDs, value types, and units.
@@ -56,7 +56,7 @@ ss_sdk_status ss_sdk_db_write_record(const ss_sdk_record *record);
 
 ss_sdk_status ss_sdk_db_get_canonical(
     int64_t from_utc,               /* validate >=0; 0 => current slot; non-zero auto-floor-aligns (example: 1735689733 => 1735689600) */
-    uint16_t quarters_to_fetch,     /* 0 or 1 => fetch 1 quarter; example: 2 => fetch 2 quarters */
+    uint16_t quarters_to_fetch,     /* 0 => forward horizon from start slot; >0 => exact number of quarters */
     ss_metric_id canonical,
     ss_sdk_samples_out *out
 );
@@ -71,16 +71,17 @@ void ss_sdk_shutdown(void);
 2. `from_utc == 0` resolves to current UTC 15m slot (`:00`, `:15`, `:30`, `:45`).
 3. For `from_utc > 0`, SDK floor-aligns to 15m slot start: `start_utc = from_utc - (from_utc % 900)`.
 4. If floor-alignment from rule 3 yields `start_utc == 0` (for example input `1..899`), start slot is UNIX epoch start (`0`), not current slot.
-5. For `ss_sdk_db_get_canonical`, `quarters_to_fetch=0` or `quarters_to_fetch=1` both mean fetch 1 quarter.
-6. For `ss_sdk_db_get_canonical`, `quarters_to_fetch > 672` returns `SS_SDK_ERR_INVALID_ARG`.
-7. Window slots are exactly `effective_quarters_to_fetch` slots:
-   `ts_utc = start_utc + k*900`, where `k in [0, effective_quarters_to_fetch)`.
-8. Equivalent interval form is `[start_utc, start_utc + effective_quarters_to_fetch*900)` (`end_utc` exclusive).
-9. Selection is based on relation to `now_slot` (not based on first returned element):
-10. For `ts < now_slot`, prefer observation; fallback to forecast; then interpolation (if allowed).
-11. For `ts == now_slot`, prefer observation; fallback to forecast; then interpolation (if allowed).
-12. For `ts > now_slot`, use forecast first; fallback to interpolation (if allowed).
-13. Interpolation policy is hardcoded in read-selection code by canonical ID with this V1 map (normative for V1):
+5. For `ss_sdk_db_get_canonical`, `quarters_to_fetch=0` means fetch from `start_utc` through latest available stored slot for the canonical metric (forward horizon).
+6. For `ss_sdk_db_get_canonical`, `quarters_to_fetch=1` means fetch exactly one quarter.
+7. For `ss_sdk_db_get_canonical`, `quarters_to_fetch > 672` returns `SS_SDK_ERR_INVALID_ARG`.
+8. For `quarters_to_fetch > 0`, window slots are exactly `quarters_to_fetch` slots:
+   `ts_utc = start_utc + k*900`, where `k in [0, quarters_to_fetch)`.
+9. Equivalent interval form for bounded reads is `[start_utc, start_utc + quarters_to_fetch*900)` (`end_utc` exclusive).
+10. Selection is based on relation to `now_slot` (not based on first returned element):
+11. For `ts < now_slot`, prefer observation; fallback to forecast; then interpolation (if allowed).
+12. For `ts == now_slot`, prefer observation; fallback to forecast; then interpolation (if allowed).
+13. For `ts > now_slot`, use forecast first; fallback to interpolation (if allowed).
+14. Interpolation policy is hardcoded in read-selection code by canonical ID with this V1 map (normative for V1):
     Linear interpolation allowed:
     `SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C`,
     `SS_METRIC_WEATHER_HUMIDITY_RELATIVE_2M_PCT`,
@@ -97,23 +98,26 @@ void ss_sdk_shutdown(void);
     `SS_METRIC_WEATHER_PRECIP_PROBABILITY_PCT`,
     `SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2`,
     `SS_METRIC_ENERGY_FX_SEK_PER_EUR`.
-14. Step-expand hourly (no linear interpolation):
+15. Step-expand hourly (no linear interpolation):
     `SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH`,
     `SS_METRIC_ENERGY_PRICE_SPOT_EUR_KWH`.
-15. No interpolation:
-    `SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE`.
-16. Any canonical add/remove in `ss_canonical.def` must update this interpolation map in the same change; implementation must enforce full canonical coverage (no silent fallback policy).
-17. Canonical schema disallows multi-row ties within the same class for the same slot (`UNIQUE(canonical, data_kind, ts_start_utc)`).
-18. Output sort order is deterministic: `(ts_utc ASC, canonical ASC)`.
-19. `SS_SDK_OK` is returned only when the requested canonical has one selected value for every slot in the requested window.
-20. `SS_SDK_ERR_PARTIAL_DATA` is returned when one or more requested slots are missing after selection policy, including the case where no rows are returned.
-21. Caller provides a non-NULL `out`; SDK overwrites `out->samples` and `out->count`.
-22. If `out->samples` is non-NULL after call (including `SS_SDK_ERR_PARTIAL_DATA`), caller must call `ss_sdk_db_free_samples(&out)`.
-23. `canonical` must be a valid `ss_metric_id` from `ss_canonical.def`.
-24. In V1, caller must explicitly provide one canonical ID per read call.
-25. `ss_sdk_db_write_record` must reject any record where canonical ID is unknown or record value type does not match canonical metadata.
-26. Canonical read APIs only read canonical rows from the canonical `records` table.
-27. Canonical DB rows in V1 must use only `SS_SDK_VALUE_I64`, `SS_SDK_VALUE_F64`, or `SS_SDK_VALUE_BOOL`; any other value type is invalid.
+16. Interpolation length is capped to 6 hours (`21600` seconds) for both linear and step policies.
+17. If any requested slot would require interpolation beyond the 6-hour interpolation length limit, the read call fails with `SS_SDK_ERR_PARTIAL_DATA` and returns no samples.
+18. No interpolation:
+    `SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE`,
+    `SS_METRIC_WEATHER_IS_DAY`.
+19. Any canonical add/remove in `ss_canonical.def` must update this interpolation map in the same change; implementation must enforce full canonical coverage (no silent fallback policy).
+20. Canonical schema disallows multi-row ties within the same class for the same slot (`UNIQUE(canonical, data_kind, ts_start_utc)`).
+21. Output sort order is deterministic: `(ts_utc ASC, canonical ASC)`.
+22. `SS_SDK_OK` is returned only when the requested canonical has one selected value for every slot in the requested window.
+23. `SS_SDK_ERR_PARTIAL_DATA` is returned when one or more requested slots are missing after selection policy, including the case where no rows are returned.
+24. Caller provides a non-NULL `out`; SDK overwrites `out->samples` and `out->count`.
+25. If `out->samples` is non-NULL after call (including `SS_SDK_ERR_PARTIAL_DATA`), caller must call `ss_sdk_db_free_samples(&out)`.
+26. `canonical` must be a valid `ss_metric_id` from `ss_canonical.def`.
+27. In V1, caller must explicitly provide one canonical ID per read call.
+28. `ss_sdk_db_write_record` must reject any record where canonical ID is unknown or record value type does not match canonical metadata.
+29. Canonical read APIs only read canonical rows from the canonical `records` table.
+30. Canonical DB rows in V1 must use only `SS_SDK_VALUE_I64`, `SS_SDK_VALUE_F64`, or `SS_SDK_VALUE_BOOL`; any other value type is invalid.
 
 ## 5. Error Contract
 
@@ -129,13 +133,15 @@ void ss_sdk_shutdown(void);
 3. `SS_SDK_ERR_INVALID_ARG`
 4. `SS_SDK_ERR_INTERNAL`
 
+Note: `SS_SDK_ERR_PARTIAL_DATA` completeness semantics are not yet implemented as a stable SDK contract.
+
 Read API notes:
 1. Invalid canonical enum IDs return `SS_SDK_ERR_INVALID_ARG`.
 2. Validation order is: validate `from_utc >= 0` first, then normalize `from_utc` per rules in Section 4.
 3. `quarters_to_fetch > 672` returns `SS_SDK_ERR_INVALID_ARG`.
 4. SQLite busy-timeout exhaustion and lock failures map to `SS_SDK_ERR_INTERNAL` in V1.
-5. Calculator/default caller policy is strict completeness: treat `SS_SDK_ERR_PARTIAL_DATA` as an error path.
-6. Rows that fail canonical/type/shape checks during read are skipped; missing slots caused by skipped rows contribute to `SS_SDK_ERR_PARTIAL_DATA`.
+5. Calculator/default caller policy currently treats any non-`SS_SDK_OK` status as an error path.
+6. `SS_SDK_ERR_PARTIAL_DATA` triggering rules are TBD and will be specified when partial-data semantics are implemented.
 7. `ss_sdk_db_free_samples(&out)` is the required release path for any returned allocation and is safe when `out->samples == NULL`.
 
 ## 6. Internal Primitive API (Minimal)
@@ -206,48 +212,50 @@ If needed later, add one advanced query API with an options struct. Keep V1 mini
 
 ## 11. Usage Example
 
+See `docs/manual/sdk_db_callsite_example.c` for concise read/write call-site examples.
+The example checks SDK return codes but keeps non-SDK input checks minimal.
+The example intentionally does not handle `SS_SDK_ERR_PARTIAL_DATA`; any non-OK status is treated as failure.
+
 ```c
-/* Single canonical per call. */
 ss_sdk_samples_out out = {0};
+ss_sdk_status st;
+double sum = 0.0;
+size_t n = 0;
 
-ss_sdk_status st = ss_sdk_db_get_canonical(
-    0,                  /* from_utc: 0 => current aligned slot */
-    1,                  /* quarters_to_fetch: 0/1 => 1 quarter */
-    SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
-    &out
-);
-
-if (st == SS_SDK_OK) {
-    for (size_t i = 0; i < out.count; ++i) {
-        const ss_sdk_sample *s = &out.samples[i];
-        /* use s->ts_utc/s->canonical/s->flags and switch on s->value_type */
-    }
-} else {
-    /* strict calculator path: treat PARTIAL_DATA and all errors as failure */
+st = ss_sdk_db_get_canonical(0, 8, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out);
+if (st != SS_SDK_OK) {
+    return st;
 }
 
+for (size_t i = 0; i < out.count; ++i) {
+    if (out.samples[i].value_type != SS_SDK_VALUE_F64) {
+        continue;
+    }
+    sum += out.samples[i].value.f64;
+    n += 1;
+}
+if (n == 0) {
+    ss_sdk_db_free_samples(&out);
+    return SS_SDK_ERR_INTERNAL;
+}
+double avg_c = sum / (double)n;
 ss_sdk_db_free_samples(&out);
 
-/* Another canonical in a separate call. */
-ss_sdk_samples_out out_multi = {0};
-
-st = ss_sdk_db_get_canonical(
-    explicit_from_utc,   /* auto-aligned by SDK, example: 1735689733 => 1735689600 */
-    2,                   /* non-zero example: fetch 2 quarters */
-    SS_METRIC_WEATHER_WIND_SPEED_10M_MS,
-    &out_multi
+ss_sdk_record rec;
+st = ss_sdk_record_make_f64(
+    &rec,
+    SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+    avg_c,
+    (int64_t)time(NULL),
+    SS_SDK_DATA_OBSERVATION
 );
-
-if (st == SS_SDK_OK) {
-    for (size_t i = 0; i < out_multi.count; ++i) {
-        const ss_sdk_sample *s = &out_multi.samples[i];
-        /* deterministic order: ts_utc ASC, canonical ASC */
-    }
-} else {
-    /* strict calculator path: treat PARTIAL_DATA and all errors as failure */
+if (st != SS_SDK_OK) {
+    return st;
 }
-
-ss_sdk_db_free_samples(&out_multi);
+st = ss_sdk_db_write_record(&rec);
+if (st != SS_SDK_OK) {
+    return st;
+}
 ```
 
 ## 12. SQLite Runtime Policy
