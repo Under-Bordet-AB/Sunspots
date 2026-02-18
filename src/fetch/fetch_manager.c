@@ -9,7 +9,7 @@
 #include <sys/wait.h>
 #include <syslog.h>
 #include <unistd.h>
-#include <cJSON.h>
+#include "../libs/json/cJSON.h"
 
 #include "fetch_utils.h"
 
@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
     }
 
     // setup();
-    if (load_apis_from_json("fetch_manager_config.json") < 0) {
+    if (load_apis_from_json("./config/fetch_manager_config.json") < 0) {
         syslog(LOG_ERR, "Fetch Manager - Couldn't load config file.");
         exit(EXIT_FAILURE);
     }

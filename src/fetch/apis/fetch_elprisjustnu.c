@@ -96,8 +96,8 @@ void* heartbeat() {
             syslog(LOG_ERR, "Fetch API - Elprisjustnu - Couldn't signal daemon, terminating.");
             exit(EXIT_FAILURE);
         }
-        syslog(LOG_INFO, "Fetch API - Elprisjustnu - Beating...");
-        sleep(5);
+        //syslog(LOG_INFO, "Fetch API - Elprisjustnu - Beating...");
+        sleep(2);
     }
 
     return NULL;

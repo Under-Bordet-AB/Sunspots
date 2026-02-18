@@ -8,7 +8,21 @@
     "modules": [
         {
             "name": "Fetch",
-            "bin_path": "./src/fetch/fetch_manager",
+            "bin_path": "./build/debug/src/fetch/sunspots_fetch_manager",
+            "heartbeat_interval": 2,
+            "source_url": "https://api.sunspots.io/v1/data",
+            "retry_limit": 3
+        },
+		{
+            "name": "Frontend",
+            "bin_path": "./build/debug/src/frontend/sunspots_frontend",
+            "heartbeat_interval": 2,
+            "source_url": "https://api.sunspots.io/v1/data",
+            "retry_limit": 3
+        },
+		{
+            "name": "Compute",
+            "bin_path": "./build/debug/src/compute/sunspots_compute_manager",
             "heartbeat_interval": 2,
             "source_url": "https://api.sunspots.io/v1/data",
             "retry_limit": 3

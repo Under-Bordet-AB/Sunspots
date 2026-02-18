@@ -30,14 +30,23 @@ int main(int argc, char **argv)
 	/** resolve root path for project, path to config file and directory */
 	daemon_resolve_project_root();
 	char config_path[PATH_MAX];
+
+	/* if (access(config_path, R_OK) != 0) */
+	/* { */
+	/* 	fprintf(stderr, " !! FATAL; Config file missing or unreadable at %s\n", config_path); */
+	/* 	return EXIT_FAILURE; */
+	/* } */
+	/* while (1) */
+	/* { */
+	/* 	if (access("config/sunspots.json", R_OK) == 0) */
+	/* 	{ */
+	/* 		break; */
+	/* 	} */
+	/* 	chdir(".."); */
+	/* } */
 	if (snprintf(config_path, sizeof(config_path), "%s/config/%s", g_prj_root, CONFIG_FILENAME) == -1)
 	{
 		perror("snprintf failed");
-		return EXIT_FAILURE;
-	}
-	if (access(config_path, R_OK) != 0)
-	{
-		fprintf(stderr, " !! FATAL; Config file missing or unreadable at %s\n", config_path);
 		return EXIT_FAILURE;
 	}
 	char config_dir[PATH_MAX];
@@ -608,6 +617,7 @@ void daemon_resolve_project_root()
 	 * file of the current process.
 	 */
 	char exe_path[PATH_MAX];
+	char temp_path[PATH_MAX];
 	ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path));
 	if (len == -1)
 	{
@@ -615,19 +625,26 @@ void daemon_resolve_project_root()
 		exit(EXIT_FAILURE);
 	}
 	exe_path[len] = '\0';
-	/* add directory of binary */
-	char *bin_dir = dirname(exe_path);
-	char path_to_root[PATH_MAX];
-	snprintf(path_to_root, sizeof(path_to_root), "%s/../..", bin_dir);
-	/* realpath() expands all symbolic links and resolves references to /./, /../
-	 * and extra '/' characters in the null-terminated string named by path to produce
-	 * a canonicalized absolute pathname.
-	 */
-	if (realpath(path_to_root, g_prj_root) == NULL)
+
+	strcpy(temp_path, exe_path);
+	char *curr_dirr = dirname(temp_path);
+	/** walk buld tree until we find target */
+	while (strcmp(curr_dirr, "/") != 0)
 	{
-		fprintf(stderr," !! FATAL: Could not resolve project root from %s: %s\n",
-				path_to_root, strerror(errno));
+		char check_path[PATH_MAX];
+		/** what we are looking for */
+		snprintf(check_path, sizeof(check_path), "%s/config/sunspots.json", curr_dirr);
+		if (access(check_path, R_OK) == 0)
+		{
+			/** we found the anchor */
+			strncpy(g_prj_root, curr_dirr, PATH_MAX);
+			return;
+		}
+		/** go out one level */
+		curr_dirr = dirname(curr_dirr);
 	}
+	fprintf(stderr, " !! Fatal: Could not find anchor (./config/sunspots.json)!\n");
+	exit(EXIT_FAILURE);
 }
 
 /** Signal handling */
