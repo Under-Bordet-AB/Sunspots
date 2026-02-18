@@ -111,16 +111,47 @@ static void json_merge(cJSON* target, cJSON* source) {
             // We detach from source so source remains valid (but empty/partial)
             cJSON_DetachItemViaPointer(source, child);
 
-            // If it existed, replace it. If not, add it.
-            if (target_child) {  // NOLINT(bugprone-branch-clone)
-                cJSON_ReplaceItemInObjectCaseSensitive(target, child->string, child);
+            // BUGFIX(#7): never call cJSON_ReplaceItemInObjectCaseSensitive(...)
+            // with child->string when replacement is child, because cJSON frees
+            // replacement->string before duplicating the key.
+            if (target_child) {
+                if (!cJSON_ReplaceItemViaPointer(target, target_child, child)) {
+                    cJSON_Delete(child);
+                }
             } else {
-                cJSON_AddItemToObject(target, child->string, child);
+                if (!cJSON_AddItemToObject(target, child->string, child)) {
+                    cJSON_Delete(child);
+                }
             }
         }
 
         child = next;
     }
+}
+
+static int json_set_top_level_item(cJSON* root, const char* key, cJSON* item) {
+    if (!root || !key || !item) {
+        if (item) {
+            cJSON_Delete(item);
+        }
+        return -EINVAL;
+    }
+
+    cJSON* existing = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (existing) {
+        if (!cJSON_ReplaceItemInObjectCaseSensitive(root, key, item)) {
+            cJSON_Delete(item);
+            return -ENOMEM;
+        }
+        return 0;
+    }
+
+    if (!cJSON_AddItemToObject(root, key, item)) {
+        cJSON_Delete(item);
+        return -ENOMEM;
+    }
+
+    return 0;
 }
 
 /**
@@ -281,21 +312,36 @@ int config_load_env(config* cfg) {
         long val = strtol(env_port, &endptr, 10);
         if (*endptr == '\0') {
             cJSON* item = cJSON_CreateNumber((int) val);
-            cJSON_ReplaceItemInObjectCaseSensitive(TO_JSON(cfg), "port", item);
+            if (!item) {
+                return -ENOMEM;
+            }
+            if (json_set_top_level_item(TO_JSON(cfg), "port", item) != 0) {
+                return -ENOMEM;
+            }
         }
     }
 
     const char* env_host = getenv("SUNSPOTS_HOST");
     if (env_host) {
         cJSON* item = cJSON_CreateString(env_host);
-        cJSON_ReplaceItemInObjectCaseSensitive(TO_JSON(cfg), "host", item);
+        if (!item) {
+            return -ENOMEM;
+        }
+        if (json_set_top_level_item(TO_JSON(cfg), "host", item) != 0) {
+            return -ENOMEM;
+        }
     }
 
     const char* env_debug = getenv("SUNSPOTS_DEBUG");
     if (env_debug) {
         bool dbg = (strcmp(env_debug, "true") == 0 || strcmp(env_debug, "1") == 0);
         cJSON* item = cJSON_CreateBool(dbg);
-        cJSON_ReplaceItemInObjectCaseSensitive(TO_JSON(cfg), "debug", item);
+        if (!item) {
+            return -ENOMEM;
+        }
+        if (json_set_top_level_item(TO_JSON(cfg), "debug", item) != 0) {
+            return -ENOMEM;
+        }
     }
 
     return 0;

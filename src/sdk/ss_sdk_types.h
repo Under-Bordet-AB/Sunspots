@@ -15,9 +15,7 @@
 typedef enum {
     SS_SDK_VALUE_I64 = 0,
     SS_SDK_VALUE_F64,
-    SS_SDK_VALUE_STR,
     SS_SDK_VALUE_BOOL
 } ss_sdk_value_type;
 
 #endif
-

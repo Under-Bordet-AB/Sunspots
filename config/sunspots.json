@@ -27,5 +27,21 @@
             "source_url": "https://api.sunspots.io/v1/data",
             "retry_limit": 3
         }
-    ]
+    ],
+    "smhi_backfiller": {
+        "enabled": true,
+        "locations": [
+            {
+                "name": "Stockholm",
+                "latitude": 59.3293,
+                "longitude": 18.0686
+            }],
+        "forecast_horizon_hours": 72,
+        "slot_interval_minutes": 15,
+        "fetch_interval_seconds": 300,
+        "request_delay_ms": 1000,
+        "batch_size": 5,
+        "retry_on_error": true,
+        "max_retries": 3
+    }
 }

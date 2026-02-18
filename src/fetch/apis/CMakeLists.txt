@@ -6,6 +6,7 @@ function(sunspots_add_fetch_api target_name source_file)
     PRIVATE
       sunspots_curly
       sunspots_cjson
+      sunspots_sdk
       Threads::Threads
   )
   target_compile_features(${target_name} PRIVATE c_std_99)

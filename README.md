@@ -23,6 +23,17 @@ If you find a bug:
 - libcurl
 - pthreads (POSIX)
 - Optional: valgrind, clang-tidy, clang/clang++ (libFuzzer), AFL++ (afl-fuzz)
+'
+
+
+
+
+
+
+# MÖTE:
+- make run    // bygger och kör så enkelt som möjligt, kör dock tester
+- make stop   // 
+
 
 ## Make targets
 
@@ -106,8 +117,77 @@ Current reference files:
 ## Documentation
 
 - Existing component docs under `docs/manual/`
+- SDK usage manual: `docs/manual/sdk.md`
 - Build/test/benchmark bug review: `docs/bugs.md`
 - Fuzzing findings: `docs/fuzz.md`
+
+## Tools
+
+Sunspots includes utility tools for development and testing, located in `tools/` as self-contained modules.
+
+### SMHI Backfiller (`tools/smhi_backfiller/`)
+
+Continuously fetches SMHI (Swedish Meteorological and Hydrological Institute) weather forecast data and stores it in the SDK database. Useful for populating the database with comprehensive historical forecast data.
+
+**Features:**
+- Live console UI with real-time statistics
+- Automatic rate limit handling (respects HTTP 429)
+- Graceful shutdown on Ctrl+C
+- Configurable locations and fetch intervals
+
+**Usage:**
+```bash
+# Build the project first
+make build
+
+# Run with default configuration
+./tools/smhi_backfiller/run_smhi_backfiller.sh
+
+# Run with custom config and database path
+./tools/smhi_backfiller/run_smhi_backfiller.sh <config_file> <db_path>
+```
+
+**Configuration:**
+Edit `tools/smhi_backfiller/config.json` to customize:
+- Enabled status
+- Database path (outputs to `db/smhi_forecast.db` by default)
+- Log file location (outputs to `logs/smhi_backfiller.log`)
+- Monitor interval and supported metrics
+- Target locations
+
+**Output:**
+- Database: `db/smhi_forecast.db` (SQLite)
+- Logs: `logs/smhi_backfiller.log`
+
+### SDK Database Test Tool (`tools/sdk_db_test/`)
+
+Demonstrates SDK database functionality by fetching live weather data from Open-Meteo API, writing canonical records to SQLite, and exporting as JSON.
+
+**Usage:**
+```bash
+# Build the project first
+make build
+
+# Run with default parameters (Stockholm)
+./tools/sdk_db_test/run_sdk_db_test.sh
+
+# Custom output file
+./tools/sdk_db_test/run_sdk_db_test.sh logs/output.json
+
+# Custom database, output, and quarters to read
+./tools/sdk_db_test/run_sdk_db_test.sh logs/output.json db/custom.db 4
+```
+
+**Parameters:**
+- `latitude` (default: 59.3293 - Stockholm)
+- `longitude` (default: 18.0686 - Stockholm)
+- `output_file` (default: `logs/sdk_output.json`)
+- `db_path` (default: `db/sdk_canonical.db`)
+- `quarters` (default: 1 - number of 15-minute quarters to read)
+
+**Output:**
+- JSON output: `logs/sdk_output.json`
+- Database: `db/sdk_canonical.db` (SQLite)
 
 ## External references
 

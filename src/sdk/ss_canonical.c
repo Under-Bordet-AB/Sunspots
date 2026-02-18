@@ -3,7 +3,7 @@
 
 static const ss_metric_meta ss_metric_table[SS_METRIC_COUNT] = {
 /* Designated initializers keep enum ID and metadata table index aligned. */
-#define X(id, canonical_name, value_type, unit) [id] = { id, canonical_name, value_type, unit },
+#define X(id, canonical_name, value_type, unit) [id] = { canonical_name, unit, id, value_type },
 #include "sdk/ss_canonical.def"
 #undef X
 };
@@ -21,9 +21,9 @@ const ss_metric_meta *ss_metric_meta_get(ss_metric_id id)
 
 const char *ss_metric_name(ss_metric_id id)
 {
-    const ss_metric_meta *meta = ss_metric_meta_get(id);
-    if (meta == NULL) {
+    const ss_metric_meta *metric_metadata = ss_metric_meta_get(id);
+    if (metric_metadata == NULL) {
         return NULL;
     }
-    return meta->canonical_name;
+    return metric_metadata->canonical_name;
 }

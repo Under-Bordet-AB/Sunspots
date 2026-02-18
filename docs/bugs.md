@@ -1,21 +1,7 @@
 # Sunspots Bug Drop-off
 
 Date: February 13, 2026  
-Purpose: Handoff list of known bugs discovered during build/test/benchmark/fuzz work.
-
-This list is now sorted by module folder so each module owner can scan only their area.
-Original bug IDs are preserved as `#<id>` for continuity.
-
-## Module Ownership Hints (Git History)
-
-- `src/core`: first commit author `timackevald@gmail.com`; top contributors `timackevald@gmail.com`, `Jimmy Jordan`, `gustavfrisen`.
-- `src/frontend`: first commit author `EmK530`; top contributors `EmK530`, `Jimmy Jordan`.
-- `src/fetch`: first commit author `timackevald@gmail.com`; top contributors `Gustav Frisén`, `timackevald@gmail.com`, `gustavfrisen`.
-- `src/config`: first commit author `Jimmy Jordan`; top contributors `Jimmy Jordan`, `timackevald@gmail.com`.
-- `src/compute`: first commit author `timackevald@gmail.com`; top contributors `Gustav Frisén`, `gustavfrisen`, `Jimmy Jordan`.
-- `src/sdk`: first commit author `Jimmy Jordan`; top contributor `Jimmy Jordan`.
-- `src/libs`: first commit author `timackevald@gmail.com`; top contributors `Jimmy Jordan`, `timackevald@gmail.com`, `EmK530`.
-- `config/`: first commit author `Jimmy Jordan`; top contributors `timackevald@gmail.com`, `Jimmy Jordan`, `gustavfrisen`.
+Purpose: List of known and potential bugs.
 
 ## Core Module (`src/core`)
 
@@ -107,77 +93,15 @@ Repro: set different `interval` values in `config/fetch_manager_config.json`; ru
 File refs: `src/fetch/fetch_manager.c:56`, `src/fetch/fetch_manager.c:57`, `src/fetch/fetch_manager.c:185`  
 Repro: start fetch manager with heartbeat arg `0` or negative; `sleep(g_heartbeat_freq)` no longer provides safe pacing.
 
-## Config Module (`src/config` and `config/`)
-
-1. `[#7][High]` Use-after-free in config merge path  
-File refs: `src/config/config.c:104`, `src/config/config.c:116`  
-Repro: `make test-unit` (fails in `config.module.test` when bug is present).
-
-2. `[#8][High]` `config_load_env` can fail to apply env overrides and leak cJSON items  
-File refs: `src/config/config.c:298`, `src/config/config.c:305`, `src/config/config.c:312`  
-Repro: `make test-unit` with env override assertions.
+5. `[#41][High]` `fetch_manager_config_fuzzer` cannot link under libFuzzer configuration  
+File refs: `src/fetch/fetch_manager.c:38`, `fuzz/fetch_manager_config_fuzzer.cpp:38`, `fuzz/CMakeLists.txt:58`  
+Repro: `make fuzz-build FUZZ_ENGINE=libfuzzer` (reports multiple `main` definition plus missing `fetch_manager_reset_apis` symbol).
 
 ## Compute Module (`src/compute`)
 
 1. `[#37][Medium]` Compute manager heartbeat interval has non-positive pacing bug  
 File refs: `src/compute/compute_manager.c:41`, `src/compute/compute_manager.c:44`, `src/compute/compute_manager.c:94`  
 Repro: run compute manager with heartbeat arg `0` or negative; loop can signal parent continuously.
-
-## SDK Module (`src/sdk`)
-
-1. `[#28][High]` SDK DB dedupe key is too weak and silently drops distinct records  
-File refs: `src/sdk/internal/db/ss_db_internal.c:422`, `src/sdk/internal/db/ss_db_internal.c:425`, `src/sdk/internal/db/ss_db_internal.c:427`, `src/sdk/internal/db/ss_db_internal.c:429`, `src/sdk/internal/db/ss_db_internal.c:571`, `src/sdk/internal/db/ss_db_internal.c:613`  
-Repro: write two observation records with same `metric + ts_start + source_api` but different `value`, `source_field`, and `ts_end`; second write returns success but row is not persisted.
-
-2. `[#29][High]` SDK allows non-finite numeric values (NaN/Inf) to pass validation and persist  
-File refs: `src/sdk/ss_sdk.c:37`, `src/sdk/ss_sdk.c:72`, `src/sdk/internal/db/ss_db_internal.c:452`, `src/sdk/internal/db/ss_db_internal.c:300`  
-Repro: write a record with `value.f64 = NAN`; `ss_sdk_db_write_record` returns `SS_SDK_OK` and DB row contains `nan`.
-
-3. `[#24][Medium]` SDK write loops can spin forever if `write(2)` returns 0  
-File refs: `src/sdk/internal/log/ss_log_internal.c:81`, `src/sdk/internal/log/ss_log_internal.c:82`, `src/sdk/internal/db/ss_db_internal.c:132`, `src/sdk/internal/db/ss_db_internal.c:133`  
-Repro: fault-inject short/zero write behavior; loops do not advance `off` on `nw == 0`.
-
-4. `[#30][Medium]` Logger silently drops events when `SUNSPOTS_CONFIG` is malformed  
-File refs: `src/sdk/internal/log/ss_log_internal.c:207`, `src/sdk/internal/log/ss_log_internal.c:208`, `src/sdk/internal/log/ss_log_internal.c:224`, `src/sdk/internal/log/ss_log_internal.c:225`  
-Repro: set `SUNSPOTS_CONFIG='{"log_path":123}'`; `ss_sdk_log_write_auto(...)` returns `SS_SDK_OK` but no log is emitted.
-
-5. `[#31][Medium]` `log_path` extraction truncates long paths silently instead of erroring  
-File refs: `src/sdk/internal/log/ss_log_internal.c:188`, `src/sdk/internal/log/ss_log_internal.c:189`, `src/sdk/internal/log/ss_log_internal.c:193`, `src/sdk/internal/log/ss_log_internal.c:217`  
-Repro: provide `log_path` longer than logger path buffer (1024); truncated path is used with no explicit error.
-
-6. `[#32][Medium]` Logger timestamp path uses thread-unsafe `gmtime`  
-File refs: `src/sdk/internal/log/ss_log_internal.c:288`, `src/sdk/internal/log/ss_log_internal.c:292`  
-Repro: concurrent high-volume logging from multiple threads can race on libc static time buffer.
-
-7. `[#33][Medium]` DB reader accepts out-of-range enum fields from disk without canonical validation  
-File refs: `src/sdk/internal/db/ss_db_internal.c:329`, `src/sdk/internal/db/ss_db_internal.c:334`, `src/sdk/internal/db/ss_db_internal.c:349`, `src/sdk/internal/db/ss_db_internal.c:707`  
-Repro: inject corrupted DB rows with invalid `metric/value_type/data_kind`; reader may return structurally invalid records instead of rejecting them.
-
-8. `[#34][Medium]` Escape-size calculations in SDK DB/log paths have no overflow guards  
-File refs: `src/sdk/internal/db/ss_db_internal.c:148`, `src/sdk/internal/db/ss_db_internal.c:160`, `src/sdk/internal/log/ss_log_internal.c:97`, `src/sdk/internal/log/ss_log_internal.c:108`  
-Repro: extremely large untrusted strings can overflow size accounting before allocation.
-
-9. `[#35][Medium]` SDK write paths acknowledge success without forcing durability to disk  
-File refs: `src/sdk/internal/db/ss_db_internal.c:627`, `src/sdk/internal/log/ss_log_internal.c:243`, `src/sdk/internal/log/ss_log_internal.c:249`  
-Repro: force abrupt process/host crash after successful write call; recently acknowledged DB/log entries can be lost.
-
-10. `[#38][Medium]` SDK float serialization/parsing is locale-dependent and can break portability  
-File refs: `src/sdk/internal/db/ss_db_internal.c:452`, `src/sdk/internal/db/ss_db_internal.c:300`  
-Repro: write records under one locale and read under another locale with different decimal separator rules.
-
-11. `[#39][Medium]` Log-path key extraction uses naive substring search and can match wrong JSON context  
-File refs: `src/sdk/internal/log/ss_log_internal.c:143`, `src/sdk/internal/log/ss_log_internal.c:153`, `src/sdk/internal/log/ss_log_internal.c:159`  
-Repro: place `"log_path"` token inside unrelated JSON string/value before actual config key; parser may bind to unintended position.
-
-12. `[#40][Medium]` Log-path extraction copies raw JSON string bytes without full unescape semantics  
-File refs: `src/sdk/internal/log/ss_log_internal.c:176`, `src/sdk/internal/log/ss_log_internal.c:193`, `src/sdk/internal/log/ss_log_internal.c:194`  
-Repro: provide escaped path sequences in JSON (for example escaped slashes/backslashes); resulting filesystem path can differ from intended decoded JSON value.
-
-## Libraries Module (`src/libs`)
-
-1. `[#12][Medium]` Atomic file writer not robust to partial write and missing parent dir  
-File refs: `src/libs/atomic_file_rw.h:125`, `src/libs/atomic_file_rw.h:141`  
-Repro: constrained IO / missing `.db/` path.
 
 ## Cross-Module / System-Wide
 

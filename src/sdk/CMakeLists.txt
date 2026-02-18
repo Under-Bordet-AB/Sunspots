@@ -1,8 +1,17 @@
+find_package(SQLite3 REQUIRED)
+
 add_library(sunspots_sdk STATIC
   ss_sdk.c
   ss_canonical.c
   internal/db/ss_db_internal.c
+  internal/db/ss_db_internal_read.c
   internal/log/ss_log_internal.c
+)
+target_link_libraries(sunspots_sdk
+  PUBLIC
+    sunspots_cjson
+  PRIVATE
+    SQLite::SQLite3
 )
 target_include_directories(sunspots_sdk
   PUBLIC
@@ -10,4 +19,7 @@ target_include_directories(sunspots_sdk
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_compile_features(sunspots_sdk PUBLIC c_std_99)
+if(BUILD_TESTING)
+  target_compile_definitions(sunspots_sdk PUBLIC SS_SDK_ENABLE_TEST_HOOKS=1)
+endif()
 sunspots_apply_target_defaults(sunspots_sdk)

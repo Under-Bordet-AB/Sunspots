@@ -17,14 +17,14 @@ typedef enum ss_metric_id {
  * @brief Metadata for one canonical metric.
  */
 typedef struct ss_metric_meta {
-    /** Metric enum identifier. */
-    ss_metric_id id;
     /** Stable canonical dotted metric name. */
     const char *canonical_name;
-    /** Canonical value type expected for metric records. */
-    ss_sdk_value_type value_type;
     /** Canonical unit label. */
     const char *unit;
+    /** Metric enum identifier. */
+    ss_metric_id id;
+    /** Canonical value type expected for metric records. */
+    ss_sdk_value_type value_type;
 } ss_metric_meta;
 
 /**

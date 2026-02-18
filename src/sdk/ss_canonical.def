@@ -14,12 +14,12 @@ X(SS_METRIC_WEATHER_PRECIP_AMOUNT_MM,         "weather.precip.amount.mm",       
 X(SS_METRIC_WEATHER_PRECIP_PROBABILITY_PCT,   "weather.precip.probability.pct",         SS_SDK_VALUE_F64, "%")
 X(SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,  "weather.radiation.shortwave.wm2",        SS_SDK_VALUE_F64, "W/m2")
 X(SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE,    "weather.condition.symbol.code",          SS_SDK_VALUE_I64, "code")
+X(SS_METRIC_WEATHER_TEMPERATURE_DEW_POINT_C,  "weather.temperature.dew.point.c",        SS_SDK_VALUE_F64, "C")
+X(SS_METRIC_WEATHER_TEMPERATURE_APPARENT_C,   "weather.temperature.apparent.c",         SS_SDK_VALUE_F64, "C")
+X(SS_METRIC_WEATHER_PRECIP_THUNDERSTORM_PCT,  "weather.precip.thunderstorm.pct",        SS_SDK_VALUE_F64, "%")
+X(SS_METRIC_WEATHER_FOG_PROBABILITY_PCT,      "weather.fog.probability.pct",            SS_SDK_VALUE_F64, "%")
+X(SS_METRIC_WEATHER_IS_DAY,                   "weather.is_day",                          SS_SDK_VALUE_BOOL, "bool")
 
 X(SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH,        "energy.price.spot.sek_per_kwh",          SS_SDK_VALUE_F64, "SEK/kWh")
 X(SS_METRIC_ENERGY_PRICE_SPOT_EUR_KWH,        "energy.price.spot.eur_per_kwh",          SS_SDK_VALUE_F64, "EUR/kWh")
 X(SS_METRIC_ENERGY_FX_SEK_PER_EUR,            "energy.fx.sek_per_eur",                  SS_SDK_VALUE_F64, "SEK/EUR")
-X(SS_METRIC_ENERGY_MARKET_SE_ZONE,            "energy.market.se.zone",                  SS_SDK_VALUE_STR, "zone_code")
-
-X(SS_METRIC_SPACE_GEOMAGNETIC_KP,             "space.geomagnetic.kp.index",             SS_SDK_VALUE_F64, "index")
-X(SS_METRIC_SPACE_ALERT_PRODUCT_ID,           "space.alert.product_id",                 SS_SDK_VALUE_STR, "code")
-X(SS_METRIC_SPACE_ALERT_MESSAGE,              "space.alert.message",                    SS_SDK_VALUE_STR, "text")

@@ -19,7 +19,7 @@ function(sunspots_apply_target_defaults target_name)
   if(MSVC)
     target_compile_options(${target_name} PRIVATE /W3)
   else()
-    target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(${target_name} PRIVATE -Wall)
   endif()
 
   if(SUNSPOTS_ENABLE_SANITIZERS)

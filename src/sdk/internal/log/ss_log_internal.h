@@ -50,4 +50,40 @@ ss_sdk_status ss_sdk_internal_log_write_fields(
  */
 void ss_sdk_internal_log_shutdown(void);
 
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+typedef enum {
+    SS_SDK_LOG_HOOK_FAIL_STRDUP = 0,
+    SS_SDK_LOG_HOOK_FAIL_MKDIR,
+    SS_SDK_LOG_HOOK_FORCE_WRITE_ZERO,
+    SS_SDK_LOG_HOOK_FORCE_WRITE_EINTR,
+    SS_SDK_LOG_HOOK_FAIL_FSYNC,
+    SS_SDK_LOG_HOOK_FAIL_FSYNC_CALL,
+    SS_SDK_LOG_HOOK_FAIL_FLOCK,
+    SS_SDK_LOG_HOOK_FAIL_GMTIME,
+    SS_SDK_LOG_HOOK_FAIL_STRFTIME,
+    SS_SDK_LOG_HOOK_FAIL_ESCAPE_BASE,
+    SS_SDK_LOG_HOOK_FAIL_ESCAPE_OPTIONAL,
+    SS_SDK_LOG_HOOK_FAIL_FORMAT_LINE,
+    SS_SDK_LOG_HOOK_FAIL_CHECKED_ADD,
+    SS_SDK_LOG_HOOK_FAIL_ESCAPE_ALLOC,
+    SS_SDK_LOG_HOOK_FORCE_FORMAT_NEEDED_NEG,
+    SS_SDK_LOG_HOOK_FORCE_FORMAT_ALLOC_NULL
+} ss_sdk_log_test_hook;
+
+void ss_sdk_internal_log_test_reset_hooks(void);
+void ss_sdk_internal_log_test_set_hook(ss_sdk_log_test_hook hook, int count);
+
+int ss_sdk_internal_log_test_checked_add_overflow(int *out_errno);
+int ss_sdk_internal_log_test_ensure_parent_dirs(const char *path);
+const char *ss_sdk_internal_log_test_level_to_string(ss_sdk_log_level level);
+char *ss_sdk_internal_log_test_escape_text(const char *s);
+char *ss_sdk_internal_log_test_strdup_local(const char *s);
+int ss_sdk_internal_log_test_write_all(int fd, const char *buf, size_t len);
+int ss_sdk_internal_log_test_extract_json_log_path(const char *json, char *out_path, size_t out_sz);
+int ss_sdk_internal_log_test_get_log_path(char *out_path, size_t out_sz);
+int ss_sdk_internal_log_test_consume_null_slot(void);
+int ss_sdk_internal_log_test_format_utc_timestamp(char out_ts[32]);
+void ss_sdk_internal_log_test_escaped_fields_free_null(void);
+#endif
+
 #endif
