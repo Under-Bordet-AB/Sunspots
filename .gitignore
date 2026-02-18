@@ -36,6 +36,7 @@ out/
 # Logs
 *.log
 .logs/
+warnings/
 
 # Editor/IDE specific
 .vscode/

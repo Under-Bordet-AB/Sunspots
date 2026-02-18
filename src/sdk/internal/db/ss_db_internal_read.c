@@ -368,16 +368,18 @@ static bool ss_decode_row_if_valid(sqlite3_stmt *query_statement, ss_sdk_value_t
 
 static void ss_compute_padded_query_bounds(int64_t start_utc, int64_t end_utc, int64_t *out_start, int64_t *out_end)
 {
-    if (start_utc < SS_DB_INTERP_PADDING_SLOTS * SS_SLOT_SECONDS) {
+    const int64_t padding_seconds = (int64_t)SS_DB_INTERP_PADDING_SLOTS * (int64_t)SS_SLOT_SECONDS;
+
+    if (start_utc < padding_seconds) {
         *out_start = 0;
     } else {
-        *out_start = start_utc - (int64_t)SS_DB_INTERP_PADDING_SLOTS * SS_SLOT_SECONDS;
+        *out_start = start_utc - padding_seconds;
     }
 
-    if (end_utc > INT64_MAX - (int64_t)SS_DB_INTERP_PADDING_SLOTS * SS_SLOT_SECONDS) {
+    if (end_utc > INT64_MAX - padding_seconds) {
         *out_end = INT64_MAX;
     } else {
-        *out_end = end_utc + (int64_t)SS_DB_INTERP_PADDING_SLOTS * SS_SLOT_SECONDS;
+        *out_end = end_utc + padding_seconds;
     }
 }
 

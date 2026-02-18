@@ -337,6 +337,35 @@ static char *ss_escape_text(const char *s)
     return out;
 }
 
+static const char *ss_filename_only(const char *path)
+{
+    const char *last_slash;
+    const char *last_backslash;
+    const char *base;
+
+    if (path == NULL) {
+        return "";
+    }
+
+    last_slash = strrchr(path, '/');
+    last_backslash = strrchr(path, '\\');
+    base = path;
+
+    if (last_slash != NULL && last_backslash != NULL) {
+        base = (last_slash > last_backslash) ? (last_slash + 1) : (last_backslash + 1);
+    } else if (last_slash != NULL) {
+        base = last_slash + 1;
+    } else if (last_backslash != NULL) {
+        base = last_backslash + 1;
+    }
+
+    if (base[0] == '\0') {
+        return path;
+    }
+    return base;
+}
+
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
 static int ss_extract_json_log_path(const char *json, char *out_path, size_t out_sz)
 {
     cJSON *root = NULL;
@@ -381,6 +410,7 @@ static int ss_extract_json_log_path(const char *json, char *out_path, size_t out
     cJSON_Delete(root);
     return 0;
 }
+#endif
 
 static int ss_get_log_path(char *out_path, size_t out_sz)
 {
@@ -405,7 +435,7 @@ static int ss_get_log_path(char *out_path, size_t out_sz)
     if (strlen(mirror_path) >= out_sz) {
         return -1;
     }
-    strcpy(out_path, mirror_path);
+    memcpy(out_path, mirror_path, strlen(mirror_path) + 1U);
     return 0;
 }
 
@@ -567,7 +597,7 @@ static int ss_log_escape_base_fields(
 
     escaped->event = ss_escape_text(event);
     escaped->message = ss_escape_text(message);
-    escaped->file = ss_escape_text(file);
+    escaped->file = ss_escape_text(ss_filename_only(file));
     escaped->func = ss_escape_text(func);
     if (escaped->event == NULL || escaped->message == NULL || escaped->file == NULL || escaped->func == NULL) {
         return -1;
@@ -676,7 +706,7 @@ static int ss_log_format_line(
     }
 
     if (fields != NULL) {
-        snprintf(
+        (void)snprintf(
             *out_line,
             (size_t)format_length + 1U,
             "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
@@ -692,7 +722,7 @@ static int ss_log_format_line(
             (long long)fields->ts_utc,
             escaped->message);
     } else {
-        snprintf(
+        (void)snprintf(
             *out_line,
             (size_t)format_length + 1U,
             "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",

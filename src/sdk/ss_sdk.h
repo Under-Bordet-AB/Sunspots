@@ -69,9 +69,9 @@ typedef struct ss_sdk_record {
 typedef uint8_t ss_sdk_sample_flags;
 
 enum {
-    SS_SDK_SAMPLE_OBSERVED = 1u << 0,
-    SS_SDK_SAMPLE_FORECAST = 1u << 1,
-    SS_SDK_SAMPLE_INTERPOLATED = 1u << 2
+    SS_SDK_SAMPLE_OBSERVED = 1U << 0,
+    SS_SDK_SAMPLE_FORECAST = 1U << 1,
+    SS_SDK_SAMPLE_INTERPOLATED = 1U << 2
 };
 
 typedef struct {

@@ -3,7 +3,7 @@
 
 static const ss_metric_meta ss_metric_table[SS_METRIC_COUNT] = {
 /* Designated initializers keep enum ID and metadata table index aligned. */
-#define X(id, canonical_name, value_type, unit) [id] = { id, canonical_name, value_type, unit },
+#define X(id, canonical_name, value_type, unit) [id] = { canonical_name, unit, id, value_type },
 #include "sdk/ss_canonical.def"
 #undef X
 };

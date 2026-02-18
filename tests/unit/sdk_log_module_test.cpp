@@ -53,6 +53,35 @@ std::string make_temp_dir()
     return std::string(dir);
 }
 
+class ScopedCwd {
+public:
+    explicit ScopedCwd(const std::string &next) : ok_(false)
+    {
+        char buf[4096];
+        if (getcwd(buf, sizeof(buf)) == NULL) {
+            return;
+        }
+        old_ = buf;
+        if (chdir(next.c_str()) != 0) {
+            return;
+        }
+        ok_ = true;
+    }
+
+    ~ScopedCwd()
+    {
+        if (!old_.empty()) {
+            (void)chdir(old_.c_str());
+        }
+    }
+
+    bool ok() const { return ok_; }
+
+private:
+    bool ok_;
+    std::string old_;
+};
+
 std::string read_text_file(const std::string &path)
 {
     int fd = open(path.c_str(), O_RDONLY);
@@ -396,6 +425,36 @@ TEST_F(SdkLogFixture, get_log_path_helper_handles_missing_env)
     char out_path[64];
     ASSERT_EQ(ss_sdk_internal_log_test_get_log_path(out_path, sizeof(out_path)), 0);
     EXPECT_STREQ(out_path, "logs/sdk.log");
+}
+
+TEST_F(SdkLogFixture, missing_env_defaults_write_to_logs_sdk_log)
+{
+    const std::string default_log_path = dir_ + "/logs/sdk.log";
+    ScopedCwd cwd(dir_);
+    ASSERT_TRUE(cwd.ok());
+    ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_ENABLED"), 0);
+    ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_PATH"), 0);
+
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.default.path", "default-path-write", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+
+    const std::string text = read_text_file(default_log_path);
+    EXPECT_NE(text.find("sdk.log.default.path"), std::string::npos);
+    EXPECT_NE(text.find("msg=\"default-path-write\""), std::string::npos);
+}
+
+TEST_F(SdkLogFixture, invalid_mirror_enabled_token_disables_mirror)
+{
+    nested_dir_ = dir_ + "/nested";
+    const std::string ignored_path = nested_dir_ + "/ignored.log";
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "maybe", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", ignored_path.c_str(), 1), 0);
+
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.invalid.toggle", "message", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+    EXPECT_EQ(access(ignored_path.c_str(), F_OK), -1);
 }
 
 TEST_F(SdkLogFixture, internal_helpers_cover_remaining_low_level_branches)
