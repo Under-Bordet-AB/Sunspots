@@ -59,7 +59,7 @@ int main() {
     if (weather_data != NULL) free(weather_data);
     if (buffer != NULL) free(buffer);
 
-    return 0;
+    exit(EXIT_SUCCESS);
 }
 
 int normalize_data(char* raw_in, weather_data_t** out) {

@@ -65,7 +65,7 @@ int main() {
     if (price_data != NULL) price_data_dispose(price_data);
     if (buffer != NULL) free(buffer);
 
-    return 0;
+    exit(EXIT_SUCCESS);
 }
 
 int normalize_data(char* raw_in, price_data_t** out) {
