@@ -1,149 +1,81 @@
-# Atomic File Manual
+# Atomic File RW Manual
 
-**Library:** `atomic_file_rw.h`
-**Purpose:** Simple, process-safe data exchange using a shared JSON file.
+**Library:** `src/libs/atomic_file_rw.h`  
+**Status:** Stable compatibility wrapper (legacy API)  
+**Recommendation:** New code should use the SDK APIs directly (`docs/manual/sdk.md`).
 
-## 1. Overview
+## 1. What This Is Now
 
-This library provides a mechanism for multiple programs ("Writers") to append data to a shared log file, and for other programs ("Readers") to read the current state of that log.
+`atomic_file_rw` is no longer the primary persistence layer.
 
-*   **Mechanism:** Advisory File Locking (`flock`) on a standard file.
-*   **Format:** NDJSON (Newline Delimited JSON).
-*   **Safety:** Guarantees atomic writes (no data interleaving) and consistent reads.
-*   **Performance:** High-performance in uncontended cases (Linux Futexes), blocks (sleeps) when contended.
+It is a compatibility shim that keeps legacy call sites (`af_save` / `af_read`) working while routing data through the SDK database/logging stack.
 
----
+- Keep using it if migration is too costly right now.
+- Prefer SDK APIs for all new features and new modules.
 
-## 2. Installation
-This is a **Single Header Library** that depends on `cJSON`.
+## 2. Migration Guidance
 
-### Requirements
-1.  Copy `atomic_file_rw.h` to your source tree.
-2.  Copy `cJSON.h` and `cJSON.c` to your source tree (or link against system cJSON).
+- Legacy write path: `af_save(...)`
+- Legacy read path: `af_read(...)`
+- Target API for new work: `ss_sdk_db_write_record(...)`, `ss_sdk_db_get_canonical(...)`, `SS_LOG_*` macros
+- SDK usage manual: `docs/manual/sdk.md`
 
-### Integration
-In **ONE** source file (e.g., `main.c` or `ipc_impl.c`), do this:
+Practical rule:
+- Existing module with limited maintenance budget: staying on `atomic_file_rw` is acceptable.
+- Any actively developed module: migrate to SDK APIs.
 
-```c
-#define ATOMIC_FILE_RW_IMPLEMENTATION
-#include "atomic_file_rw.h"
-```
-
-In all other files, just include it:
+## 3. API (Still Supported)
 
 ```c
-#include "atomic_file_rw.h"
-```
-
-### Compilation
-You must compile and link `cJSON`.
-
-```bash
-gcc -o my_app main.c cJSON.c -lpthread
-```
-
----
-
-## 3. Data Format & Schema
-
-All data is written to a hardcoded file path: `./database.jsonl` (relative to execution directory).
-
-The library **enforces** a strict JSON schema for every line. You provide the `Source`, `Type`, and `Data`, and the library adds the `Timestamp`.
-
-**Schema:**
-```json
-{
-  "timestamp": 1706531200,    // Unix Epoch (Seconds), auto-generated
-  "source": "API_smhi",       // Use AF_SOURCE_* macros
-  "type": "temperature",      // Use AF_TYPE_* macros
-  "data": "23.5"              // string
-}
-```
-
-### Standard Constants
-To avoid typos, use the defined macros in your code:
-
-**Sources:**
-*   `AF_SOURCE_API_SMHI` ("API_smhi")
-*   `AF_SOURCE_SENSOR` ("Sensor_Network")
-*   `AF_SOURCE_CALCULATOR` ("Calculator_Svc")
-*   `AF_SOURCE_SYSTEM` ("System_Log")
-
-**Types:**
-*   `AF_TYPE_TEMPERATURE` ("temperature")
-*   `AF_TYPE_HUMIDITY` ("humidity")
-*   `AF_TYPE_POWER` ("power_usage")
-*   `AF_TYPE_LOG` ("log_entry")
-*   `AF_TYPE_ERROR` ("error_report")
-
----
-
-## 4. API Reference
-
-### Writers: `af_save`
-
-Use this to append a new event to the log.
-
-```c
-/**
- * Saves a structured event to the file.
- * BLOCKING: Sleeps if another process is currently writing.
- *
- * @param source  Origin (e.g., "API_Weather", "Sensor_X")
- * @param type    Category (e.g., "temperature", "boot_log")
- * @param data    The payload string.
- * @return        0 on success, -1 on error.
- */
 int af_save(const char *source, const char *type, const char *data);
-```
-
-**Example:**
-```c
-if (af_save("WeatherAPI", "temperature", "23.5") != 0) {
-    perror("Write failed");
-}
-```
-
-### Readers: `af_read`
-
-Use this to read the **entire** content of the log file at once.
-
-```c
-/**
- * Reads the ENTIRE file content.
- * BLOCKING: Sleeps if a Writer is currently writing.
- *
- * @param out_size  [Optional] Pointer to store the size of read data.
- * @return          Malloc'd buffer containing the file data. 
- *                  You MUST free() this buffer. Returns NULL on error.
- */
 char *af_read(size_t *out_size);
 ```
 
-**Example:**
-```c
-size_t size = 0;
-char *content = af_read(&size);
+### `af_save`
 
-if (content) {
-    printf("Read %zu bytes:\n%s\n", size, content);
-    free(content); // IMPORTANT
-}
-```
+Writes legacy payloads into SDK canonical storage.
 
----
+- Returns `0` on success, `-1` on hard failure.
+- `source`, `type`, `data` must be non-null (`EINVAL` + `-1` otherwise).
+- `type` is currently accepted for compatibility but not used for routing.
+- `data` is expected to be JSON.
 
-## 5. Concurrency Model (Blocking)
+Compatibility behavior:
+- If JSON parse fails: payload is dropped, wrapper logs warning, return is still `0`.
+- If `source` is unknown: payload is ignored, wrapper logs info, return is `0`.
 
-This library uses **Blocking synchronization**.
+### `af_read`
 
-### How it works
-1.  **Writer:** Tries to acquire `LOCK_EX`. If the file is busy (Writer or Reader active), the calling thread **Sleeps** (0% CPU) until the lock is free.
-2.  **Reader:** Tries to acquire `LOCK_SH`. If a Writer is active, the calling thread **Sleeps**. Multiple Readers can read simultaneously.
+Returns newline-delimited JSON text (`malloc`-allocated; caller must `free`).
 
-### Best Practices
-*   **Don't block the UI:** If your application has a GUI or high-frequency loop, running `af_save` directly might cause "stutters" if the disk is busy. Move writes to a background thread if this happens.
-*   **Short Reads:** `af_read` locks the file for the duration of the read. It reads into memory and unlocks immediately. This keeps contention low.
-*   **Atomic guarantees:** You will never read a "half-written" line. You will never see two lines mixed together.
+- Returns `NULL` on hard failure.
+- Output is synthesized from SDK reads (not raw file bytes).
+- Current shape is one latest sample per supported canonical metric, serialized as JSON lines.
 
----
+## 4. Behavior Differences vs Old Manual
+
+This wrapper no longer provides the old guarantees/mechanics that were documented earlier:
+
+- No direct advisory-lock (`flock`) contract for users.
+- No user-facing "shared JSONL file" as source of truth.
+- No requirement to rely on `./database.jsonl` as operational storage.
+
+`ATOMIC_FILE_DEFAULT_PATH` remains for source compatibility, but persistence is SDK-backed.
+
+## 5. Source Routing (Current)
+
+Current legacy source handling in `af_save`:
+
+- `Openmeteo` / `openmeteo`: weather observations + forecast fields mapped into SDK canonical metrics.
+- `Elprisjustnu` / `elprisjustnu`: electricity price fields mapped into SDK canonical metrics.
+- Other sources: accepted for compatibility, ignored for data writes.
+
+## 6. Recommended Direction
+
+For the best developer experience and explicit semantics:
+
+- Use SDK record APIs for writes.
+- Use SDK canonical read APIs for reads.
+- Use SDK log macros (`SS_LOG_DEBUG/INFO/WARN/ERROR`) for logging.
+
+See `docs/manual/sdk.md` for usage-first examples.

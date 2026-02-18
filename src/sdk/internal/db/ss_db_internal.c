@@ -141,6 +141,44 @@ static char *ss_strdup_local(const char *s)
     return p;
 }
 
+static bool ss_sdk_debug_enabled(void)
+{
+    const char *value = getenv("SS_SDK_DEBUG");
+    if (value == NULL) {
+        return true;
+    }
+    return strcmp(value, "1") == 0 ||
+           strcmp(value, "true") == 0 ||
+           strcmp(value, "TRUE") == 0 ||
+           strcmp(value, "yes") == 0 ||
+           strcmp(value, "YES") == 0 ||
+           strcmp(value, "on") == 0 ||
+           strcmp(value, "ON") == 0;
+}
+
+static void ss_db_debug_log(const char *event, const char *message)
+{
+    if (!ss_sdk_debug_enabled()) {
+        return;
+    }
+    (void)SS_LOG_DEBUG(event, message);
+}
+
+static void ss_db_debug_log_path(const char *event, const char *path)
+{
+    char msg[1200];
+    if (!ss_sdk_debug_enabled()) {
+        return;
+    }
+    if (path == NULL) {
+        path = "";
+    }
+    if (snprintf(msg, sizeof(msg), "db_path=%s", path) < 0) {
+        return;
+    }
+    (void)SS_LOG_DEBUG(event, msg);
+}
+
 static const char *ss_db_path(void)
 {
     // if we have env variable set, read from that instead
@@ -310,13 +348,17 @@ static ss_sdk_status ss_db_open_locked(void)
                 g_db_open_path != NULL &&
                 strcmp(g_db_open_path, path) == 0;
 
+    ss_db_debug_log_path("sdk.db.path.selected", path);
+
     // 1) Already open on requested path: reuse existing handle.
     if (paths_match) {
+        ss_db_debug_log("sdk.db.reuse_open_handle", "reusing already open sqlite handle");
         return SS_SDK_OK;
     }
 
     // 2) Open on a different path: close old handle before switching.
     if (db_is_open) {
+        ss_db_debug_log("sdk.db.switch_path", "closing existing sqlite handle before path switch");
         ss_db_close_locked();
     }
 
@@ -361,6 +403,7 @@ static ss_sdk_status ss_db_open_locked(void)
     }
 
     g_db = opened_db;
+    ss_db_debug_log_path("sdk.db.opened", path);
     return SS_SDK_OK;
 }
 
@@ -369,6 +412,8 @@ ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record)
     if (record == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
+
+    ss_db_debug_log("sdk.db.write.begin", "internal db write started");
 
     const char *sql_text = ss_db_sql_text(SS_DB_SQL_INSERT_RECORD);
 
@@ -500,6 +545,8 @@ ss_sdk_status ss_sdk_internal_db_get_canonical(
     if (out == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
+
+    ss_db_debug_log("sdk.db.get.begin", "internal canonical range read started");
 
     out->samples = NULL;
     out->count = 0;

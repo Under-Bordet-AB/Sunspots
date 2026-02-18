@@ -10,6 +10,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -109,6 +110,8 @@ void ss_sdk_internal_log_test_set_hook(ss_sdk_log_test_hook hook, int count)
 }
 #endif
 
+static const char *const SS_SDK_LOG_MIRROR_DEFAULT_PATH = "logs/sdk.log";
+
 static int ss_checked_add(size_t *current_size, size_t add)
 {
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
@@ -205,6 +208,39 @@ static const char *ss_level_to_string(ss_sdk_log_level level)
         default:
             return NULL;
     }
+}
+
+static int ss_level_to_syslog_priority(ss_sdk_log_level level)
+{
+    switch (level) {
+        case SS_SDK_LOG_DEBUG:
+            return LOG_DEBUG;
+        case SS_SDK_LOG_INFO:
+            return LOG_INFO;
+        case SS_SDK_LOG_WARN:
+            return LOG_WARNING;
+        case SS_SDK_LOG_ERROR:
+            return LOG_ERR;
+        default:
+            return -1;
+    }
+}
+
+static int ss_env_bool_enabled(const char *value)
+{
+    if (value == NULL) {
+        return 0;
+    }
+    if (strcmp(value, "1") == 0 ||
+        strcmp(value, "true") == 0 ||
+        strcmp(value, "TRUE") == 0 ||
+        strcmp(value, "yes") == 0 ||
+        strcmp(value, "YES") == 0 ||
+        strcmp(value, "on") == 0 ||
+        strcmp(value, "ON") == 0) {
+        return 1;
+    }
+    return 0;
 }
 
 static int ss_write_all(int fd, const char *buf, size_t len)
@@ -348,22 +384,32 @@ static int ss_extract_json_log_path(const char *json, char *out_path, size_t out
 
 static int ss_get_log_path(char *out_path, size_t out_sz)
 {
-    const char *cfg = getenv("SUNSPOTS_CONFIG");
+    const char *mirror_enabled = getenv("SS_SDK_LOG_MIRROR_ENABLED");
+    const char *mirror_path = getenv("SS_SDK_LOG_MIRROR_PATH");
+    int mirror_is_enabled;
 
-    if (cfg == NULL || cfg[0] == '\0') {
+    if (out_path == NULL || out_sz == 0) {
+        return -1;
+    }
+
+    mirror_is_enabled = (mirror_enabled == NULL) ? 1 : ss_env_bool_enabled(mirror_enabled);
+    if (!mirror_is_enabled) {
         out_path[0] = '\0';
         return 0;
     }
 
-    if (ss_extract_json_log_path(cfg, out_path, out_sz) != 0) {
-        /* BUGFIX(#30): malformed logging config is an explicit error, not silent no-op. */
-        return -1;
+    if (mirror_path == NULL || mirror_path[0] == '\0') {
+        mirror_path = SS_SDK_LOG_MIRROR_DEFAULT_PATH;
     }
 
+    if (strlen(mirror_path) >= out_sz) {
+        return -1;
+    }
+    strcpy(out_path, mirror_path);
     return 0;
 }
 
-static ss_sdk_status ss_log_write_line(const char *line)
+static ss_sdk_status ss_log_write_mirror_line(const char *line)
 {
     char path[1024];
     int fd;
@@ -423,6 +469,34 @@ static ss_sdk_status ss_log_write_line(const char *line)
     flock(fd, LOCK_UN);
     close(fd);
     return SS_SDK_OK;
+}
+
+static void ss_log_write_syslog(ss_sdk_log_level level, const char *line)
+{
+    int priority;
+    size_t len;
+    size_t trimmed_len;
+    char *copy;
+
+    priority = ss_level_to_syslog_priority(level);
+    if (priority < 0 || line == NULL) {
+        return;
+    }
+
+    len = strlen(line);
+    trimmed_len = len;
+    while (trimmed_len > 0 && (line[trimmed_len - 1] == '\n' || line[trimmed_len - 1] == '\r')) {
+        trimmed_len--;
+    }
+
+    copy = (char *)malloc(trimmed_len + 1U);
+    if (copy == NULL) {
+        return;
+    }
+    memcpy(copy, line, trimmed_len);
+    copy[trimmed_len] = '\0';
+    syslog(priority, "%s", copy);
+    free(copy);
 }
 
 typedef struct {
@@ -538,6 +612,11 @@ static int ss_log_format_line(
     const ss_log_escaped_fields *escaped)
 {
     int format_length;
+    const char *event_text = "-";
+
+    if (escaped->event != NULL && escaped->event[0] != '\0') {
+        event_text = escaped->event;
+    }
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
     if (ss_log_test_consume(&g_log_test_hooks.fail_format_line)) {
@@ -552,7 +631,7 @@ static int ss_log_format_line(
             "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
             ts,
             level_text,
-            escaped->event,
+            event_text,
             escaped->file,
             line,
             escaped->func,
@@ -568,7 +647,7 @@ static int ss_log_format_line(
             "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",
             ts,
             level_text,
-            escaped->event,
+            event_text,
             escaped->file,
             line,
             escaped->func,
@@ -603,7 +682,7 @@ static int ss_log_format_line(
             "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
             ts,
             level_text,
-            escaped->event,
+            event_text,
             escaped->file,
             line,
             escaped->func,
@@ -619,7 +698,7 @@ static int ss_log_format_line(
             "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",
             ts,
             level_text,
-            escaped->event,
+            event_text,
             escaped->file,
             line,
             escaped->func,
@@ -644,7 +723,7 @@ static ss_sdk_status ss_log_write_common(
     char *line_buf = NULL;
     ss_sdk_status write_status;
 
-    if (event == NULL || event[0] == '\0' || message == NULL || file == NULL || func == NULL) {
+    if (message == NULL || file == NULL || func == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
 
@@ -665,7 +744,8 @@ static ss_sdk_status ss_log_write_common(
         return SS_SDK_ERR_INTERNAL;
     }
 
-    write_status = ss_log_write_line(line_buf);
+    ss_log_write_syslog(level, line_buf);
+    write_status = ss_log_write_mirror_line(line_buf);
 
     ss_log_escaped_fields_free(&escaped);
     free(line_buf);

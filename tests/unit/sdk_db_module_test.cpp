@@ -57,6 +57,23 @@ std::string make_temp_dir()
     return std::string(dir);
 }
 
+std::string read_text_file(const std::string &path)
+{
+    FILE *fp = std::fopen(path.c_str(), "rb");
+    if (fp == NULL) {
+        return "";
+    }
+
+    std::string out;
+    char buf[512];
+    size_t nr;
+    while ((nr = std::fread(buf, 1, sizeof(buf), fp)) > 0) {
+        out.append(buf, nr);
+    }
+    std::fclose(fp);
+    return out;
+}
+
 class ScopedCwd {
 public:
     explicit ScopedCwd(const std::string &next) : ok_(false)
@@ -145,7 +162,12 @@ ss_sdk_status write_i64_record(ss_metric_id metric, int64_t value, int64_t ts_st
 
 class SdkDbFixture : public ::testing::Test {
 protected:
-    SdkDbFixture() : db_path_guard_("SS_SDK_DB_PATH") {}
+    SdkDbFixture()
+        : db_path_guard_("SS_SDK_DB_PATH"),
+          sdk_debug_guard_("SS_SDK_DEBUG"),
+          sdk_log_mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
+          sdk_log_mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
+    {}
 
     void SetUp() override
     {
@@ -163,6 +185,9 @@ protected:
     }
 
     ScopedEnvVar db_path_guard_;
+    ScopedEnvVar sdk_debug_guard_;
+    ScopedEnvVar sdk_log_mirror_enabled_guard_;
+    ScopedEnvVar sdk_log_mirror_path_guard_;
     std::string dir_;
     std::string db_path_;
 };
@@ -281,6 +306,15 @@ TEST_F(SdkDbFixture, record_factory_rejects_metric_type_mismatch)
             &rec,
             SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
             1,
+            now_slot_utc(),
+            SS_SDK_DATA_OBSERVATION),
+        SS_SDK_ERR_VALIDATION);
+
+    EXPECT_EQ(
+        ss_sdk_record_make_bool(
+            &rec,
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            true,
             now_slot_utc(),
             SS_SDK_DATA_OBSERVATION),
         SS_SDK_ERR_VALIDATION);
@@ -748,6 +782,41 @@ TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
     EXPECT_EQ(out_second.count, (size_t)0);
 
     remove_file_if_exists(path_two);
+}
+
+TEST_F(SdkDbFixture, sdk_debug_logs_selected_db_path_for_write)
+{
+    const int64_t slot = now_slot_utc();
+    const std::string log_path = dir_ + "/sdk_debug.log";
+
+    ASSERT_EQ(setenv("SS_SDK_DEBUG", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", log_path.c_str(), 1), 0);
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 5.5, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+
+    const std::string text = read_text_file(log_path);
+    EXPECT_NE(text.find("sdk.db.path.selected"), std::string::npos);
+    EXPECT_NE(text.find("db_path=" + db_path_), std::string::npos);
+}
+
+TEST_F(SdkDbFixture, sdk_debug_logs_selected_db_path_for_read)
+{
+    const int64_t slot = now_slot_utc();
+    const std::string log_path = dir_ + "/sdk_debug_read.log";
+    ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_EQ(setenv("SS_SDK_DEBUG", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", log_path.c_str(), 1), 0);
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 4.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_OK);
+    ss_sdk_db_free_samples(&out);
+
+    const std::string text = read_text_file(log_path);
+    EXPECT_NE(text.find("sdk.db.path.selected"), std::string::npos);
+    EXPECT_NE(text.find("db_path=" + db_path_), std::string::npos);
 }
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS

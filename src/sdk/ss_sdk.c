@@ -3,7 +3,10 @@
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 
 #include "sdk/internal/db/ss_db_internal.h"
@@ -36,6 +39,29 @@ static bool ss_sdk_is_valid_data_kind(ss_sdk_data_kind data_kind)
 {
     return data_kind == SS_SDK_DATA_OBSERVATION ||
            data_kind == SS_SDK_DATA_FORECAST;
+}
+
+static bool ss_sdk_debug_enabled(void)
+{
+    const char *value = getenv("SS_SDK_DEBUG");
+    if (value == NULL) {
+        return true;
+    }
+    return strcmp(value, "1") == 0 ||
+           strcmp(value, "true") == 0 ||
+           strcmp(value, "TRUE") == 0 ||
+           strcmp(value, "yes") == 0 ||
+           strcmp(value, "YES") == 0 ||
+           strcmp(value, "on") == 0 ||
+           strcmp(value, "ON") == 0;
+}
+
+static void ss_sdk_debug_log(const char *event, const char *message)
+{
+    if (!ss_sdk_debug_enabled()) {
+        return;
+    }
+    (void)SS_LOG_DEBUG(event, message);
 }
 
 static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *record)
@@ -196,25 +222,35 @@ ss_sdk_status ss_sdk_db_write_record(const ss_sdk_record *record)
     ss_sdk_record normalized;
     ss_sdk_status validation_status;
 
+    ss_sdk_debug_log("sdk.api.db_write.begin", "public db write called");
+
     if (record == NULL) {
+        ss_sdk_debug_log("sdk.api.db_write.invalid_arg", "record pointer is null");
         return SS_SDK_ERR_INVALID_ARG;
     }
     if (record->ts_start_utc < 0) {
+        ss_sdk_debug_log("sdk.api.db_write.validation_failed", "record start time was negative");
         return SS_SDK_ERR_VALIDATION;
     }
 
     normalized = *record;
     normalized.ts_start_utc = ss_sdk_align_utc_to_slot(record->ts_start_utc);
     if (normalized.ts_start_utc > INT64_MAX - SS_SLOT_SECONDS) {
+        ss_sdk_debug_log("sdk.api.db_write.validation_failed", "aligned start time overflowed slot range");
         return SS_SDK_ERR_VALIDATION;
     }
     normalized.ts_end_utc = normalized.ts_start_utc + SS_SLOT_SECONDS;
 
     validation_status = ss_sdk_validate_record(&normalized);
     if (validation_status != SS_SDK_OK) {
+        ss_sdk_debug_log("sdk.api.db_write.validation_failed", "normalized record failed validation");
         return validation_status;
     }
-    return ss_sdk_internal_db_write_record(&normalized);
+    validation_status = ss_sdk_internal_db_write_record(&normalized);
+    if (validation_status == SS_SDK_OK) {
+        ss_sdk_debug_log("sdk.api.db_write.ok", "public db write succeeded");
+    }
+    return validation_status;
 }
 
 ss_sdk_status ss_sdk_db_get_canonical(
@@ -227,7 +263,10 @@ ss_sdk_status ss_sdk_db_get_canonical(
     int64_t span;
     int64_t end_utc;
 
+    ss_sdk_debug_log("sdk.api.db_get.begin", "public canonical read called");
+
     if (out == NULL) {
+        ss_sdk_debug_log("sdk.api.db_get.invalid_arg", "output pointer is null");
         return SS_SDK_ERR_INVALID_ARG;
     }
 
@@ -236,14 +275,17 @@ ss_sdk_status ss_sdk_db_get_canonical(
 
     // Do we have a valid canonical?
     if (ss_metric_meta_get(canonical) == NULL) {
+        ss_sdk_debug_log("sdk.api.db_get.invalid_arg", "canonical id was invalid");
         return SS_SDK_ERR_INVALID_ARG;
     }
 
     if (from_utc < 0) {
+        ss_sdk_debug_log("sdk.api.db_get.invalid_arg", "from_utc was negative");
         return SS_SDK_ERR_INVALID_ARG;
     }
 
     if (quarters_to_fetch > SS_MAX_QUARTERS) {
+        ss_sdk_debug_log("sdk.api.db_get.invalid_arg", "quarters_to_fetch exceeded maximum");
         return SS_SDK_ERR_INVALID_ARG;
     }
 
@@ -261,6 +303,7 @@ ss_sdk_status ss_sdk_db_get_canonical(
 
     span = (int64_t)quarters_to_fetch * SS_SLOT_SECONDS;
     if (start_utc > INT64_MAX - span) {
+        ss_sdk_debug_log("sdk.api.db_get.invalid_arg", "time window overflow detected");
         return SS_SDK_ERR_INVALID_ARG;
     }
     end_utc = start_utc + span;

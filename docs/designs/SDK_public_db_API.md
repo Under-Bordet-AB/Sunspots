@@ -213,6 +213,7 @@ If needed later, add one advanced query API with an options struct. Keep V1 mini
 ## 11. Usage Example
 
 See `docs/manual/sdk_db_callsite_example.c` for concise read/write call-site examples.
+See `docs/manual/sdk_log_callsite_example.c` for concise SDK logging call-site examples.
 The example checks SDK return codes but keeps non-SDK input checks minimal.
 The example intentionally does not handle `SS_SDK_ERR_PARTIAL_DATA`; any non-OK status is treated as failure.
 

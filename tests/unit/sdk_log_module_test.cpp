@@ -91,33 +91,14 @@ void remove_dir_if_exists(const std::string &path)
     (void)rmdir(path.c_str());
 }
 
-std::string json_escape(const std::string &in)
-{
-    std::string out;
-    out.reserve(in.size() * 2 + 8);
-    for (size_t i = 0; i < in.size(); ++i) {
-        const char ch = in[i];
-        if (ch == '"') {
-            out += "\\\"";
-        } else if (ch == '\\') {
-            out += "\\\\";
-        } else if (ch == '/') {
-            out += "\\/";
-        } else {
-            out.push_back(ch);
-        }
-    }
-    return out;
-}
-
-std::string json_with_log_path(const std::string &log_path)
-{
-    return std::string("{\"log_path\":\"") + json_escape(log_path) + "\"}";
-}
-
 class SdkLogFixture : public ::testing::Test {
 protected:
-    SdkLogFixture() : cfg_guard_("SUNSPOTS_CONFIG") {}
+    SdkLogFixture()
+        : cfg_guard_("SUNSPOTS_CONFIG"),
+          mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
+          mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH"),
+          db_path_guard_("SS_SDK_DB_PATH")
+    {}
 
     void SetUp() override
     {
@@ -137,11 +118,14 @@ protected:
     {
         nested_dir_ = dir_ + "/nested";
         log_path_ = nested_dir_ + "/" + relative;
-        const std::string cfg = json_with_log_path(log_path_);
-        ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+        ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
+        ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", log_path_.c_str(), 1), 0);
     }
 
     ScopedEnvVar cfg_guard_;
+    ScopedEnvVar mirror_enabled_guard_;
+    ScopedEnvVar mirror_path_guard_;
+    ScopedEnvVar db_path_guard_;
     std::string dir_;
     std::string nested_dir_;
     std::string log_path_;
@@ -158,30 +142,44 @@ TEST_F(SdkLogFixture, invalid_level_returns_invalid_arg)
 
 TEST_F(SdkLogFixture, invalid_base_arguments_return_invalid_arg)
 {
-    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "m", __FILE__, __LINE__, __func__), SS_SDK_ERR_INVALID_ARG);
-    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "m", __FILE__, __LINE__, __func__), SS_SDK_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "m", __FILE__, __LINE__, __func__), SS_SDK_OK);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "m", __FILE__, __LINE__, __func__), SS_SDK_OK);
     EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", NULL, __FILE__, __LINE__, __func__), SS_SDK_ERR_INVALID_ARG);
     EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", "m", NULL, __LINE__, __func__), SS_SDK_ERR_INVALID_ARG);
     EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", "m", __FILE__, __LINE__, NULL), SS_SDK_ERR_INVALID_ARG);
 }
 
-TEST_F(SdkLogFixture, malformed_config_returns_internal_error)
+TEST_F(SdkLogFixture, null_or_empty_event_uses_placeholder_and_writes_log)
 {
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", "{\"log_path\":123}", 1), 0);
-    EXPECT_EQ(
-        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.test", "message", __FILE__, __LINE__, __func__),
-        SS_SDK_ERR_INTERNAL);
+    use_log_path("optional_event.log");
+    ASSERT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "from_null_event", __FILE__, __LINE__, __func__), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "from_empty_event", __FILE__, __LINE__, __func__), SS_SDK_OK);
+
+    const std::string text = read_text_file(log_path_);
+    EXPECT_NE(text.find(" INFO - "), std::string::npos);
+    EXPECT_NE(text.find("msg=\"from_null_event\""), std::string::npos);
+    EXPECT_NE(text.find("msg=\"from_empty_event\""), std::string::npos);
+}
+
+TEST_F(SdkLogFixture, mirror_enabled_without_path_uses_default_path)
+{
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
+    ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_PATH"), 0);
+
+    char out_path[256];
+    ASSERT_EQ(ss_sdk_internal_log_test_get_log_path(out_path, sizeof(out_path)), 0);
+    EXPECT_STREQ(out_path, "logs/sdk.log");
 }
 
 TEST_F(SdkLogFixture, missing_log_path_is_intentional_noop)
 {
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", "{\"not_log_path\":\"x\"}", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
     EXPECT_EQ(
         ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.noop", "message", __FILE__, __LINE__, __func__),
         SS_SDK_OK);
 }
 
-TEST_F(SdkLogFixture, escaped_json_log_path_is_decoded_and_used)
+TEST_F(SdkLogFixture, mirror_path_env_is_used)
 {
     use_log_path("sdk log.txt");
 
@@ -196,35 +194,26 @@ TEST_F(SdkLogFixture, escaped_json_log_path_is_decoded_and_used)
 TEST_F(SdkLogFixture, overlong_log_path_returns_internal_error)
 {
     const std::string long_path(1500, 'a');
-    const std::string cfg = std::string("{\"log_path\":\"") + long_path + "\"}";
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", long_path.c_str(), 1), 0);
 
     EXPECT_EQ(
         ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.long_path", "message", __FILE__, __LINE__, __func__),
         SS_SDK_ERR_INTERNAL);
 }
 
-TEST_F(SdkLogFixture, ignores_log_path_tokens_inside_unrelated_string_values)
+TEST_F(SdkLogFixture, mirror_disabled_ignores_path_and_returns_ok)
 {
     nested_dir_ = dir_ + "/nested";
-    const std::string good_path = nested_dir_ + "/good.log";
-    const std::string bad_path = dir_ + "/bad.log";
-
-    const std::string noise =
-        std::string("prefix \\\"log_path\\\":\\\"") + bad_path + "\\\" suffix";
-    const std::string cfg =
-        std::string("{\"noise\":\"") + json_escape(noise) + "\",\"log_path\":\"" +
-        json_escape(good_path) + "\"}";
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+    const std::string ignored_path = nested_dir_ + "/ignored.log";
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", ignored_path.c_str(), 1), 0);
 
     ASSERT_EQ(
-        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.good_key", "message", __FILE__, __LINE__, __func__),
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.mirror_disabled", "message", __FILE__, __LINE__, __func__),
         SS_SDK_OK);
 
-    EXPECT_EQ(access(bad_path.c_str(), F_OK), -1);
-    EXPECT_EQ(access(good_path.c_str(), F_OK), 0);
-
-    remove_file_if_exists(good_path);
+    EXPECT_EQ(access(ignored_path.c_str(), F_OK), -1);
 }
 
 TEST_F(SdkLogFixture, write_fields_includes_structured_fields)
@@ -402,10 +391,11 @@ TEST_F(SdkLogFixture, write_fields_hooked_optional_escape_failure_returns_intern
 
 TEST_F(SdkLogFixture, get_log_path_helper_handles_missing_env)
 {
-    ASSERT_EQ(unsetenv("SUNSPOTS_CONFIG"), 0);
+    ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_ENABLED"), 0);
+    ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_PATH"), 0);
     char out_path[64];
     ASSERT_EQ(ss_sdk_internal_log_test_get_log_path(out_path, sizeof(out_path)), 0);
-    EXPECT_STREQ(out_path, "");
+    EXPECT_STREQ(out_path, "logs/sdk.log");
 }
 
 TEST_F(SdkLogFixture, internal_helpers_cover_remaining_low_level_branches)
@@ -470,8 +460,8 @@ TEST_F(SdkLogFixture, write_auto_covers_path_open_flock_write_and_fsync_call_err
         ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.mkdir", "m", __FILE__, __LINE__, __func__),
         SS_SDK_ERR_INTERNAL);
 
-    const std::string cfg_root = std::string("{\"log_path\":\"/\"}");
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg_root.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", "/", 1), 0);
     EXPECT_EQ(
         ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.root.open_fail", "m", __FILE__, __LINE__, __func__),
         SS_SDK_ERR_INTERNAL);

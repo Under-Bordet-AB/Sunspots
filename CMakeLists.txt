@@ -17,7 +17,9 @@ include(SunspotsOptions)
 include(SunspotsDependencies)
 
 add_subdirectory(src)
-add_subdirectory(tools)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
+  add_subdirectory(tools)
+endif()
 
 if(BUILD_TESTING)
   add_subdirectory(tests)

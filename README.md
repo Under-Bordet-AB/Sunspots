@@ -117,6 +117,7 @@ Current reference files:
 ## Documentation
 
 - Existing component docs under `docs/manual/`
+- SDK usage manual: `docs/manual/sdk.md`
 - Build/test/benchmark bug review: `docs/bugs.md`
 - Fuzzing findings: `docs/fuzz.md`
 

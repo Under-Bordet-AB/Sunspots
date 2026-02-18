@@ -12,12 +12,12 @@
  * @brief SDK status/error codes returned by public API calls.
  */
 typedef enum {
-    SS_SDK_OK = 0,
-    SS_SDK_ERR_PARTIAL_DATA,
-    SS_SDK_ERR_INVALID_ARG,
-    SS_SDK_ERR_VALIDATION,
-    SS_SDK_ERR_NOT_IMPLEMENTED,
-    SS_SDK_ERR_INTERNAL
+    SS_SDK_OK = 0,         /**< Call succeeded. */
+    SS_SDK_ERR_PARTIAL_DATA, /**< Data completeness signal: data may be usable, but request completeness was not met. */
+    SS_SDK_ERR_INVALID_ARG,  /**< Invalid function arguments. */
+    SS_SDK_ERR_VALIDATION,   /**< Input failed SDK validation rules. */
+    SS_SDK_ERR_NOT_IMPLEMENTED, /**< API/feature not implemented. */
+    SS_SDK_ERR_INTERNAL      /**< Internal/config/I/O failure. */
 } ss_sdk_status;
 
 /**
@@ -184,26 +184,38 @@ void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
 
 /**
  * @brief Log helper macro (debug level) with source location.
+ * @return `ss_sdk_status`
  */
-#define SS_LOG_DEBUG(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, (event), (message), __FILE__, __LINE__, __func__)
+#ifndef SS_SDK_LOG_FILE_TOKEN
+#if defined(__FILE_NAME__)
+#define SS_SDK_LOG_FILE_TOKEN __FILE_NAME__
+#else
+#define SS_SDK_LOG_FILE_TOKEN __FILE__
+#endif
+#endif
+
+#define SS_LOG_DEBUG(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
  * @brief Log helper macro (info level) with source location.
+ * @return `ss_sdk_status`
  */
-#define SS_LOG_INFO(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_INFO,  (event), (message), __FILE__, __LINE__, __func__)
+#define SS_LOG_INFO(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_INFO,  (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
  * @brief Log helper macro (warning level) with source location.
+ * @return `ss_sdk_status`
  */
-#define SS_LOG_WARN(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_WARN,  (event), (message), __FILE__, __LINE__, __func__)
+#define SS_LOG_WARN(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_WARN,  (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
  * @brief Log helper macro (error level) with source location.
+ * @return `ss_sdk_status`
  */
-#define SS_LOG_ERROR(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, (event), (message), __FILE__, __LINE__, __func__)
+#define SS_LOG_ERROR(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 
 /**
  * @brief Write one log event with auto-captured source location.
  *
  * @param level Log severity.
- * @param event Stable event key.
+ * @param event Optional stable event key (`NULL` or empty allowed).
  * @param message Human-readable message.
  * @param file Source file path.
  * @param line Source line number.
@@ -224,7 +236,7 @@ ss_sdk_status ss_sdk_log_write_auto(
  * Use this variant when you want extra typed context beyond event/message.
  *
  * @param level Log severity.
- * @param event Stable event key.
+ * @param event Optional stable event key (`NULL` or empty allowed).
  * @param message Human-readable message.
  * @param fields Optional structured context.
  * @param file Source file path.
