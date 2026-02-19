@@ -1,41 +1,46 @@
 #include "menu.hpp"
-#include "../http/http_client.hpp"
+
 #include <iostream>
 
-Menu::Menu(){}
+Menu::Menu() {}
 
-void Menu::mainMenu()
+// Loads and shows menu with interactable options
+void Menu::show(PlanService &service)
 {
-    std::vector<std::string> options = { "Check health", "Option 2", "Option 3", "Option 4", "Exit" };
+    std::vector<std::string> options = {"Now", "Day", "Week", "History", "Exit"};
 
     while (true)
     {
-        int selection = create("MAIN MENU", options);
-        char buf;
+        int selection = createAndSelect("MAIN MENU", options);
+
         switch (selection)
         {
             case 0:
             {
-                HttpClient httpClient(HOST, PORT);
-                std::string response = httpClient.get("/health");
-                std::cout << response << "\n";
-                std::cout << "Enter any key to continue" << std::endl;
-                std::cin >> buf;
+                // Option 1
+                // Show what to do right now
+                service.showNow();
                 break;
             }
             case 1:
             {
                 // Option 2
+                // Show next 24 hours
+                service.showDay();
                 break;
             }
             case 2:
             {
                 // Option 3
+                // Show next 7 days
+                service.showWeek();
                 break;
             }
             case 3:
             {
                 // Option 4
+                // See history log
+                service.showHistory();
                 break;
             }
             case 4:
@@ -50,26 +55,27 @@ void Menu::mainMenu()
 
 // Creates, displays and selects in a dynamic interactable list
 // Returns the index in the vector that was selected
-int Menu::create(std::string title, std::vector<std::string> options)
+int Menu::createAndSelect(std::string title, std::vector<std::string> options)
 {
     size_t selected = 0;
 
     while (true)
     {
         clearScreen();
-        
+
+        // ============= Printing =============
         std::cout << "* * * * * * *" << "\n";
         std::cout << "* " << title << std::endl;
         for (size_t i = 0; i < options.size(); i++)
         {
             if (i == selected)
-                std::cout << "*  " << options[i] << " <\n"; // < indicator
+                std::cout << "*  " << options[i] << " <\n";  // < indicator
             else
                 std::cout << "* " << options[i] << "\n";
         }
         std::cout << "* * * * * * *" << std::endl;
 
-        // Input handling
+        // ========== Input handling ==========
         Input::Key keyPressed = Input::getArrowKey();
 
         if (keyPressed == Input::Key::UP && selected > 0)

@@ -1,17 +1,19 @@
 #pragma once
 
-#include "input/input.hpp"
-#include <vector>
 #include <string>
+#include <vector>
+
+#include "input/input.hpp"
+#include "../plan_service/plan_service.hpp"
 
 class Menu
 {
-public:
+   public:
     Menu();
 
-    void mainMenu();
+    void show(PlanService &PlanService);
 
-private:
+   private:
     void clearScreen();
-    int create(std::string title, std::vector<std::string> options);
+    int createAndSelect(std::string title, std::vector<std::string> options);
 };

@@ -10,19 +10,22 @@ BUILD_DIR = ../../build
 TARGET = $(BUILD_DIR)/client
 
 # Source files
-SRCS = client.cpp \
-       http/http_client.cpp \
+SRCS = main.cpp \
 	   menu/menu.cpp \
-	   menu/input/input.cpp
+	   menu/input/input.cpp \
+       http/http_client.cpp \
+	   plan_service/plan_service.cpp 
 
 # Object files (placed in build directory)
 OBJS = $(addprefix $(BUILD_DIR)/, $(SRCS:.cpp=.o))
 
 # Header files (for dependencies)
-HEADERS = http/http_client.hpp \
+HEADERS = menu/menu.hpp \
+		  menu/input/input.hpp \
+		  http/http_client.hpp \
           http/http_status.hpp \
-		  menu/menu.hpp \
-		  menu/input/input.hpp
+		  plan_service/plan_service.hpp \
+		  config.hpp
 
 # Default target
 all: $(TARGET)

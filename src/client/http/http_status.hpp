@@ -1,3 +1,5 @@
+#pragma once
+
 enum class StatusCode
 {
     // 1xx Informational
