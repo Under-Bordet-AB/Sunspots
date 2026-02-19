@@ -5,10 +5,10 @@
 
 struct LiveStatus
 {
-    double buy_electricity = false;
-    double use_solar = false;
-    double charge_battery = false;
-    double sell_excess = false;
+    double buy_electricity = 0.0;
+    double use_solar = 0.0;
+    double charge_battery = 0.0;
+    double sell_excess = 0.0;
 };
 
 class PlanService
