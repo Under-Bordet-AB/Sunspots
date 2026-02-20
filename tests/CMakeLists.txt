@@ -53,3 +53,17 @@ sunspots_apply_target_defaults(sdk_log_module_test)
 add_test(NAME sdk.log.module.test COMMAND sdk_log_module_test)
 set_tests_properties(sdk.log.module.test PROPERTIES LABELS "unit;component:sdk")
 sunspots_add_valgrind_test(sdk.log.module.test sdk_log_module_test)
+
+add_executable(sdk_config_module_test
+  unit/sdk_config_module_test.cpp
+)
+target_link_libraries(sdk_config_module_test
+  PRIVATE
+    GTest::gtest_main
+    sunspots_sdk
+)
+target_compile_features(sdk_config_module_test PRIVATE cxx_std_11)
+sunspots_apply_target_defaults(sdk_config_module_test)
+add_test(NAME sdk.config.module.test COMMAND sdk_config_module_test)
+set_tests_properties(sdk.config.module.test PROPERTIES LABELS "unit;component:sdk")
+sunspots_add_valgrind_test(sdk.config.module.test sdk_config_module_test)

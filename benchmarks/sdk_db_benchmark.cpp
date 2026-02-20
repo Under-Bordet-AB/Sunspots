@@ -39,11 +39,7 @@ bool ensure_bench_db_path()
 
     g_db_dir = dir;
     g_db_path = g_db_dir + "/sdk_bench.db";
-    if (setenv("SS_SDK_DB_PATH", g_db_path.c_str(), 1) != 0) {
-        return false;
-    }
-
-    return true;
+    return setenv("SS_SDK_DB_PATH", g_db_path.c_str(), 1) == 0;
 }
 
 bool reset_db_file()
@@ -121,7 +117,7 @@ static void BM_SdkDbWriteSingle(benchmark::State &state)
         benchmark::DoNotOptimize(rc);
     }
 }
-BENCHMARK(BM_SdkDbWriteSingle);
+BENCHMARK(BM_SdkDbWriteSingle);  // NOLINT(cert-err58-cpp)
 
 static void BM_SdkDbWriteDuplicate(benchmark::State &state)
 {
@@ -151,7 +147,7 @@ static void BM_SdkDbWriteDuplicate(benchmark::State &state)
         benchmark::DoNotOptimize(rc);
     }
 }
-BENCHMARK(BM_SdkDbWriteDuplicate);
+BENCHMARK(BM_SdkDbWriteDuplicate);  // NOLINT(cert-err58-cpp)
 
 static void BM_SdkDbReadCanonical(benchmark::State &state)
 {
@@ -176,6 +172,6 @@ static void BM_SdkDbReadCanonical(benchmark::State &state)
         ss_sdk_db_free_samples(&out);
     }
 }
-BENCHMARK(BM_SdkDbReadCanonical);
+BENCHMARK(BM_SdkDbReadCanonical);  // NOLINT(cert-err58-cpp)
 
 BENCHMARK_MAIN();

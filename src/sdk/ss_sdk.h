@@ -47,23 +47,14 @@ typedef enum {
     SS_SDK_LOG_ERROR
 } ss_sdk_log_level;
 
-/**
- * @brief Canonical record persisted by SDK DB backend.
- */
+// Canonical record persisted by SDK DB backend.
 typedef struct ss_sdk_record {
-    /** Canonical metric identifier from SDK catalog. */
-    ss_metric_id metric;
-    /** Value type expected by metric metadata. */
-    ss_sdk_value_type value_type;
-    /** Actual value payload. */
-    ss_sdk_value value;
-
-    /** 15-minute slot start timestamp (UTC epoch seconds). */
-    int64_t ts_start_utc;
-    /** 15-minute slot end timestamp (UTC epoch seconds). */
-    int64_t ts_end_utc;
-    /** Observation/forecast marker. */
-    ss_sdk_data_kind data_kind;
+    ss_metric_id metric; // Canonical metric identifier from SDK catalog.
+    ss_sdk_value_type value_type; // Value type expected by metric metadata.
+    ss_sdk_value value; // Actual value payload.
+    int64_t ts_start_utc; // 15-minute slot start timestamp (UTC epoch seconds).
+    int64_t ts_end_utc; // 15-minute slot end timestamp (UTC epoch seconds).
+    ss_sdk_data_kind data_kind; // Observation/forecast marker.
 } ss_sdk_record;
 
 typedef uint8_t ss_sdk_sample_flags;
@@ -87,18 +78,12 @@ typedef struct {
     size_t count;
 } ss_sdk_samples_out;
 
-/**
- * @brief Optional structured logging context for advanced log calls.
- */
+// Optional structured logging context for advanced log calls.
 typedef struct ss_sdk_log_fields {
-    /** Logical module name (example: "fetch.openmeteo"). */
-    const char *module;
-    /** Optional source API identifier. */
-    const char *source_api;
-    /** Optional metric associated with log event. */
-    ss_metric_id metric;
-    /** Optional event timestamp (UTC epoch seconds). */
-    int64_t ts_utc;
+    const char *module; // Logical module name (example: "fetch.openmeteo").
+    const char *source_api; // Optional source API identifier.
+    ss_metric_id metric; // Optional metric associated with log event.
+    int64_t ts_utc; // Optional event timestamp (UTC epoch seconds).
 } ss_sdk_log_fields;
 
 /**

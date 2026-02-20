@@ -21,7 +21,7 @@ Think in two layers.
 
 Layer 1 is the declaration layer: CMake reads `CMakeLists.txt` files and produces a build graph. This is where targets are defined, libraries are linked, compile options are set, and tests/benchmarks are registered.
 
-Layer 2 is the usage layer: the root `Makefile` runs CMake and CTest with consistent arguments so the team can type short commands like `make build` or `make test`.
+Layer 2 is the usage layer: the root `Makefile` runs CMake and CTest with consistent arguments so the team can type short commands like `make build`, `make run`, or `make run-tests`.
 
 If you ever see a mismatch, fix the CMake layer. The wrapper should never be a second build system.
 
@@ -52,12 +52,36 @@ In this repository, `src/CMakeLists.txt` is the directory index that pulls in co
 
 ## Chapter 4: What happens when you run `make`
 
-The default `make` goal is `build`. That means `make` performs a configure step (CMake generates build files) and then a build step (your compiler and linker run the plan).
+The default `make` goal is `build`. That means plain `make` is build-only.
 
-Conceptually, it is:
+Conceptually, the daily loop is:
 
-1. Configure: `cmake -S . -B build/debug ...`
-2. Build: `cmake --build build/debug --parallel`
+1. Build app lane: `make build`
+2. Run app lane: `make run`
+3. Build tests only (when iterating tests): `make build-tests`
+4. Run tests: `make run-tests`
+5. Warning reports: `make warnings`
+
+Module-scoped loop (optional):
+- Discover runnable targets: `make list-modules`
+- Build a specific module: `make build M=daemon` (or any listed alias/target)
+- Run a specific module: `make run M=sunspots_fetch_openmeteo`
+- Valgrind a specific module: `make run-valgrind M=fetch_openmeteo`
+- Run full CLI matrix automation: `scripts/test_make_cli_matrix.sh`
+
+Important detail: `make run-tests` runs CTest in the existing build directory and does not rebuild test binaries. If you changed test/source files, run `make build-tests` first.
+
+Valgrind loop (separate lane):
+- Runtime checks on tests: `make build-tests-valgrind` then `make run-tests-valgrind`
+- Runtime checks on daemon: `make build-valgrind` then `make run-valgrind`
+
+`make run-valgrind` is preconfigured to trace child processes and write per-PID logs under `logs/make/<branch>/raw_logs/valgrind_tree/`.
+
+Current limitation: daemon-level Valgrind is not reliable while the daemon runs in background mode. Child-process logs are still captured in `valgrind_tree/`. Complete daemon-level capture requires a foreground-capable daemon mode.
+
+For a single serialized pass, use `make all`. It runs the main build/test/report pipeline under a lock file in `logs/make/<branch>/raw_logs/` so overlapping `make all` or `make warnings` executions fail fast instead of colliding.
+
+`make warnings` is a consolidated actionable-diagnostics report, not just compiler output. It runs build lanes (`build`, `build-valgrind`, `tidy`) before generating reports, then aggregates parsed diagnostics from compiler/clang-tidy/cppcheck/valgrind lanes when available.
 
 The configure step may print messages about fetching GoogleTest or Google Benchmark. That simply means those packages were not found via the system package manager, so CMake is bootstrapping them using `FetchContent`. This is expected in this project.
 
@@ -68,6 +92,8 @@ Sunspots targets C99 and C++11. This is not left to compiler defaults.
 Warnings are enabled to catch common mistakes without turning the build into a constant fight. The goal is to keep warnings meaningful and actionable, not to enforce perfection at the cost of velocity.
 
 Debug builds enable sanitizers by default. Sanitizers are not a replacement for tests, but they are excellent at making classes of memory and undefined-behavior defects visible during everyday development. When a sanitizer report happens, treat it as a correctness bug, not as a "tool issue".
+
+In this repository, `make run` and `make run-tests` set `ASAN_OPTIONS`/`UBSAN_OPTIONS` with `log_path` under `logs/make/<branch>/raw_logs/asan/` so reports are preserved even when daemonized/background processes close terminal streams.
 
 ## Chapter 6: Dependencies without mystery
 
@@ -82,22 +108,26 @@ This matters because it makes onboarding simpler: a new developer can build with
 
 ## Chapter 7: Testing in this repository
 
-Tests are built as normal executables, and then registered with CTest. The wrapper target `make test` calls CTest for the current build directory.
+Tests are built as normal executables, and then registered with CTest. Use `make build-tests` (or `make build`) to compile test binaries, then `make run-tests` to execute them through CTest.
 
-A deliberately named placeholder test exists as a template:
-- `tests/unit/sample_test.cpp`
-
-It is not meant as finished coverage. Its job is to show how to write a test that is readable and stable.
+Current module-focused examples live under:
+- `tests/unit/sdk_db_module_test.cpp`
+- `tests/unit/sdk_canonical_module_test.cpp`
+- `tests/unit/sdk_log_module_test.cpp`
+- `tests/unit/sdk_config_module_test.cpp`
 
 Run:
 
 ```bash
-make test
+make build-tests
+make run-tests
+make build-tests-valgrind
+make run-tests-valgrind
 ```
 
 Then open:
 - `tests/CMakeLists.txt`
-- `tests/unit/sample_test.cpp`
+- one SDK test file from `tests/unit/`
 
 Read the structure and notice the intent:
 - it arranges deterministic inputs
@@ -129,7 +159,8 @@ Sunspots ships a deliberately named placeholder benchmark as a template:
 Run:
 
 ```bash
-make bench
+make build
+./build/debug/benchmarks/sample_benchmark
 ```
 
 Google Benchmark works by executing a benchmark function many times. You write a function that accepts `benchmark::State& state`, and then you place the code you want to measure inside:
@@ -161,7 +192,8 @@ Create a new test file such as `tests/unit/compute_decision_test.cpp`, use the s
 After writing the test, register it in `tests/CMakeLists.txt` as a new executable and a new CTest entry, then run:
 
 ```bash
-make test
+make build-tests
+make run-tests
 ```
 
 If it fails, don’t "fix" the test immediately. Decide whether the code is wrong or the behavior sentence was wrong. The value of tests is that they force you to make that decision explicitly.
@@ -170,7 +202,7 @@ If it fails, don’t "fix" the test immediately. Decide whether the code is wron
 
 Professional performance work starts with a question. Example: "Does this change reduce CPU time for the hot decision path in compute logic?".
 
-Copy `benchmarks/sample_benchmark.cpp` into a module-specific benchmark file, keep setup outside the measured loop, and isolate one workload shape per benchmark. Register the new target in `benchmarks/CMakeLists.txt`, then run `make bench` and compare `CPU` time across baseline vs changed code.
+Copy `benchmarks/sample_benchmark.cpp` into a module-specific benchmark file, keep setup outside the measured loop, and isolate one workload shape per benchmark. Register the new target in `benchmarks/CMakeLists.txt`, then run `make build` and execute the benchmark binary (for example `./build/debug/benchmarks/sample_benchmark`) to compare `CPU` time across baseline vs changed code.
 
 Benchmark results are comparative, and they are contextual. If the machine is under load, if you changed build type, or if you changed inputs, your numbers won’t be comparable. When you include benchmark evidence in a PR, include the benchmark name, the input shape, and the build profile so another developer can reproduce the comparison.
 
@@ -178,7 +210,14 @@ Benchmark results are comparative, and they are contextual. If the machine is un
 
 `make clean` and `make deepclean` are different tools.
 
-`make clean` runs target-level clean operations for configured build directories (when present). `make deepclean` removes the entire `build/` tree. Use `clean` for normal iteration, and use `deepclean` when you need a full rebuild from scratch.
+`make clean` runs target-level clean operations for configured build directories (when present) and removes raw logs for the active branch lane (`logs/make/<branch>/raw_logs/`).
+
+`make deepclean` removes:
+- `build/`
+- `logs/make/<branch>/`
+- `warnings/`
+
+Use `clean` for normal iteration, and `deepclean` when you want to reset generated artifacts and reports.
 
 ## Chapter 13: Extending the system correctly
 
@@ -212,7 +251,7 @@ When you add a new module, follow this stable pattern:
 2. Create `add_library(sunspots_<component> ...)` for the reusable logic (no `main`).
 3. Create `add_executable(sunspots_<component>_<role> ...)` for the entrypoint.
 4. `target_link_libraries(...)` on the executable to link the library target and any extra runtime dependencies.
-5. Add tests by copying the structure of `tests/unit/sample_test.cpp` and linking your library target.
+5. Add tests by copying the structure of an existing file in `tests/unit/` and linking your library target.
 6. If performance is a risk, add benchmarks by copying `benchmarks/sample_benchmark.cpp` and linking your library target.
 
 If you follow this pattern, the build system stays readable, your modules stay testable, and quality tools stay usable.
@@ -229,7 +268,7 @@ If you want one concrete order to learn the repository, use this:
 6. `src/CMakeLists.txt`
 7. one component `src/<component>/CMakeLists.txt`
 8. `tests/CMakeLists.txt`
-9. `tests/unit/sample_test.cpp`
+9. one test file in `tests/unit/`
 10. `benchmarks/CMakeLists.txt`
 11. `benchmarks/sample_benchmark.cpp`
 
@@ -238,8 +277,8 @@ Then run:
 ```bash
 make deepclean
 make
-make test
-make bench
+make run-tests
+make warnings
 ```
 
 After that sequence, you will have exercised the main development loop.

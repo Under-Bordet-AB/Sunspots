@@ -6,11 +6,14 @@ raw_name="${2:-build.raw.log}"
 workspace_root="$(pwd)"
 verbose="${WARNING_SPLITTER_VERBOSE:-0}"
 warn_prefix="${WARN_PREFIX:-[warn]}"
+write_raw="${WARNING_SPLITTER_WRITE_RAW:-0}"
 
 mkdir -p "$out_dir"
-rm -f "$out_dir"/*.warn.log
+rm -f "$out_dir"/*.warn.log "$out_dir"/*.raw.log
 raw_log="$out_dir/$raw_name"
-: > "$raw_log"
+if (( write_raw != 0 )); then
+    : > "$raw_log"
+fi
 
 declare -A warning_counts=()
 total_warnings=0
@@ -28,7 +31,9 @@ is_ignored_warning_source() {
 }
 
 while IFS= read -r line; do
-    printf '%s\n' "$line" >> "$raw_log"
+    if (( write_raw != 0 )); then
+        printf '%s\n' "$line" >> "$raw_log"
+    fi
 
     if [[ "$line" =~ ^(/[^:]+):[0-9]+(:[0-9]+)?:[[:space:]]warning: ]]; then
         source_path="${BASH_REMATCH[1]}"
