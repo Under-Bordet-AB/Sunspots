@@ -146,16 +146,24 @@ if (st != SS_SDK_OK) {
 - Macros auto-capture file/line/function.
 - All log APIs return `ss_sdk_status`.
 - SDK logs are written to the process logger (`syslog`/journald).
-- Extra SDK debug logs are enabled by default (`SS_SDK_DEBUG` unset).
-- Set `SS_SDK_DEBUG=0` to disable extra SDK debug logs.
+- SDK log verbosity is controlled by `SS_SDK_LOG_LEVEL`:
+  - `debug`, `info`, `warn`/`warning`, `error`, `off`/`none`
 - Optional SDK file mirror is controlled by env vars:
-  - `SS_SDK_LOG_MIRROR_ENABLED=1`
+  - `SS_SDK_LOG_MIRROR_ENABLED=1` (accepted truthy tokens: `1`, `true`, `yes`, `on`)
   - `SS_SDK_LOG_MIRROR_PATH=/path/to/sdk.log`
+- DB path is controlled by `SS_SDK_DB_PATH`.
+- Config convention for daemon/module config blobs:
+  - `common.sdk.db_path`
+  - `common.sdk.log_level`
+  - `common.sdk.log_mirror_enabled`
+  - `common.sdk.log_mirror_path`
 - Default behavior with no SDK config/env:
   - DB path defaults to `db/ss_sdk.db`
-  - Debug logging defaults to on
+  - Log level defaults to `debug`
   - Mirror defaults to on
   - Default mirror path is `logs/sdk.log` (if no path is provided)
+- With SDK mirror enabled, mirror writes are blocking per call: each log call locks the mirror file, writes, then unlocks.
+- Performance guideline: avoid logging inside tight loops; collect state in loop variables and emit one summary log at the end (for example via a final `switch`/result branch).
 - Recommended pattern for larger modules: use enum + lookup table for stable event strings.
 
 ## See Also

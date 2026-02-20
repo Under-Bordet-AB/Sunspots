@@ -92,7 +92,8 @@ public:
     ~ScopedCwd()
     {
         if (!old_.empty()) {
-            (void)chdir(old_.c_str());
+            if (chdir(old_.c_str()) != 0) {
+            }
         }
     }
 
@@ -164,7 +165,7 @@ class SdkDbFixture : public ::testing::Test {
 protected:
     SdkDbFixture()
         : db_path_guard_("SS_SDK_DB_PATH"),
-          sdk_debug_guard_("SS_SDK_DEBUG"),
+          sdk_log_level_guard_("SS_SDK_LOG_LEVEL"),
           sdk_log_mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           sdk_log_mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
     {}
@@ -185,7 +186,7 @@ protected:
     }
 
     ScopedEnvVar db_path_guard_;
-    ScopedEnvVar sdk_debug_guard_;
+    ScopedEnvVar sdk_log_level_guard_;
     ScopedEnvVar sdk_log_mirror_enabled_guard_;
     ScopedEnvVar sdk_log_mirror_path_guard_;
     std::string dir_;
@@ -784,12 +785,12 @@ TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
     remove_file_if_exists(path_two);
 }
 
-TEST_F(SdkDbFixture, sdk_debug_logs_selected_db_path_for_write)
+TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_write)
 {
     const int64_t slot = now_slot_utc();
     const std::string log_path = dir_ + "/sdk_debug.log";
 
-    ASSERT_EQ(setenv("SS_SDK_DEBUG", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "debug", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", log_path.c_str(), 1), 0);
 
@@ -800,13 +801,13 @@ TEST_F(SdkDbFixture, sdk_debug_logs_selected_db_path_for_write)
     EXPECT_NE(text.find("db_path=" + db_path_), std::string::npos);
 }
 
-TEST_F(SdkDbFixture, sdk_debug_logs_selected_db_path_for_read)
+TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_read)
 {
     const int64_t slot = now_slot_utc();
     const std::string log_path = dir_ + "/sdk_debug_read.log";
     ss_sdk_samples_out out = {NULL, 0};
 
-    ASSERT_EQ(setenv("SS_SDK_DEBUG", "1", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "debug", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", log_path.c_str(), 1), 0);
 

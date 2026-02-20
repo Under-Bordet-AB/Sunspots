@@ -7,6 +7,8 @@ function(sunspots_add_fetch_api target_name source_file)
       sunspots_curly
       sunspots_cjson
       sunspots_sdk
+      sunspots_weather_transform
+      sunspots_price_transform
       Threads::Threads
   )
   target_compile_features(${target_name} PRIVATE c_std_99)

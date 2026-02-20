@@ -3,6 +3,7 @@ find_package(SQLite3 REQUIRED)
 add_library(sunspots_sdk STATIC
   ss_sdk.c
   ss_canonical.c
+  internal/ss_sdk_config.c
   internal/db/ss_db_internal.c
   internal/db/ss_db_internal_read.c
   internal/log/ss_log_internal.c

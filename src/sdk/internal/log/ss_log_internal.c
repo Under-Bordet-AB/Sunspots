@@ -1,4 +1,5 @@
 #include "sdk/internal/log/ss_log_internal.h"
+#include "sdk/internal/ss_sdk_config.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -6,6 +7,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -109,8 +111,6 @@ void ss_sdk_internal_log_test_set_hook(ss_sdk_log_test_hook hook, int count)
     }
 }
 #endif
-
-static const char *const SS_SDK_LOG_MIRROR_DEFAULT_PATH = "logs/sdk.log";
 
 static int ss_checked_add(size_t *current_size, size_t add)
 {
@@ -224,6 +224,47 @@ static int ss_level_to_syslog_priority(ss_sdk_log_level level)
         default:
             return -1;
     }
+}
+
+static int ss_log_default_level(void)
+{
+    return SS_SDK_LOG_DEBUG;
+}
+
+static int ss_log_parse_level(const char *value)
+{
+    if (value == NULL || value[0] == '\0') {
+        return ss_log_default_level();
+    }
+
+    if (strcasecmp(value, "debug") == 0) {
+        return SS_SDK_LOG_DEBUG;
+    }
+    if (strcasecmp(value, "info") == 0) {
+        return SS_SDK_LOG_INFO;
+    }
+    if (strcasecmp(value, "warn") == 0 || strcasecmp(value, "warning") == 0) {
+        return SS_SDK_LOG_WARN;
+    }
+    if (strcasecmp(value, "error") == 0) {
+        return SS_SDK_LOG_ERROR;
+    }
+    if (strcasecmp(value, "off") == 0 || strcasecmp(value, "none") == 0) {
+        return SS_SDK_LOG_ERROR + 1;
+    }
+
+    return ss_log_default_level();
+}
+
+static int ss_log_min_level(void)
+{
+    static int sdk_env_bootstrapped = 0;
+    if (!sdk_env_bootstrapped) {
+        ss_sdk_config_bootstrap_env_from_blob();
+        sdk_env_bootstrapped = 1;
+    }
+
+    return ss_log_parse_level(getenv(SS_SDK_ENV_LOG_LEVEL));
 }
 
 static int ss_env_bool_enabled(const char *value)
@@ -414,15 +455,22 @@ static int ss_extract_json_log_path(const char *json, char *out_path, size_t out
 
 static int ss_get_log_path(char *out_path, size_t out_sz)
 {
-    const char *mirror_enabled = getenv("SS_SDK_LOG_MIRROR_ENABLED");
-    const char *mirror_path = getenv("SS_SDK_LOG_MIRROR_PATH");
+    static int sdk_env_bootstrapped = 0;
+    const char *mirror_enabled = getenv(SS_SDK_ENV_LOG_MIRROR_ENABLED);
+    const char *mirror_path = getenv(SS_SDK_ENV_LOG_MIRROR_PATH);
     int mirror_is_enabled;
 
     if (out_path == NULL || out_sz == 0) {
         return -1;
     }
+    if (!sdk_env_bootstrapped) {
+        ss_sdk_config_bootstrap_env_from_blob();
+        sdk_env_bootstrapped = 1;
+        mirror_enabled = getenv(SS_SDK_ENV_LOG_MIRROR_ENABLED);
+        mirror_path = getenv(SS_SDK_ENV_LOG_MIRROR_PATH);
+    }
 
-    mirror_is_enabled = (mirror_enabled == NULL) ? 1 : ss_env_bool_enabled(mirror_enabled);
+    mirror_is_enabled = (mirror_enabled == NULL) ? SS_SDK_LOG_MIRROR_ENABLED_DEFAULT : ss_env_bool_enabled(mirror_enabled);
     if (!mirror_is_enabled) {
         out_path[0] = '\0';
         return 0;
@@ -441,7 +489,7 @@ static int ss_get_log_path(char *out_path, size_t out_sz)
 
 static ss_sdk_status ss_log_write_mirror_line(const char *line)
 {
-    char path[1024];
+    char path[SS_SDK_PATH_BUFFER_SIZE];
     int fd;
 
     if (ss_get_log_path(path, sizeof(path)) != 0) {
@@ -755,6 +803,9 @@ static ss_sdk_status ss_log_write_common(
 
     if (message == NULL || file == NULL || func == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
+    }
+    if ((int)level < ss_log_min_level()) {
+        return SS_SDK_OK;
     }
 
     level_text = ss_level_to_string(level);

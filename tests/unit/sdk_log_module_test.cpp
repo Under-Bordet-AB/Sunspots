@@ -71,7 +71,8 @@ public:
     ~ScopedCwd()
     {
         if (!old_.empty()) {
-            (void)chdir(old_.c_str());
+            if (chdir(old_.c_str()) != 0) {
+            }
         }
     }
 
@@ -124,6 +125,7 @@ class SdkLogFixture : public ::testing::Test {
 protected:
     SdkLogFixture()
         : cfg_guard_("SUNSPOTS_CONFIG"),
+          log_level_guard_("SS_SDK_LOG_LEVEL"),
           mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH"),
           db_path_guard_("SS_SDK_DB_PATH")
@@ -152,6 +154,7 @@ protected:
     }
 
     ScopedEnvVar cfg_guard_;
+    ScopedEnvVar log_level_guard_;
     ScopedEnvVar mirror_enabled_guard_;
     ScopedEnvVar mirror_path_guard_;
     ScopedEnvVar db_path_guard_;
@@ -591,11 +594,58 @@ TEST_F(SdkLogFixture, format_and_escape_alloc_failures_cover_common_error_paths)
 TEST_F(SdkLogFixture, debug_level_is_written)
 {
     use_log_path("debug.log");
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "debug", 1), 0);
     ASSERT_EQ(
         ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug", "hello", __FILE__, __LINE__, __func__),
         SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find(" DEBUG sdk.log.debug "), std::string::npos);
+}
+
+TEST_F(SdkLogFixture, info_threshold_filters_out_debug_lines)
+{
+    use_log_path("filter.log");
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "info", 1), 0);
+
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug.filtered", "drop-me", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.info.allowed", "keep-me", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+
+    const std::string text = read_text_file(log_path_);
+    EXPECT_EQ(text.find("sdk.log.debug.filtered"), std::string::npos);
+    EXPECT_NE(text.find("sdk.log.info.allowed"), std::string::npos);
+}
+
+TEST_F(SdkLogFixture, invalid_log_level_token_falls_back_to_debug)
+{
+    use_log_path("invalid_level.log");
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "loud", 1), 0);
+
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug.fallback", "hello", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+
+    const std::string text = read_text_file(log_path_);
+    EXPECT_NE(text.find("sdk.log.debug.fallback"), std::string::npos);
+}
+
+TEST_F(SdkLogFixture, off_threshold_drops_all_lines)
+{
+    use_log_path("off.log");
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "off", 1), 0);
+
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.off.debug", "drop", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, "sdk.log.off.error", "drop", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+
+    const std::string text = read_text_file(log_path_);
+    EXPECT_TRUE(text.empty());
 }
 #endif

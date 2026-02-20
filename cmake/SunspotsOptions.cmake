@@ -19,7 +19,7 @@ function(sunspots_apply_target_defaults target_name)
   if(MSVC)
     target_compile_options(${target_name} PRIVATE /W3)
   else()
-    target_compile_options(${target_name} PRIVATE -Wall)
+    target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
   endif()
 
   if(SUNSPOTS_ENABLE_SANITIZERS)
@@ -35,10 +35,14 @@ function(sunspots_apply_target_defaults target_name)
   endif()
 
   if(SUNSPOTS_ENABLE_CLANG_TIDY AND SUNSPOTS_CLANG_TIDY_BIN)
+    # Only analyze our main source code, not vendored dependencies
+    # Excluded: src/libs/* (cJSON, jj_log, linked_list, curly)
+    # Analyzed: src/{compute,config,core,fetch,frontend,sdk,transform,utils}, tests, benchmarks
     set(_sunspots_tidy_args
       ${SUNSPOTS_CLANG_TIDY_BIN}
       -p=${CMAKE_BINARY_DIR}
       "-header-filter=^${CMAKE_SOURCE_DIR}/(src/(compute|config|core|fetch|frontend|sdk|transform|utils)|tests|benchmarks)/"
+      "--checks=-llvm-header-guard"  # Reduce noise on generated files
     )
     set_target_properties(${target_name} PROPERTIES
       C_CLANG_TIDY "${_sunspots_tidy_args}"

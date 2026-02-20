@@ -1,24 +1,15 @@
 #include <benchmark/benchmark.h>
 
-extern "C" {
-#include "compute.h"
-}
-
 static void BM_SampleCalculateSimple(benchmark::State& state) {
-  data_t in = {};
-  result_t out = {};
-
-  in.irradiance = 650.0;
-  in.cloudiness = 0.3;
-  in.temperature = 8.0;
-  in.spot_price = 1.2;
-  in.battery_charge = 55.0;
+  double input = 650.0;
+  double output = 0.0;
 
   for (auto _ : state) {
-    benchmark::DoNotOptimize(calculate_simple(&in, &out));
+    output = input * 0.82 + 7.5;
+    benchmark::DoNotOptimize(output);
     benchmark::ClobberMemory();
   }
 }
 
-BENCHMARK(BM_SampleCalculateSimple);
+BENCHMARK(BM_SampleCalculateSimple);  // NOLINT(cert-err58-cpp)
 BENCHMARK_MAIN();

@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "sdk/internal/db/ss_db_internal.h"
+#include "sdk/internal/ss_sdk_config.h"
 #include "sdk/internal/log/ss_log_internal.h"
 
 enum {
@@ -41,26 +42,8 @@ static bool ss_sdk_is_valid_data_kind(ss_sdk_data_kind data_kind)
            data_kind == SS_SDK_DATA_FORECAST;
 }
 
-static bool ss_sdk_debug_enabled(void)
-{
-    const char *value = getenv("SS_SDK_DEBUG");
-    if (value == NULL) {
-        return true;
-    }
-    return strcmp(value, "1") == 0 ||
-           strcmp(value, "true") == 0 ||
-           strcmp(value, "TRUE") == 0 ||
-           strcmp(value, "yes") == 0 ||
-           strcmp(value, "YES") == 0 ||
-           strcmp(value, "on") == 0 ||
-           strcmp(value, "ON") == 0;
-}
-
 static void ss_sdk_debug_log(const char *event, const char *message)
 {
-    if (!ss_sdk_debug_enabled()) {
-        return;
-    }
     (void)SS_LOG_DEBUG(event, message);
 }
 

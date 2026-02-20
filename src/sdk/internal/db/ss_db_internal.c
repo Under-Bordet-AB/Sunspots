@@ -1,5 +1,6 @@
 #include "sdk/internal/db/ss_db_internal.h"
 #include "sdk/internal/db/ss_db_internal_shared.h"
+#include "sdk/internal/ss_sdk_config.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -13,8 +14,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-static const char *const SS_SDK_DB_DEFAULT_PATH = "db/ss_sdk.db";
 
 // Lookup table for all SQL queries
 static const char *const g_ss_db_sql[SS_DB_SQL_COUNT] = {
@@ -141,35 +140,14 @@ static char *ss_strdup_local(const char *s)
     return p;
 }
 
-static bool ss_sdk_debug_enabled(void)
-{
-    const char *value = getenv("SS_SDK_DEBUG");
-    if (value == NULL) {
-        return true;
-    }
-    return strcmp(value, "1") == 0 ||
-           strcmp(value, "true") == 0 ||
-           strcmp(value, "TRUE") == 0 ||
-           strcmp(value, "yes") == 0 ||
-           strcmp(value, "YES") == 0 ||
-           strcmp(value, "on") == 0 ||
-           strcmp(value, "ON") == 0;
-}
-
 static void ss_db_debug_log(const char *event, const char *message)
 {
-    if (!ss_sdk_debug_enabled()) {
-        return;
-    }
     (void)SS_LOG_DEBUG(event, message);
 }
 
 static void ss_db_debug_log_path(const char *event, const char *path)
 {
-    char msg[1200];
-    if (!ss_sdk_debug_enabled()) {
-        return;
-    }
+    char msg[SS_SDK_PATH_BUFFER_SIZE];
     if (path == NULL) {
         path = "";
     }
@@ -181,8 +159,14 @@ static void ss_db_debug_log_path(const char *event, const char *path)
 
 static const char *ss_db_path(void)
 {
+    static int sdk_env_bootstrapped = 0;
+    if (!sdk_env_bootstrapped) {
+        ss_sdk_config_bootstrap_env_from_blob();
+        sdk_env_bootstrapped = 1;
+    }
+
     // if we have env variable set, read from that instead
-    const char *override = getenv("SS_SDK_DB_PATH");
+    const char *override = getenv(SS_SDK_ENV_DB_PATH);
     if (override != NULL && override[0] != '\0') {
         return override;
     }
@@ -320,11 +304,14 @@ static void ss_db_close_locked(void)
         int sqlite_result;
 
         (void)sqlite3_wal_checkpoint_v2(g_db, NULL, SQLITE_CHECKPOINT_PASSIVE, NULL, NULL);
-        sqlite_result = sqlite3_close(g_db);
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
         if (ss_test_consume(&g_db_test_hooks.fail_sqlite_close)) {
             sqlite_result = SQLITE_BUSY;
+        } else {
+            sqlite_result = sqlite3_close(g_db);
         }
+#else
+        sqlite_result = sqlite3_close(g_db);
 #endif
         if (sqlite_result != SQLITE_OK) {
             (void)sqlite3_close_v2(g_db);

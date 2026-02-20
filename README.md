@@ -1,97 +1,157 @@
 # Sunspots
 
-Sunspots is a multi-component C99/C++11 project with a unified CMake build system and a root `Makefile` wrapper for daily development.
-
-## Bug reporting
-
-If you find a bug:
-
-1. Add it to `docs/bugs.md`.
-2. Or open a GitHub issue.
-
-## Build system policy
-
-- CMake is the only build source of truth.
-- The root `Makefile` is a convenience wrapper.
-- Legacy per-folder make build scripts have been removed.
+Sunspots is a multi-component C99/C++11 project with CMake as source of truth and a root `Makefile` wrapper for daily workflows.
 
 ## Requirements
 
 - CMake 3.22+
 - C compiler with C99 support
 - C++ compiler with C++11 support
-- libcurl
-- pthreads (POSIX)
-- Optional: valgrind, clang-tidy, clang/clang++ (libFuzzer), AFL++ (afl-fuzz)
-'
+- POSIX threads
 
+### Ubuntu/Debian packages
 
-
-
-
-
-# MÖTE:
-- make run    // bygger och kör så enkelt som möjligt, kör dock tester
-- make stop   // 
-
-
-## Make targets
-
-Use `make <target>` with the following targets:
+Minimum packages for `make build`:
 
 ```bash
-make
-make configure
+sudo apt update
+sudo apt install -y \
+  build-essential \
+  cmake \
+  pkg-config \
+  git \
+  ca-certificates \
+  libcurl4-openssl-dev \
+  libsqlite3-dev
+```
+
+Notes:
+
+- `libsqlite3-dev` is required by `find_package(SQLite3 REQUIRED)` (`sqlite3` CLI alone is not enough).
+- GoogleTest and Google Benchmark are fetched automatically by CMake when missing.
+
+Optional packages for extra workflows:
+
+```bash
+sudo apt install -y \
+  sqlite3 \
+  valgrind \
+  clang-tidy \
+  cppcheck \
+  python3-pip \
+  fzf \
+  libgtest-dev \
+  libbenchmark-dev
+python3 -m pip install --user lizard
+```
+
+One-shot full developer setup (build + tests + warnings tools):
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential \
+  cmake \
+  pkg-config \
+  git \
+  ca-certificates \
+  libcurl4-openssl-dev \
+  libsqlite3-dev \
+  sqlite3 \
+  valgrind \
+  clang-tidy \
+  cppcheck \
+  python3-pip \
+  fzf \
+  libgtest-dev \
+  libbenchmark-dev
+python3 -m pip install --user lizard
+```
+
+## Build Policy
+
+- CMake defines targets, dependencies, flags, tests, and benchmarks.
+- The root `Makefile` provides developer-friendly commands.
+- Per-folder Makefiles are not part of the active build system.
+
+## Quick Start
+
+```bash
+make help
 make build
-make rebuild
-make test
-make test-unit
-make test-integration
-make test-component COMPONENT=sample
-make bench
-make valgrind
-make run COMPONENT=sunspots_frontend
-make run COMPONENT=sunspots_daemon ARGS="daemon"
+make run-tests
+make warnings
+```
+
+## Make Targets
+
+```bash
+make all
+make build
+make build-valgrind
+make build-tests
+make build-tests-valgrind
+make list-modules
+make list-modules-valgrind
+make run
+make run-valgrind
+make run-tests
+make run-tests-valgrind
 make tidy
-make fuzz-build
-make fuzz-run TARGET=http_request_fuzzer
-make fuzz-all
+make cppcheck
+make lizard
+make warnings
+make e2e
+make e2e-valgrind
 make clean
 make deepclean
 ```
 
-`make tidy` is optional and only runs when invoked explicitly.
+Notes:
 
-## Fuzzing
+- `make` defaults to `make build` (build only).
+- `make all` runs a serialized full pipeline (build lanes + test lanes + tidy + reports).
+- Most workflow targets accept optional `M=<module-or-target>` for module-scoped actions (examples: `M=daemon`, `M=fetch`, `M=sunspots_fetch_openmeteo`).
+- `make list-modules` and `make list-modules-valgrind` dynamically discover runnable module targets from configured build trees.
+- `make run` and `make run-valgrind` run the daemon from existing builds and do not rebuild.
+- `make run M=<module>` and `make run-valgrind M=<module>` run that module binary directly (useful when daemon backgrounding makes daemon-level Valgrind unreliable).
+- `scripts/test_make_cli_matrix.sh` runs an automated CLI matrix across make targets, per-module `M=...`, and combined `M=...` cases.
+- For a faster smoke run: `INCLUDE_RUN_TARGETS=0 INCLUDE_HEAVY=0 scripts/test_make_cli_matrix.sh`
+- `make run` and `make run-tests` export `ASAN_OPTIONS`/`UBSAN_OPTIONS` with file logging to `logs/make/<branch>/raw_logs/asan/`.
+- `make run-valgrind` writes per-process Valgrind logs with child tracing.
+- Current limitation: daemon-level Valgrind is not reliable right now because the daemon runs in background mode.
+- `make build-tests` and `make build-tests-valgrind` compile test binaries only.
+- `make run-tests` and `make run-tests-valgrind` run tests only and do not rebuild.
+- `make warnings` runs build lanes (`build`, `build-valgrind`, `tidy`) and regenerates warning/analysis reports.
+- `make e2e` and `make e2e-valgrind` are placeholders and currently report "not yet implemented".
 
-Default fuzzing engine is libFuzzer.
+## Main Outputs
 
-```bash
-make fuzz-build
-make fuzz-run TARGET=http_request_fuzzer
-make fuzz-all
-```
+- Build trees:
+  - `build/debug`
+  - `build/valgrind`
+- Logs:
+  - `logs/make/<branch>/raw_logs/debug_configure.log`
+  - `logs/make/<branch>/raw_logs/debug_build.log`
+  - `logs/make/<branch>/raw_logs/debug_build_tests.log` (when `make build-tests` is run)
+  - `logs/make/<branch>/raw_logs/debug_test.log` (when `make run-tests` is run)
+  - `logs/make/<branch>/raw_logs/asan/asan.*` and `logs/make/<branch>/raw_logs/asan/ubsan.*` (sanitizer runtime logs from `make run`/`make run-tests`)
+  - `logs/make/<branch>/raw_logs/valgrind_configure.log`
+  - `logs/make/<branch>/raw_logs/valgrind_build.log`
+  - `logs/make/<branch>/raw_logs/valgrind_build_tests.log` (when `make build-tests-valgrind` is run)
+  - `logs/make/<branch>/raw_logs/valgrind_test.log` (when `make run-tests-valgrind` is run)
+  - `logs/make/<branch>/raw_logs/run_valgrind_<target>.log` (when `make run-valgrind` is run)
+  - `logs/make/<branch>/raw_logs/valgrind_tree/*.log` (per-PID daemon/subprocess Valgrind logs)
+  - `logs/make/<branch>/raw_logs/tidy_configure.log`
+  - `logs/make/<branch>/raw_logs/tidy_build.log`
+  - `logs/make/<branch>/raw_logs/cppcheck.log`
+  - `logs/make/<branch>/raw_logs/lizard.log`
+  - `logs/make/<branch>/raw_logs/warnings_raw.log` (verbose bundle of report inputs)
+  - `logs/make/<branch>/raw_logs/lizard_raw.log` (raw lizard console output copy)
+  - `logs/make/<branch>/warnings_report.txt` (single ASCII report aggregating actionable warnings: compiler/clang-tidy/cppcheck/valgrind)
+  - `logs/make/<branch>/lizard_report.txt` (separate complexity/recommendation report with tabular output)
 
-`FUZZ_TIME` defaults to `60` seconds per target. Override when needed (example: `FUZZ_TIME=300`).
-Current fuzz targets include:
-- `http_request_fuzzer`
-- `openmeteo_transform_fuzzer`
-- `config_args_fuzzer`
-- `compute_calculator_fuzzer`
-- `fetch_manager_config_fuzzer`
-
-Optional AFL++ mode:
-
-```bash
-make fuzz-build FUZZ_ENGINE=afl
-make fuzz-run FUZZ_ENGINE=afl TARGET=http_request_fuzzer
-```
-
-## Build outputs
-
-By default the wrapper uses `build/debug` and Debug configuration with sanitizers enabled.
-
-## Component executables
+## Executables
 
 - `sunspots_daemon`
 - `sunspots_frontend`
@@ -100,99 +160,24 @@ By default the wrapper uses `build/debug` and Debug configuration with sanitizer
 - `sunspots_fetch_elprisjustnu`
 - `sunspots_compute_manager`
 
-## Testing and quality model
+## SDK Runtime Config
 
-CTest labels are used for filtering:
+Sample runtime config keys live in `config/sunspots.json` under `common.sdk`:
 
-- `unit`
-- `integration`
-- `valgrind`
-- `component:<name>`
-
-Current reference files:
-- `tests/unit/sample_test.cpp` (minimal sample)
-- `tests/unit/config_module_test.cpp` (module-focused config test example)
-- `benchmarks/sample_benchmark.cpp`
+- `db_path`: SDK sqlite DB path (default `db/ss_sdk.db`)
+- `log_level`: `debug`, `info`, `warn`/`warning`, `error`, `off`/`none` (default `debug`)
+- `log_mirror_enabled`: mirror toggle (default `true`)
+- `log_mirror_path`: mirror output path (default `logs/sdk.log`)
 
 ## Documentation
 
-- Existing component docs under `docs/manual/`
-- SDK usage manual: `docs/manual/sdk.md`
-- Build/test/benchmark bug review: `docs/bugs.md`
-- Fuzzing findings: `docs/fuzz.md`
+- SDK manual: `docs/manual/sdk.md`
+- Build and quality workflow: `docs/manual/build_and_quality_system.md`
+- Static analysis ratcheting: `docs/manual/static_analysis_ratcheting.md`
+- Bug tracker doc: `docs/bugs.md`
+- Design notes: `docs/designs/SDK_public_db_API.md`
 
-## Tools
+## Bug Reporting
 
-Sunspots includes utility tools for development and testing, located in `tools/` as self-contained modules.
-
-### SMHI Backfiller (`tools/smhi_backfiller/`)
-
-Continuously fetches SMHI (Swedish Meteorological and Hydrological Institute) weather forecast data and stores it in the SDK database. Useful for populating the database with comprehensive historical forecast data.
-
-**Features:**
-- Live console UI with real-time statistics
-- Automatic rate limit handling (respects HTTP 429)
-- Graceful shutdown on Ctrl+C
-- Configurable locations and fetch intervals
-
-**Usage:**
-```bash
-# Build the project first
-make build
-
-# Run with default configuration
-./tools/smhi_backfiller/run_smhi_backfiller.sh
-
-# Run with custom config and database path
-./tools/smhi_backfiller/run_smhi_backfiller.sh <config_file> <db_path>
-```
-
-**Configuration:**
-Edit `tools/smhi_backfiller/config.json` to customize:
-- Enabled status
-- Database path (outputs to `db/smhi_forecast.db` by default)
-- Log file location (outputs to `logs/smhi_backfiller.log`)
-- Monitor interval and supported metrics
-- Target locations
-
-**Output:**
-- Database: `db/smhi_forecast.db` (SQLite)
-- Logs: `logs/smhi_backfiller.log`
-
-### SDK Database Test Tool (`tools/sdk_db_test/`)
-
-Demonstrates SDK database functionality by fetching live weather data from Open-Meteo API, writing canonical records to SQLite, and exporting as JSON.
-
-**Usage:**
-```bash
-# Build the project first
-make build
-
-# Run with default parameters (Stockholm)
-./tools/sdk_db_test/run_sdk_db_test.sh
-
-# Custom output file
-./tools/sdk_db_test/run_sdk_db_test.sh logs/output.json
-
-# Custom database, output, and quarters to read
-./tools/sdk_db_test/run_sdk_db_test.sh logs/output.json db/custom.db 4
-```
-
-**Parameters:**
-- `latitude` (default: 59.3293 - Stockholm)
-- `longitude` (default: 18.0686 - Stockholm)
-- `output_file` (default: `logs/sdk_output.json`)
-- `db_path` (default: `db/sdk_canonical.db`)
-- `quarters` (default: 1 - number of 15-minute quarters to read)
-
-**Output:**
-- JSON output: `logs/sdk_output.json`
-- Database: `db/sdk_canonical.db` (SQLite)
-
-## External references
-
-- CMake documentation: `https://cmake.org/documentation/`
-- GoogleTest documentation: `https://google.github.io/googletest/`
-- Google Benchmark documentation: `https://github.com/google/benchmark/blob/main/docs/user_guide.md`
-- libFuzzer documentation: `https://llvm.org/docs/LibFuzzer.html`
-- AFL++ documentation: `https://aflplus.plus/docs/`
+1. Add it to `docs/bugs.md`, or
+2. Open a GitHub issue.

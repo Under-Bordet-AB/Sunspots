@@ -247,7 +247,7 @@ bool ss_try_interpolate(
     }
 
     if (policy == SS_INTERP_POLICY_STEP) {
-        ss_raw_row prev;
+        ss_raw_row prev = {0};
         int64_t age_sec;
 
         if (!ss_find_prev_row(rows, count, ts_utc, allow_observation, allow_forecast, &prev)) {
@@ -267,8 +267,8 @@ bool ss_try_interpolate(
     }
 
     if (policy == SS_INTERP_POLICY_LINEAR) {
-        ss_raw_row prev;
-        ss_raw_row next;
+        ss_raw_row prev = {0};
+        ss_raw_row next = {0};
         int64_t span_sec;
         int64_t delta_sec;
         double ratio;
