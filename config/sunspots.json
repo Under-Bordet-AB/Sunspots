@@ -7,19 +7,19 @@
   "modules": [
     {
       "name": "Service_Heartbeat_Mode",
-      "bin_path": "/usr/local/bin/my_service",
+      "bin_path": "./src/core/SHM",
       "Timer-type": 0,
       "heartbeat_interval": 5
     },
     {
       "name": "Task_Absolute_Mode",
-      "bin_path": "/usr/local/bin/daily_cleanup",
+      "bin_path": "./src/core/TAM",
       "Timer-type": 1,
-      "Abs-time": "02:30"
+      "Abs-time": "16:52"
     },
     {
       "name": "Task_Relative_Mode",
-      "bin_path": "/usr/local/bin/check_temp",
+      "bin_path": "./src/core/TRM",
       "Timer-type": 1,
       "Rel-time": 30
     }
