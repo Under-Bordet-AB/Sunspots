@@ -11,10 +11,15 @@ double fahrenheit_to_celsius(double fahrenheit) {
 int iso8601_to_unix(const char* iso8601_time) {
     struct tm t = {0};
 
-    if (strptime(iso8601_time, "%Y-%m-%dT%H:%M:%S", &t) == NULL) {
-        return -1;
-    }
+    char *err = strptime(iso8601_time, "%Y-%m-%dT%H:%M:%S", &t);
 
+    if (err == NULL) {
+        // Try without seconds
+        err = strptime(iso8601_time, "%Y-%m-%dT%H:%M", &t);
+        if (err == NULL) {
+            return -1;
+        }
+    }
     const char *tz = iso8601_time + 19;
     int offset_seconds = 0;
 

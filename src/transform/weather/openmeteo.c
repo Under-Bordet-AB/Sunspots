@@ -1,10 +1,12 @@
 
 #include "transform.h"
 #include "weather_model.h"
+#include "forecast_model.h"
 #include "cJSON.h"
 #include "json_utils.h"
 #include "unit_utils.h"
 #include <string.h>
+#include <stdlib.h>
 
 transform_status_t transform_openmeteo_weather(const cJSON *input, weather_data_t *out){
     JSON_REQUIRE(cJSON_IsObject(input), TRANSFORM_INVALID_INPUT);
@@ -149,6 +151,113 @@ transform_status_t transform_openmeteo_solar(const cJSON *input, weather_data_t 
     out->timestamp_unix = (recent_time > out->timestamp_unix) ? recent_time : out->timestamp_unix;
     out->solar_radiation_W_per_m2 = recent_radiation;
     out->has_solar_radiation = true;
+
+    return TRANSFORM_OK;
+}
+
+transform_status_t transform_openmeteo_forecast(const cJSON *input, forecast_data_t *out){
+    JSON_REQUIRE(cJSON_IsObject(input), TRANSFORM_INVALID_INPUT);
+
+    cJSON *units_obj;
+    cJSON *hourly_obj;
+
+    JSON_GET_REQUIRED(input, "hourly_units",
+                      units_obj, cJSON_IsObject,
+                      TRANSFORM_MISSING_FIELD);
+
+    JSON_GET_REQUIRED(input, "hourly",
+                      hourly_obj, cJSON_IsObject,
+                      TRANSFORM_MISSING_FIELD);
+
+    const char *time_unit;
+    const char *radiation_unit;
+    const char *temperature_unit;
+    const char *cloud_cover_unit;
+
+    JSON_GET_STRING(units_obj, "time",
+                    time_unit, TRANSFORM_BAD_FORMAT);
+
+    JSON_GET_STRING(units_obj, "shortwave_radiation",
+                    radiation_unit, TRANSFORM_BAD_FORMAT);
+
+    JSON_GET_STRING(units_obj, "temperature_2m",
+                    temperature_unit, TRANSFORM_BAD_FORMAT);
+
+    JSON_GET_STRING(units_obj, "cloud_cover",
+                    cloud_cover_unit, TRANSFORM_BAD_FORMAT);
+
+                    
+    if (strcmp(time_unit, "iso8601") != 0 && strcmp(time_unit, "unixtime") != 0) { return TRANSFORM_UNSUPPORTED; }
+    if (strcmp(radiation_unit, "W/m²") != 0) { return TRANSFORM_UNSUPPORTED; }
+    if (strcmp(temperature_unit, "°C") != 0 && strcmp(temperature_unit, "°F") != 0) { return TRANSFORM_UNSUPPORTED; }
+    if (strcmp(cloud_cover_unit, "%") != 0) { return TRANSFORM_UNSUPPORTED; }
+
+    bool is_unix_time = (strcmp(time_unit, "unixtime") == 0);
+
+    cJSON *time_array;
+    cJSON *radiation_array;
+    cJSON *temperature_array;
+    cJSON *cloud_cover_array;
+
+    JSON_GET_REQUIRED(hourly_obj, "time",
+                      time_array, cJSON_IsArray,
+                      TRANSFORM_MISSING_FIELD);
+
+    JSON_GET_REQUIRED(hourly_obj, "shortwave_radiation",
+                      radiation_array, cJSON_IsArray,
+                      TRANSFORM_MISSING_FIELD);
+
+    JSON_GET_REQUIRED(hourly_obj, "temperature_2m",
+                      temperature_array, cJSON_IsArray,
+                      TRANSFORM_MISSING_FIELD);
+
+    JSON_GET_REQUIRED(hourly_obj, "cloud_cover",
+                      cloud_cover_array, cJSON_IsArray,
+                      TRANSFORM_MISSING_FIELD);
+
+    int num_entries = cJSON_GetArraySize(time_array);
+    if (cJSON_GetArraySize(radiation_array) != num_entries ||
+        cJSON_GetArraySize(temperature_array) != num_entries ||
+        cJSON_GetArraySize(cloud_cover_array) != num_entries){
+        return TRANSFORM_BAD_FORMAT;
+    }
+
+    out->weather_arr = (weather_data_t *)malloc(num_entries * sizeof(weather_data_t));
+    out->no_data_points = num_entries;
+
+    for (int i = 0; i < num_entries; i++){
+        weather_data_t *item = &out->weather_arr[i];
+        weather_data_init(item);
+        int unix_time;
+        if (is_unix_time){
+            unix_time = cJSON_GetArrayItem(time_array, i)->valueint;
+        } else {
+            const char *iso_time = cJSON_GetArrayItem(time_array, i)->valuestring;
+            unix_time = iso8601_to_unix(iso_time);
+            if (unix_time == -1){
+                continue;
+            }
+        }
+        item->timestamp_unix = unix_time;
+
+        cJSON *radiation = cJSON_GetArrayItem(radiation_array, i);
+        if (cJSON_IsNumber(radiation)){
+            item->solar_radiation_W_per_m2 = radiation->valuedouble;
+            item->has_solar_radiation = true;
+        }
+
+        cJSON *temperature = cJSON_GetArrayItem(temperature_array, i);
+        if (cJSON_IsNumber(temperature)){
+            item->temperature_c = temperature->valuedouble;
+            item->has_temperature = true;
+        }
+
+        cJSON *cloud_cover = cJSON_GetArrayItem(cloud_cover_array, i);
+        if (cJSON_IsNumber(cloud_cover)){
+            item->cloud_cover_percent = cloud_cover->valuedouble;
+            item->has_cloud_cover = true;
+        }
+    }
 
     return TRANSFORM_OK;
 }
