@@ -5,11 +5,14 @@
 #include <signal.h>
 #include <pthread.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "../fetch_utils.h"
 
 #include "../../libs/curly.h"
 #include "../../libs/json/cJSON.h"
+
+#include "../../sdk/ss_sdk.h"
 
 #include "../../transform/transform.h"
 #include "../../transform/weather/weather_model.h"
@@ -101,6 +104,74 @@ int normalize_data(char* raw_in, weather_data_t** out) {
 }
 
 int save_to_database(weather_data_t* weather_data) {
+    if (weather_data == NULL) {
+        return -1;
+    }
+
+    if (weather_data->timestamp_unix <= 0) {
+        return -1;
+    }
+
+    if (weather_data->has_temperature) {
+        ss_sdk_record record;
+        ss_sdk_status status = ss_sdk_record_make_f64(
+            &record,
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            weather_data->temperature_c,
+            (int64_t)weather_data->timestamp_unix,
+            SS_SDK_DATA_OBSERVATION);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Openmeteo - record_make temperature failed status=%d", (int)status);
+            return -1;
+        }
+
+        status = ss_sdk_db_write_record(&record);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Openmeteo - db_write temperature failed status=%d", (int)status);
+            return -1;
+        }
+    }
+
+    if (weather_data->has_cloud_cover) {
+        ss_sdk_record record;
+        ss_sdk_status status = ss_sdk_record_make_f64(
+            &record,
+            SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
+            weather_data->cloud_cover_percent,
+            (int64_t)weather_data->timestamp_unix,
+            SS_SDK_DATA_OBSERVATION);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Openmeteo - record_make cloud_cover failed status=%d", (int)status);
+            return -1;
+        }
+
+        status = ss_sdk_db_write_record(&record);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Openmeteo - db_write cloud_cover failed status=%d", (int)status);
+            return -1;
+        }
+    }
+
+    if (weather_data->has_solar_radiation) {
+        ss_sdk_record record;
+        ss_sdk_status status = ss_sdk_record_make_f64(
+            &record,
+            SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+            weather_data->solar_radiation_W_per_m2,
+            (int64_t)weather_data->timestamp_unix,
+            SS_SDK_DATA_OBSERVATION);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Openmeteo - record_make shortwave_radiation failed status=%d", (int)status);
+            return -1;
+        }
+
+        status = ss_sdk_db_write_record(&record);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Openmeteo - db_write shortwave_radiation failed status=%d", (int)status);
+            return -1;
+        }
+    }
+
     return 0;
 }
 

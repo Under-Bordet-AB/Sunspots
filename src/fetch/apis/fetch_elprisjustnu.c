@@ -5,11 +5,14 @@
 #include <signal.h>
 #include <pthread.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "../fetch_utils.h"
 
 #include "../../libs/curly.h"
 #include "../../libs/json/cJSON.h"
+
+#include "../../sdk/ss_sdk.h"
 
 #include "../../transform/transform.h"
 #include "../../transform/price/price_model.h"
@@ -111,8 +114,37 @@ int normalize_data(char* raw_in, price_data_t** out) {
 }
 
 int save_to_database(price_data_t* price_data) {
+    if (price_data == NULL) {
+        return -1;
+    }
+
+    if (price_data->no_data_points <= 0) {
+        return -1;
+    }
+
+    if (price_data->timestamp_arr_unix == NULL || price_data->price_arr_SEK_per_kWh == NULL) {
+        return -1;
+    }
+
     for (int i = 0; i < price_data->no_data_points; i++) {
-        // save each datapoint with its respective timestamp (in its timeslot database wise)
+        ss_sdk_record record;
+        ss_sdk_status status = ss_sdk_record_make_f64(
+            &record,
+            SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH,
+            price_data->price_arr_SEK_per_kWh[i],
+            (int64_t)price_data->timestamp_arr_unix[i],
+            SS_SDK_DATA_FORECAST);
+
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - record_make failed at i=%d status=%d", i, (int)status);
+            return -1;
+        }
+
+        status = ss_sdk_db_write_record(&record);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - db_write failed at i=%d status=%d", i, (int)status);
+            return -1;
+        }
     }
 
     return 0;
