@@ -5,6 +5,7 @@
 #include "http_constants.h"
 
 #define STRICT_VALIDATION 1
+#define HTTPRESPONSE_BODYLEN_AUTODETECT -1
 
 typedef enum {
     Method_Unknown = 0,

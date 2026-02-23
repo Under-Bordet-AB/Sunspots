@@ -9,10 +9,12 @@ target_include_directories(sunspots_frontend_core
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src/libs/linked_list
+    ${CMAKE_SOURCE_DIR}/src/libs/json
 )
 target_link_libraries(sunspots_frontend_core
   PUBLIC
     sunspots_linked_list
+    sunspots_cjson
     Threads::Threads
 )
 target_compile_features(sunspots_frontend_core PUBLIC c_std_99)
