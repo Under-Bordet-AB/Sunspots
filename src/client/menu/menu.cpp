@@ -1,4 +1,5 @@
 #include "menu.hpp"
+#include "../plan_service/plan_service.hpp"
 
 #include <iostream>
 
@@ -20,12 +21,18 @@ void Menu::show(PlanService &service)
                 // Option 1
                 // Show what to do right now
                 service.showNow();
+        
+                while (Input::getArrowKey() != Input::Key::ENTER)
+                {
+                    clearScreen();
+                }
                 break;
             }
             case 1:
             {
                 // Option 2
                 // Show next 24 hours
+                clearScreen();
                 service.showDay();
                 break;
             }
@@ -58,22 +65,23 @@ void Menu::show(PlanService &service)
 int Menu::createAndSelect(std::string title, std::vector<std::string> options)
 {
     size_t selected = 0;
+    std::string outline = "+----------------------+";
 
     while (true)
     {
         clearScreen();
 
         // ============= Printing =============
-        std::cout << "* * * * * * *" << "\n";
-        std::cout << "* " << title << std::endl;
+        std::cout << outline << "\n";
+        std::cout << "|\t" << title << std::endl;
         for (size_t i = 0; i < options.size(); i++)
         {
             if (i == selected)
-                std::cout << "*  " << options[i] << " <\n";  // < indicator
+                std::cout << "|  " << options[i] << " <\n";  // < indicator
             else
-                std::cout << "* " << options[i] << "\n";
+                std::cout << "| " << options[i] << "\n";
         }
-        std::cout << "* * * * * * *" << std::endl;
+        std::cout << outline << std::endl;
 
         // ========== Input handling ==========
         Input::Key keyPressed = Input::getArrowKey();

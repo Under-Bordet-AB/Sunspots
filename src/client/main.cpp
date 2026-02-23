@@ -6,13 +6,8 @@
 
 int main()
 {
-    // ========== Connect to server ==========
+    // ========== Initialize server ==========
     HttpClient client("localhost", "10480");
-    if (!client.connect())
-    {
-        perror("Connect()");
-        return 1;
-    }
 
     // ======= Initialize plan service =======
     PlanService service(client);

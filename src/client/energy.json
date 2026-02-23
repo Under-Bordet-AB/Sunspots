@@ -1,0 +1,9 @@
+{
+  "result": {
+    "buy_electricity": 0.0,
+    "direct_use": 0.0,
+    "charge_battery": 0.0,
+    "sell_excess": 0.0,
+    "timestamp": "2026-01-01T00:00:00Z"
+  }
+}
