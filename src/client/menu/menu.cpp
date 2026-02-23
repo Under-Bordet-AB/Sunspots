@@ -34,6 +34,11 @@ void Menu::show(PlanService &service)
                 // Show next 24 hours
                 clearScreen();
                 service.showDay();
+
+                while (Input::getArrowKey() != Input::Key::ENTER)
+                {
+                    clearScreen();
+                }
                 break;
             }
             case 2:
@@ -41,6 +46,11 @@ void Menu::show(PlanService &service)
                 // Option 3
                 // Show next 7 days
                 service.showWeek();
+
+                while (Input::getArrowKey() != Input::Key::ENTER)
+                {
+                    clearScreen();
+                }
                 break;
             }
             case 3:
@@ -48,6 +58,11 @@ void Menu::show(PlanService &service)
                 // Option 4
                 // See history log
                 service.showHistory();
+
+                while (Input::getArrowKey() != Input::Key::ENTER)
+                {
+                    clearScreen();
+                }
                 break;
             }
             case 4:

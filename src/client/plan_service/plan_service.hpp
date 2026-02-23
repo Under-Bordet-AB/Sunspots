@@ -6,7 +6,7 @@
 struct Result 
 {
     double buy_electricity = 0.0;
-    double use_solar = 0.0;
+    double direct_use = 0.0;
     double charge_battery = 0.0;
     double sell_excess = 0.0;
 
@@ -26,4 +26,6 @@ class PlanService
 
    private:
     HttpClient client;
+
+    Result parseResponse(const std::string &buffer);
 };
