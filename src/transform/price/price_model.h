@@ -5,8 +5,8 @@
 #include <stdbool.h>
 
 typedef struct {
-    time_t *timestamp_unix;
-    double *price_SEK_per_kWh;
+    time_t *timestamp_arr_unix;
+    double *price_arr_SEK_per_kWh;
     int no_data_points;
     int region;
 } price_data_t;
