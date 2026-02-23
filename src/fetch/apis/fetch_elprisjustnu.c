@@ -28,44 +28,52 @@ int main() {
 
     syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
 
+    int rc = EXIT_FAILURE;
     char* buffer = NULL;
+    price_data_t* price_data = NULL;
 
     char url[128];
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
 
+    if (!t) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - localtime failed.");
+        goto done;
+    }
+
     snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
 
     if (fetch_from_url(url, &buffer, 30) < 0) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API.");
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     if (!buffer) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL.");
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
-    price_data_t* price_data = NULL;
     if (normalize_data(buffer, &price_data) < 0) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data.");
-        free(buffer);
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     if ((save_to_database(price_data) < 0)) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
-        price_data_dispose(price_data);
-        free(buffer);
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved!");
+    rc = EXIT_SUCCESS;
     
-    if (price_data != NULL) price_data_dispose(price_data);
+done:
+    if (price_data != NULL) {
+        price_data_dispose(price_data);
+        free(price_data);
+    }
     if (buffer != NULL) free(buffer);
 
-    exit(EXIT_SUCCESS);
+    return rc;
 }
 
 int normalize_data(char* raw_in, price_data_t** out) {

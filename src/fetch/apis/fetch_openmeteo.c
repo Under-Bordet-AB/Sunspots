@@ -15,7 +15,7 @@
 #include "../../transform/weather/weather_model.h"
 #include "../../transform/weather/weather_transform.h"
 
-#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current=temperature_2m,cloud_cover"
+#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current=temperature_2m,cloud_cover&hourly=shortwave_radiation"
 
 int normalize_data(char* raw_in, weather_data_t** out);
 int save_to_database(weather_data_t* price_data);
@@ -28,38 +28,38 @@ int main() {
 
     syslog(LOG_INFO, "Fetch API - Openmeteo - Starting...");
 
+    int rc = EXIT_FAILURE;
     char* buffer = NULL;
+    weather_data_t* weather_data = NULL;
 
     if (fetch_from_url(API_URL, &buffer, 30) < 0) {
         syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't fetch from API.");
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     if (!buffer) {
         syslog(LOG_WARNING, "Fetch API - Openmeteo - Buffer is NULL.");
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
-    weather_data_t* weather_data = NULL;
     if (normalize_data(buffer, &weather_data) < 0) {
         syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't normalize data.");
-        free(buffer);
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     if ((save_to_database(weather_data) < 0)) {
         syslog(LOG_WARNING, "Fetch API - Openmeteo - Couldn't save data to database.");
-        free(weather_data);
-        free(buffer);
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     syslog(LOG_INFO, "Fetch API - Openmeteo - Data successfully normalized and saved!");
+    rc = EXIT_SUCCESS;
     
+done:
     if (weather_data != NULL) free(weather_data);
     if (buffer != NULL) free(buffer);
 
-    exit(EXIT_SUCCESS);
+    return rc;
 }
 
 int normalize_data(char* raw_in, weather_data_t** out) {
@@ -100,7 +100,7 @@ int normalize_data(char* raw_in, weather_data_t** out) {
     return 0;
 }
 
-int save_to_database(weather_data_t* price_data) {
+int save_to_database(weather_data_t* weather_data) {
     return 0;
 }
 
