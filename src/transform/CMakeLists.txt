@@ -1,5 +1,6 @@
 add_library(sunspots_weather_transform STATIC
   weather/openmeteo.c
+  weather/forecast_model.c
   weather/weather_model.c
 )
 target_include_directories(sunspots_weather_transform
