@@ -16,4 +16,5 @@ function(sunspots_add_fetch_api target_name source_file)
 endfunction()
 
 sunspots_add_fetch_api(sunspots_fetch_openmeteo fetch_openmeteo.c)
+sunspots_add_fetch_api(sunspots_fetch_openmeteo_forecast fetch_openmeteo_forecast.c)
 sunspots_add_fetch_api(sunspots_fetch_elprisjustnu fetch_elprisjustnu.c)
