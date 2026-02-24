@@ -9,22 +9,22 @@
 #include <errno.h>
 #include <string.h>
 
-#include "../../sdk/ss_sdk.h"
+#include "../sdk/ss_sdk.h"
 #include "../libs/json/cJSON.h"
+
 #include "algorithms/compute_lp.h"
 
-#define DB_PATH "db_path"
 #define ENDPOINTS_DIR "endpoints"
 #define ENDPOINTS_FILE "endpoints/result.json"
 #define SERIES_LEN 96
 #define SLOT_SECONDS 900
 
 typedef struct compute_data_t {
-    double irradiance[96];
-    double cloudiness[96];
-    double temperature[96];
+    double irradiance[SERIES_LEN];
+    double cloudiness[SERIES_LEN];
+    double temperature[SERIES_LEN];
 
-    double elpris[96];
+    double elpris[SERIES_LEN];
 } compute_data_t;
 
 typedef struct result_t {
@@ -64,7 +64,7 @@ int main() {
     }
 
     syslog(LOG_INFO, "Compute Manager - Done.");
-    exit(EXIT_SUCCESS);
+    return EXIT_SUCCESS;
 }
 
 void cleanup(void) {
