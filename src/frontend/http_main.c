@@ -72,18 +72,19 @@ http_server* http_init()
 int http_accept(http_server* server)
 {
     int accepts = 0;
-    while (1) {
-        int client_fd = accept(server->server_fd, NULL, NULL);
+    int client_fd;
+    do {
+        client_fd = accept(server->server_fd, NULL, NULL);
         if (client_fd >= 0) {
-            enqueue_client(client_fd);
-            accepts++;
-        } else {
-            if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                break;
-            } else {
-                perror("accept");
+            int status = enqueue_client(client_fd);
+            if(status != 0) {
+                close(client_fd);
             }
+            accepts++;
         }
+    } while(client_fd >= 0);
+    if(errno != EAGAIN && errno != EWOULDBLOCK) {
+        perror("accept");
     }
     return accepts;
 }

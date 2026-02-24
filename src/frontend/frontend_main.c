@@ -11,54 +11,39 @@
 #include "client_queue.h"
 #include "http_constants.h"
 #include "http_main.h"
+#include "cJSON.h"
 
 void cleanup(void);
 
 #define ALLOW_STANDALONE_EXEC 1
 
-int main(int argc, char* argv[]) {
+int main() {
     atexit(cleanup);
 
     openlog("SUNSPOTS_HTTP_SERVER", LOG_PID, LOG_DAEMON);
 
-    int received = 0;
-    if(argc < 3)
-    {
-        if(!ALLOW_STANDALONE_EXEC)
-        {
-            printf("Usage: /path/to/frontend <PPID> <Heartbeats/sec>\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> Missing command line arguments: /path/to/frontend <PPID> <Heartbeats/sec>");
-            exit(EXIT_FAILURE);
-        }
-    } else {
-        received = 1;
+    /* In any spawned module binary — replaces argv parsing */
+    int    daemon_pid    = getppid();
+    char  *sig_env       = getenv("SUNSPOTS_SIGNAL");
+    if(sig_env == NULL) {
+        printf("Missing environment variable: SUNSPOTS_SIGNAL\n");
+        syslog(LOG_ERR, "<frontend/frontend_main.c> Missing environment variable: SUNSPOTS_SIGNAL");
+        exit(EXIT_FAILURE);
     }
+    int    sig_number    = atoi(sig_env);
+    char  *config_blob   = getenv("SUNSPOTS_CONFIG");
+    if(config_blob == NULL) {
+        printf("Missing environment variable: SUNSPOTS_CONFIG\n");
+        syslog(LOG_ERR, "<frontend/frontend_main.c> Missing environment variable: SUNSPOTS_CONFIG");
+        exit(EXIT_FAILURE);
+    }
+    cJSON *cfg           = cJSON_Parse(config_blob);
+    int    hb_interval   = cJSON_GetObjectItem(cfg, "heartbeat_interval")->valueint;
 
-    long parent_pid, beat_freq = 0;
-
-    if(received)
-    {
-        char* endptr;
-        parent_pid = strtol(argv[1], &endptr, 10);
-        if(errno == ERANGE)
-        {
-            printf("Invalid PPID argument\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> Could not parse PPID argument");
-            exit(EXIT_FAILURE);
-        }
-        beat_freq = strtol(argv[2], &endptr, 10);
-        if(errno == ERANGE)
-        {
-            printf("Invalid heartbeat frequency argument\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> Could not parse heartbeat frequency argument");
-            exit(EXIT_FAILURE);
-        }
-
-        if (kill(parent_pid, SIGRTMIN) == -1) {
-            printf("Could not signal the provided PPID\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> PPID test signaling failed, is the argument correct?");
-            exit(EXIT_FAILURE);
-        }
+    if (kill(daemon_pid, sig_number) == -1) {
+        printf("Could not signal the daemon PPID\n");
+        syslog(LOG_ERR, "<frontend/frontend_main.c> PPID test signaling failed, is the argument correct?");
+        exit(EXIT_FAILURE);
     }
 
     syslog(LOG_INFO, "<frontend/frontend_main.c> Initializing HTTP server...");
@@ -79,17 +64,14 @@ int main(int argc, char* argv[]) {
     while(1)
     {
         clock_gettime(CLOCK_MONOTONIC, &now);
-        if(received)
+        int64_t elapsed_ns = (int64_t)(now.tv_sec - last.tv_sec) * 1000000000LL + (now.tv_nsec - last.tv_nsec);
+        if(elapsed_ns >= hb_interval * 1000000000LL)
         {
-            int64_t elapsed_ns = (int64_t)(now.tv_sec - last.tv_sec) * 1000000000LL + (now.tv_nsec - last.tv_nsec);
-            if(elapsed_ns >= beat_freq * 1000000000LL)
-            {
-                if (kill(parent_pid, SIGRTMIN) == -1) {
-                    syslog(LOG_ERR, "<frontend/frontend_main.c> Could not signal daemon, panic!!!");
-                    exit(EXIT_FAILURE);
-                }
-                last = now;
+            if (kill(daemon_pid, sig_number) == -1) {
+                syslog(LOG_ERR, "<frontend/frontend_main.c> Could not signal daemon, panic!!!");
+                exit(EXIT_FAILURE);
             }
+            last = now;
         }
 
         int count = http_accept(srv);

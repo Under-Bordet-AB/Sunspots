@@ -98,7 +98,7 @@ http_response* process_request(http_request* req)
 
     if(strcmp(req->path, "/health") == 0)
     {
-        http_response* resp = http_response_init(200, "{\"status\":\"ok\"}", -1);
+        http_response* resp = http_response_init(200, "{\"status\":\"ok\"}", HTTPRESPONSE_BODYLEN_AUTODETECT);
         if(!resp)
             return NULL;
         http_response_add_header(resp, "Content-Type", "application/json");
@@ -107,7 +107,7 @@ http_response* process_request(http_request* req)
 
     if(strcmp(req->path, "/") == 0)
     {
-        http_response* resp = http_response_init(200, "Welcome to Sunspots!", -1);
+        http_response* resp = http_response_init(200, "Welcome to Sunspots!", HTTPRESPONSE_BODYLEN_AUTODETECT);
         if(!resp)
             return NULL;
         http_response_add_header(resp, "Content-Type", "text/plain");
@@ -123,7 +123,7 @@ http_response* process_request(http_request* req)
         char* file_data = load_file(file_path, &file_size);
         if (!file_data)
         {
-            http_response* resp = http_response_init(404, "Not Found", -1);
+            http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
             if(!resp)
                 return NULL;
             http_response_add_header(resp, "Content-Type", "text/plain");
@@ -142,7 +142,7 @@ http_response* process_request(http_request* req)
         return resp;
     }
 
-    http_response* resp = http_response_init(404, "Not Found", -1);
+    http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
     if(!resp)
         return NULL;
     http_response_add_header(resp, "Content-Type", "text/plain");
