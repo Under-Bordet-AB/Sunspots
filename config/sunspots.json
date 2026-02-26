@@ -6,14 +6,14 @@
         "socket_path": "./logs/sunspots.sock"
     },
     "modules": [
-        {
-            "name": "Logger",
-            "bin_path": "./src/core/logger",
-            "Timer-type": 0,
-            "heartbeat_interval": 3,
-            "log_path": "./logs/daemon.log",
-            "socket_path": "./logs/sunspots.sock"
-        },
+    {
+        "name": "Logger",
+        "bin_path": "./build/debug/src/core/sunspots_logger",
+        "Timer-type": 0,
+        "heartbeat_interval": 3,
+        "log_path": "./logs/daemon.log",
+        "socket_path": "./logs/sunspots.sock"
+    },
     {
       "name": "Task_Absolute_Mode",
       "bin_path": "./src/core/TAM",
