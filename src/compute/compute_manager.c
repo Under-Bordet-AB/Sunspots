@@ -16,7 +16,8 @@
 #include "algorithms/compute_lp.h"
 
 #define ENDPOINTS_DIR "endpoints"
-#define ENDPOINTS_FILE "endpoints/result.json"
+#define ENDPOINTS_RESULT_FILE "endpoints/result.json"
+#define ENDPOINTS_WEATHER_FILE "endpoints/weather.json"
 #define SLOT_SECONDS 900
 
 void cleanup(void);
@@ -27,7 +28,8 @@ void cleanup(void);
 
 // Load data
 static void init_compute_data(compute_data_t* data);
-static int count_horizon_len_from_price(const double* price);
+static int count_horizon_len_from_inputs(const compute_data_t* data, int max_len);
+int save_weather(const compute_data_t* data);
 int load_data(compute_data_t* out);
 
 // Compute
@@ -35,8 +37,8 @@ static void init_result_data(result_t* result);
 int compute(const compute_data_t* data, result_t* out_result);
 
 // Save result
-static int add_series_to_json(cJSON* parent, const char* name, const double* values);
-int save_result(const result_t* result);
+static int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len);
+int save_result(const result_t* result, int horizon_len);
 
 //*************************//
 //          MAIN           //
@@ -61,7 +63,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    if (save_result(&result) < 0) {
+    if (save_result(&result, data.horizon_len) < 0) {
         syslog(LOG_ERR, "Compute Manager - Saving result failed.");
         return EXIT_FAILURE;
     }
@@ -88,13 +90,73 @@ static void init_compute_data(compute_data_t* data) {
     }
 }
 
-static int count_horizon_len_from_price(const double* price) {
-    int len = 0;
-    for (int i = 0; i < SERIES_LEN; i++) {
-        if (isnan(price[i])) break;
+static int count_horizon_len_from_inputs(const compute_data_t* data, int max_len) {
+    int len;
+
+    if (!data) return 0;
+    if (max_len < 0) max_len = 0;
+    if (max_len > SERIES_LEN) max_len = SERIES_LEN;
+
+    len = 0;
+    for (int i = 0; i < max_len; i++) {
+        if (isnan(data->irradiance[i]) ||
+            isnan(data->cloudiness[i]) ||
+            isnan(data->temperature[i]) ||
+            isnan(data->price_kwh[i])) {
+            break;
+        }
         len++;
     }
+
     return len;
+}
+
+int save_weather(const compute_data_t* data) {
+    if (!data) return -1;
+
+    if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
+        int err = errno;
+        syslog(LOG_ERR, "Compute Manager - mkdir('%s') failed %s", ENDPOINTS_DIR, strerror(err));
+        return -1;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    if (!root) return -1;
+
+    cJSON* forecast_obj = cJSON_CreateObject();
+    if (!forecast_obj) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, SERIES_LEN) < 0 ||
+        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, SERIES_LEN) < 0 ||
+        add_series_to_json(forecast_obj, "temperature", data->temperature, SERIES_LEN)) {
+        cJSON_Delete(forecast_obj);
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    cJSON_AddItemToObject(root, "forecast", forecast_obj);
+
+    char* json = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (!json) return -1;
+
+    FILE* f = fopen(ENDPOINTS_WEATHER_FILE, "w");
+    if (!f) {
+        int err = errno;
+        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_WEATHER_FILE, strerror(err));
+        free(json);
+        return -1;
+    }
+
+    fputs(json, f);
+    fputc('\n', f);
+    fclose(f);
+    free(json);
+
+    return 0;
 }
 
 int load_data(compute_data_t* out) {
@@ -156,10 +218,15 @@ int load_data(compute_data_t* out) {
         ss_sdk_db_free_samples(&samples);
     }
 
-    out->horizon_len = horizon_slots;
+    out->horizon_len = count_horizon_len_from_inputs(out, horizon_slots);
 
     if (out->horizon_len <= 0) {
         syslog(LOG_ERR, "Compute Manager - No usable elpris slots.");
+        return -1;
+    }
+
+    if (save_weather(out) < 0) {
+        syslog(LOG_ERR, "Compute Manager - Failed to save weather data to endpoints folder.");
         return -1;
     }
 
@@ -195,26 +262,36 @@ int compute(const compute_data_t* data, result_t* out_result) {
 //          SAVE RESULT           //
 //********************************//
 
-static int add_series_to_json(cJSON* parent, const char* name, const double* values) {
+static int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len) {
     cJSON* array = cJSON_CreateArray();
     if (!array) {
         return -1;
     }
 
+    if (valid_len < 0) valid_len = 0;
+    if (valid_len > SERIES_LEN) valid_len = SERIES_LEN;
+
     for (int i = 0; i < SERIES_LEN; i++) {
-        cJSON* number = cJSON_CreateNumber(values[i]);
-        if (!number) {
+        cJSON* value_item;
+
+        if (i >= valid_len) {
+            value_item = cJSON_CreateNull();
+        } else {
+            value_item = cJSON_CreateNumber(values[i]);
+        }
+
+        if (!value_item) {
             cJSON_Delete(array);
             return -1;
         }
-        cJSON_AddItemToArray(array, number);
+        cJSON_AddItemToArray(array, value_item);
     }
 
     cJSON_AddItemToObject(parent, name, array);
     return 0;
 }
 
-int save_result(const result_t* result) {
+int save_result(const result_t* result, int horizon_len) {
     if (!result) return -1;
 
     if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
@@ -232,10 +309,10 @@ int save_result(const result_t* result) {
         return -1;
     }
 
-    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity) < 0 ||
-        add_series_to_json(result_obj, "direct_use", result->direct_use) < 0 ||
-        add_series_to_json(result_obj, "charge_battery", result->charge_battery) < 0 ||
-        add_series_to_json(result_obj, "sell_excess", result->sell_excess) < 0) {
+    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "direct_use", result->direct_use, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "charge_battery", result->charge_battery, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "sell_excess", result->sell_excess, horizon_len) < 0) {
         cJSON_Delete(result_obj);
         cJSON_Delete(root);
         return -1;
@@ -244,14 +321,14 @@ int save_result(const result_t* result) {
 
     cJSON_AddItemToObject(root, "result", result_obj);
 
-    char* json = cJSON_PrintUnformatted(root);
+    char* json = cJSON_Print(root);
     cJSON_Delete(root);
     if (!json) return -1;
 
-    FILE* f = fopen(ENDPOINTS_FILE, "w");
+    FILE* f = fopen(ENDPOINTS_RESULT_FILE, "w");
     if (!f) {
         int err = errno;
-        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_FILE, strerror(err));
+        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_RESULT_FILE, strerror(err));
         free(json);
         return -1;
     }
