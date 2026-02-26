@@ -12,32 +12,35 @@
 #include "../sdk/ss_sdk.h"
 #include "../libs/json/cJSON.h"
 
+#include "compute_models.h"
 #include "algorithms/compute_lp.h"
 
 #define ENDPOINTS_DIR "endpoints"
 #define ENDPOINTS_FILE "endpoints/result.json"
-#define SERIES_LEN 96
 #define SLOT_SECONDS 900
 
-typedef struct compute_data_t {
-    double irradiance[SERIES_LEN];
-    double cloudiness[SERIES_LEN];
-    double temperature[SERIES_LEN];
-
-    double elpris[SERIES_LEN];
-} compute_data_t;
-
-typedef struct result_t {
-    double buy_electricity;
-    double direct_use;
-    double charge_battery;
-    double sell_excess;
-} result_t;
-
 void cleanup(void);
+
+//*****************************************//
+//          FORWARD DECLARATIONS           //
+//*****************************************//
+
+// Load data
+static void init_compute_data(compute_data_t* data);
+static int count_horizon_len_from_price(const double* price);
 int load_data(compute_data_t* out);
+
+// Compute
+static void init_result_data(result_t* result);
 int compute(const compute_data_t* data, result_t* out_result);
+
+// Save result
+static int add_series_to_json(cJSON* parent, const char* name, const double* values);
 int save_result(const result_t* result);
+
+//*************************//
+//          MAIN           //
+//*************************//
 
 int main() {
     atexit(cleanup);
@@ -72,13 +75,26 @@ void cleanup(void) {
     closelog();
 }
 
+//******************************//
+//          LOAD DATA           //
+//******************************//
+
 static void init_compute_data(compute_data_t* data) {
     for (int i = 0; i < SERIES_LEN; i++) {
         data->irradiance[i] = NAN;
         data->cloudiness[i] = NAN;
         data->temperature[i] = NAN;
-        data->elpris[i] = NAN;
+        data->price_kwh[i] = NAN;
     }
+}
+
+static int count_horizon_len_from_price(const double* price) {
+    int len = 0;
+    for (int i = 0; i < SERIES_LEN; i++) {
+        if (isnan(price[i])) break;
+        len++;
+    }
+    return len;
 }
 
 int load_data(compute_data_t* out) {
@@ -86,8 +102,21 @@ int load_data(compute_data_t* out) {
 
     init_compute_data(out);
 
+    struct tm local_tm;
+    const int64_t now = (int64_t)time(NULL);
+    localtime_r(&now, &local_tm);
+
+    local_tm.tm_hour = 0;
+    local_tm.tm_min = 0;
+    local_tm.tm_sec = 0;
+    local_tm.tm_mday += 1;
+
     const int64_t start_slot = ((int64_t)time(NULL) / SLOT_SECONDS) * SLOT_SECONDS;
-    const int64_t end_slot = start_slot + ((int64_t)SERIES_LEN * SLOT_SECONDS);
+    const int64_t end_slot = (int64_t)mktime(&local_tm);
+
+    int horizon_slots = (int)((end_slot - start_slot) / SLOT_SECONDS);
+    if (horizon_slots < 0) horizon_slots = 0;
+    if (horizon_slots > SERIES_LEN) horizon_slots = SERIES_LEN;
 
     ss_metric_id metrics[4] =  {
         SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
@@ -100,12 +129,12 @@ int load_data(compute_data_t* out) {
         out->irradiance,
         out->cloudiness,
         out->temperature,
-        out->elpris
+        out->price_kwh
     };
 
     for (int m = 0; m < 4; m++) {
         ss_sdk_samples_out samples = {0};
-        ss_sdk_status status = ss_sdk_db_get_canonical(0, SERIES_LEN, metrics[m], &samples);
+        ss_sdk_status status = ss_sdk_db_get_canonical(0, horizon_slots, metrics[m], &samples);
 
         if (status != SS_SDK_OK && status != SS_SDK_ERR_PARTIAL_DATA) {
             syslog(LOG_ERR, "Compute Manager - ss_sdk_db_get_canonical failed for metric=%d status=%d", (int)metrics[m], (int)status);
@@ -119,7 +148,7 @@ int load_data(compute_data_t* out) {
             if (s->ts_utc < start_slot || s->ts_utc >= end_slot) continue;
 
             int idx = (int)((s->ts_utc - start_slot) / SLOT_SECONDS);
-            if (idx >= 0 && idx < SERIES_LEN) {
+            if (idx >= 0 && idx < horizon_slots) {
                 targets[m][idx] = s->value.f64;
             }
         }
@@ -127,19 +156,61 @@ int load_data(compute_data_t* out) {
         ss_sdk_db_free_samples(&samples);
     }
 
+    out->horizon_len = horizon_slots;
+
+    if (out->horizon_len <= 0) {
+        syslog(LOG_ERR, "Compute Manager - No usable elpris slots.");
+        return -1;
+    }
+
     return 0;
+}
+
+//****************************//
+//          COMPUTE           //
+//****************************//
+
+static void init_result_data(result_t* result) {
+    for (int i = 0; i < SERIES_LEN; i++) {
+        result->buy_electricity[i] = 0.0;
+        result->direct_use[i] = 0.0;
+        result->charge_battery[i] = 0.0;
+        result->sell_excess[i] = 0.0;
+    }
 }
 
 int compute(const compute_data_t* data, result_t* out_result) {
     if (!data || !out_result) return -1;
 
-    // LP function here
+    init_result_data(out_result);
 
-    out_result->buy_electricity = 0.0;
-    out_result->direct_use = 0.0;
-    out_result->charge_battery = 0.0;
-    out_result->sell_excess = 0.0;
+    if (compute_lp(data, out_result) < 0) {
+        return -1;
+    }
 
+    return 0;
+}
+
+//********************************//
+//          SAVE RESULT           //
+//********************************//
+
+static int add_series_to_json(cJSON* parent, const char* name, const double* values) {
+    cJSON* array = cJSON_CreateArray();
+    if (!array) {
+        return -1;
+    }
+
+    for (int i = 0; i < SERIES_LEN; i++) {
+        cJSON* number = cJSON_CreateNumber(values[i]);
+        if (!number) {
+            cJSON_Delete(array);
+            return -1;
+        }
+        cJSON_AddItemToArray(array, number);
+    }
+
+    cJSON_AddItemToObject(parent, name, array);
     return 0;
 }
 
@@ -161,10 +232,14 @@ int save_result(const result_t* result) {
         return -1;
     }
 
-    cJSON_AddNumberToObject(result_obj, "buy_electricity", result->buy_electricity);
-    cJSON_AddNumberToObject(result_obj, "direct_use", result->direct_use);
-    cJSON_AddNumberToObject(result_obj, "charge_battery", result->charge_battery);
-    cJSON_AddNumberToObject(result_obj, "sell_excess", result->sell_excess);
+    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity) < 0 ||
+        add_series_to_json(result_obj, "direct_use", result->direct_use) < 0 ||
+        add_series_to_json(result_obj, "charge_battery", result->charge_battery) < 0 ||
+        add_series_to_json(result_obj, "sell_excess", result->sell_excess) < 0) {
+        cJSON_Delete(result_obj);
+        cJSON_Delete(root);
+        return -1;
+    }
     cJSON_AddNumberToObject(result_obj, "timestamp", (double)time(NULL));
 
     cJSON_AddItemToObject(root, "result", result_obj);
