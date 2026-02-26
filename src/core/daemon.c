@@ -2,9 +2,10 @@
  * @file daemon.c
  */
 
-#include <linux/limits.h>
-#define _GNU_SOURCE
 
+#define _GNU_SOURCE
+#include <linux/limits.h>
+#include "daemon_logger.h"
 #include "daemon.h"
 #include "module.h"
 #include <stdio.h>
@@ -41,6 +42,7 @@ struct daemon_var {
     module_t *modules; 
 };
 
+static void daemon_set_system_config(daemon_var_t *self);
 static void daemon_resolve_paths(daemon_var_t *self);
 static void daemon_daemonize(void);
 static void daemon_epoll_setup(daemon_var_t *self);
@@ -50,26 +52,25 @@ static void daemon_handle_heartbeat(daemon_var_t *self, uint32_t sender_pid);
 
 void daemon_init(daemon_var_t **self_ptr)
 {
-    if (!self_ptr) exit(EXIT_FAILURE);
-    
+    if (!self_ptr) exit(EXIT_FAILURE);    
     daemon_var_t *self = (daemon_var_t*)calloc(1, sizeof(struct daemon_var));
     if (!self) exit(EXIT_FAILURE);    
     self->alive = 1;
 	/** We stay away from the first rt signals due to glibc */
 	self->hearbeat_sig = HEARTBEAT_SIG + HEARTBEAT_OFFSET;
     
-    daemon_resolve_paths(self);    
-    daemon_daemonize();
-	daemon_write_pidfile(self->prj_root_folder);
-    
+    daemon_resolve_paths(self);	
+    daemon_daemonize();    
     openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
+	daemon_epoll_setup(self);
     syslog(LOG_NOTICE, "Sunspots daemon started. Detached and darkened.");
-    
-    daemon_epoll_setup(self);
-    
+
     module_init(&self->modules);	
     self->n_modules_running = module_load(&self->modules, self->n_modules_running, self->prj_config_path, self->prj_root_folder, self->epoll_fd, self->hearbeat_sig);
-
+    daemon_write_pidfile(self->prj_root_folder);
+	daemon_set_system_config(self);
+	daemon_logger_send("DAEMON", "Finished setting up daemon");
+	
     *self_ptr = self;
 }
 
@@ -121,7 +122,7 @@ void daemon_run(daemon_var_t *self)
             syslog(LOG_ERR, "epoll_wait error: %m");
             break;
         }
-
+        
         for (int i = 0; i < nfds; i++)
         {
             /** Event 1: Synchronous Signals */
@@ -130,7 +131,7 @@ void daemon_run(daemon_var_t *self)
                 while (read(self->signal_fd, &fdsi, sizeof(fdsi)) == sizeof(fdsi))
                 {
                     if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM)
-					{
+					{						
 						self->alive = 0;
 					} 
 					else if (fdsi.ssi_signo == SIGCHLD)
@@ -140,6 +141,7 @@ void daemon_run(daemon_var_t *self)
 					else if (fdsi.ssi_signo == (uint32_t)self->hearbeat_sig)
 					{
 						daemon_handle_heartbeat(self, fdsi.ssi_pid);
+						daemon_logger_send("DAEMON", "Handled heartbeat.");
 					}
                 }
             }
@@ -184,6 +186,32 @@ void daemon_run(daemon_var_t *self)
             }
         }
     }
+}
+
+static void daemon_set_system_config(daemon_var_t *self)
+{
+	const char *system_config = module_get_system_config(self->modules);
+	if (system_config)
+	{
+		cJSON *sys = cJSON_Parse(system_config);
+		if (sys)
+		{
+			cJSON *sp = cJSON_GetObjectItemCaseSensitive(sys, "socket_path");
+			if (cJSON_IsString(sp))
+			{
+				char abs_sp[PATH_MAX];
+				snprintf(abs_sp, sizeof(abs_sp), "%s/%s", self->prj_root_folder, sp->valuestring);
+				cJSON_SetValuestring(sp, abs_sp);
+			}
+			char *resolved_abs_sp = cJSON_PrintUnformatted(sys);
+			if (resolved_abs_sp)
+			{
+				setenv("SUNSPOTS_SYSTEM", resolved_abs_sp, 1);
+				free(resolved_abs_sp);
+				cJSON_Delete(sys);
+			}
+		}
+	}
 }
 
 static void daemon_reap_zombies(daemon_var_t *self)

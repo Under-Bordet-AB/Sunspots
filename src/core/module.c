@@ -398,6 +398,10 @@ void module_timer_config(module_t *self, int epoll_fd)
     }    
     timerfd_settime(self->module_timer_fd, timerfd_flags, &its, NULL);
 }
+const char *module_get_system_config(module_t *self)
+{
+	return (self && self[0].system_config) ? self[0].system_config : NULL;
+}
 
 pid_t module_get_pid(module_t *self)
 {

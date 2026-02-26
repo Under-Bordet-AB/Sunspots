@@ -57,6 +57,10 @@ void module_timer_config(module_t *self, int epoll_fd);
  */
 module_t *module_find_by_pid(module_t *array, int count, pid_t pid);
 
+/**
+ * @breif Returns system config
+ */
+const char *module_get_system_config(module_t *self);
 pid_t module_get_pid(module_t *self);
 void  module_set_pid(module_t *self, int value);
 void  module_set_alive(module_t *self, int value);
