@@ -54,6 +54,19 @@ http_server* http_init()
         printf("Out of memory allocating http_server.\n");
         return NULL;
     }
+    server->workers = calloc(LISTENER_COUNT, sizeof(pthread_t));
+    if(server->workers == NULL)
+    {
+        printf("Out of memory allocating http_server->workers.\n");
+        return NULL;
+    }
+
+    client_queue = calloc(QUEUE_SIZE, sizeof(int));
+    if(client_queue == NULL)
+    {
+        printf("Out of memory allocating client_queue.\n");
+        return NULL;
+    }
 
     int flags = fcntl(server_fd, F_GETFL, 0);
     fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
@@ -72,18 +85,19 @@ http_server* http_init()
 int http_accept(http_server* server)
 {
     int accepts = 0;
-    while (1) {
-        int client_fd = accept(server->server_fd, NULL, NULL);
+    int client_fd;
+    do {
+        client_fd = accept(server->server_fd, NULL, NULL);
         if (client_fd >= 0) {
-            enqueue_client(client_fd);
-            accepts++;
-        } else {
-            if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                break;
-            } else {
-                perror("accept");
+            int status = enqueue_client(client_fd);
+            if(status != 0) {
+                close(client_fd);
             }
+            accepts++;
         }
+    } while(client_fd >= 0);
+    if(errno != EAGAIN && errno != EWOULDBLOCK) {
+        perror("accept");
     }
     return accepts;
 }

@@ -382,7 +382,7 @@ http_response* http_response_init(int code, const char* body, int bodyLen) {
     response->headers = LinkedList_create();
 
     response->responseCode = code;
-    if(bodyLen == -1)
+    if(bodyLen == HTTPRESPONSE_BODYLEN_AUTODETECT)
     {
         response->body = strdup(body);
         bodyLen = strlen(response->body);

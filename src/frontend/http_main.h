@@ -8,7 +8,7 @@
 typedef struct
 {
     int server_fd;
-    pthread_t workers[LISTENER_COUNT];
+    pthread_t* workers;
 } http_server;
 
 /*

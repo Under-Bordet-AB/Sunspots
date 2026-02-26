@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE 500
+
 #include <stdio.h>
 #include <unistd.h>
 #include <limits.h>
@@ -62,7 +64,7 @@ int sanitize_path(const char* url_path, char* out_path, size_t out_size)
 
     // Resolve document root
     char doc_root[PATH_MAX];
-    if (!realpath("./htdocs", doc_root))
+    if (!realpath(FILE_SEARCH_DIR, doc_root))
         return -1;
 
     // Build the final path
@@ -98,7 +100,7 @@ http_response* process_request(http_request* req)
 
     if(strcmp(req->path, "/health") == 0)
     {
-        http_response* resp = http_response_init(200, "{\"status\":\"ok\"}", -1);
+        http_response* resp = http_response_init(200, "{\"status\":\"ok\"}", HTTPRESPONSE_BODYLEN_AUTODETECT);
         if(!resp)
             return NULL;
         http_response_add_header(resp, "Content-Type", "application/json");
@@ -107,7 +109,7 @@ http_response* process_request(http_request* req)
 
     if(strcmp(req->path, "/") == 0)
     {
-        http_response* resp = http_response_init(200, "Welcome to Sunspots!", -1);
+        http_response* resp = http_response_init(200, "Welcome to Sunspots!", HTTPRESPONSE_BODYLEN_AUTODETECT);
         if(!resp)
             return NULL;
         http_response_add_header(resp, "Content-Type", "text/plain");
@@ -116,33 +118,36 @@ http_response* process_request(http_request* req)
 
     // Treat URL as file path
 
-    char file_path[PATH_MAX];
-    if(sanitize_path(req->path, file_path, sizeof(file_path)) == 0)
+    if(ALLOW_SEARCH)
     {
-        size_t file_size;
-        char* file_data = load_file(file_path, &file_size);
-        if (!file_data)
+        char file_path[PATH_MAX];
+        if(sanitize_path(req->path, file_path, sizeof(file_path)) == 0)
         {
-            http_response* resp = http_response_init(404, "Not Found", -1);
-            if(!resp)
+            size_t file_size;
+            char* file_data = load_file(file_path, &file_size);
+            if (!file_data)
+            {
+                http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
+                if(!resp)
+                    return NULL;
+                http_response_add_header(resp, "Content-Type", "text/plain");
+                return resp;
+            }
+
+            http_response* resp = http_response_init(200, file_data, file_size);
+            if (!resp) {
+                free(file_data);
                 return NULL;
-            http_response_add_header(resp, "Content-Type", "text/plain");
+            }
+
+            http_response_add_header(resp, "Content-Type", guess_mime_type(file_path));
+
+            free(file_data);
             return resp;
         }
-
-        http_response* resp = http_response_init(200, file_data, file_size);
-        if (!resp) {
-            free(file_data);
-            return NULL;
-        }
-
-        http_response_add_header(resp, "Content-Type", guess_mime_type(file_path));
-
-        free(file_data);
-        return resp;
     }
 
-    http_response* resp = http_response_init(404, "Not Found", -1);
+    http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
     if(!resp)
         return NULL;
     http_response_add_header(resp, "Content-Type", "text/plain");

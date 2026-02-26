@@ -7,58 +7,80 @@
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "client_queue.h"
 #include "http_constants.h"
 #include "http_main.h"
+#include "cJSON.h"
 
 void cleanup(void);
 
 #define ALLOW_STANDALONE_EXEC 1
 
-int main(int argc, char* argv[]) {
+int main() {
     atexit(cleanup);
 
     openlog("SUNSPOTS_HTTP_SERVER", LOG_PID, LOG_DAEMON);
 
-    int received = 0;
-    if(argc < 3)
-    {
-        if(!ALLOW_STANDALONE_EXEC)
+    /* In any spawned module binary — replaces argv parsing */
+    int    daemon_pid    = getppid();
+    char  *sig_env       = getenv("SUNSPOTS_SIGNAL");
+    if(sig_env == NULL) {
+        printf("Missing environment variable: SUNSPOTS_SIGNAL\n");
+        syslog(LOG_ERR, "<frontend/frontend_main.c> Missing environment variable: SUNSPOTS_SIGNAL");
+        exit(EXIT_FAILURE);
+    }
+    int    sig_number    = atoi(sig_env);
+    char  *config_blob   = getenv("SUNSPOTS_CONFIG");
+    if(config_blob == NULL) {
+        printf("Missing environment variable: SUNSPOTS_CONFIG\n");
+        syslog(LOG_ERR, "<frontend/frontend_main.c> Missing environment variable: SUNSPOTS_CONFIG");
+        exit(EXIT_FAILURE);
+    }
+    cJSON *cfg           = cJSON_Parse(config_blob);
+
+    int hb_interval = 5;
+
+
+    // Load configs safely
+
+    cJSON *js_temp = cJSON_GetObjectItem(cfg, "heartbeat_interval");
+    if(js_temp != NULL) { hb_interval = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain heartbeat_interval, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "server_port_http");
+    if(js_temp != NULL) { HTTP_PORT = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain server_port_http, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "server_threads");
+    if(js_temp != NULL) { LISTENER_COUNT = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain server_threads, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "server_listen_queue");
+    if(js_temp != NULL) { LISTEN_QUEUE = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain server_listen_queue, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "client_queue_size");
+    if(js_temp != NULL) { QUEUE_SIZE = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain client_queue_size, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "allow_file_search");
+    if(js_temp != NULL) { ALLOW_SEARCH = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain allow_file_search, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "file_search_dir");
+    if(js_temp != NULL) {
+        FILE_SEARCH_DIR = malloc(strlen(js_temp->valuestring)+1);
+        if(FILE_SEARCH_DIR == NULL)
         {
-            printf("Usage: /path/to/frontend <PPID> <Heartbeats/sec>\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> Missing command line arguments: /path/to/frontend <PPID> <Heartbeats/sec>");
+            syslog(LOG_ERR, "<frontend/frontend_main.c> Memory allocation error for FILE_SEARCH_DIR, exiting.");
             exit(EXIT_FAILURE);
         }
+        strcpy(FILE_SEARCH_DIR, js_temp->valuestring);
     } else {
-        received = 1;
+        syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain file_search_dir, using default value.");
+        FILE_SEARCH_DIR = "./htdocs";
     }
 
-    long parent_pid, beat_freq = 0;
-
-    if(received)
-    {
-        char* endptr;
-        parent_pid = strtol(argv[1], &endptr, 10);
-        if(errno == ERANGE)
-        {
-            printf("Invalid PPID argument\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> Could not parse PPID argument");
-            exit(EXIT_FAILURE);
-        }
-        beat_freq = strtol(argv[2], &endptr, 10);
-        if(errno == ERANGE)
-        {
-            printf("Invalid heartbeat frequency argument\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> Could not parse heartbeat frequency argument");
-            exit(EXIT_FAILURE);
-        }
-
-        if (kill(parent_pid, SIGRTMIN) == -1) {
-            printf("Could not signal the provided PPID\n");
-            syslog(LOG_ERR, "<frontend/frontend_main.c> PPID test signaling failed, is the argument correct?");
-            exit(EXIT_FAILURE);
-        }
+    if (kill(daemon_pid, sig_number) == -1) {
+        printf("Could not signal the daemon PPID\n");
+        syslog(LOG_ERR, "<frontend/frontend_main.c> PPID test signaling failed, is the argument correct?");
+        exit(EXIT_FAILURE);
     }
 
     syslog(LOG_INFO, "<frontend/frontend_main.c> Initializing HTTP server...");
@@ -79,17 +101,14 @@ int main(int argc, char* argv[]) {
     while(1)
     {
         clock_gettime(CLOCK_MONOTONIC, &now);
-        if(received)
+        int64_t elapsed_ns = (int64_t)(now.tv_sec - last.tv_sec) * 1000000000LL + (now.tv_nsec - last.tv_nsec);
+        if(elapsed_ns >= hb_interval * 1000000000LL)
         {
-            int64_t elapsed_ns = (int64_t)(now.tv_sec - last.tv_sec) * 1000000000LL + (now.tv_nsec - last.tv_nsec);
-            if(elapsed_ns >= beat_freq * 1000000000LL)
-            {
-                if (kill(parent_pid, SIGRTMIN) == -1) {
-                    syslog(LOG_ERR, "<frontend/frontend_main.c> Could not signal daemon, panic!!!");
-                    exit(EXIT_FAILURE);
-                }
-                last = now;
+            if (kill(daemon_pid, sig_number) == -1) {
+                syslog(LOG_ERR, "<frontend/frontend_main.c> Could not signal daemon, panic!!!");
+                exit(EXIT_FAILURE);
             }
+            last = now;
         }
 
         int count = http_accept(srv);
