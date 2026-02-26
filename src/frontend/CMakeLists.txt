@@ -4,6 +4,7 @@ add_library(sunspots_frontend_core STATIC
   http_main.c
   http_parser.c
   http_worker.c
+  http_constants.c
 )
 target_include_directories(sunspots_frontend_core
   PUBLIC

@@ -5,7 +5,7 @@
 
 #include "http_constants.h"
 
-extern int client_queue[QUEUE_SIZE];
+extern int* client_queue;
 extern int q_head;
 extern int q_tail;
 

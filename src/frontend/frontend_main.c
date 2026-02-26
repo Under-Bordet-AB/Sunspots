@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "client_queue.h"
 #include "http_constants.h"
@@ -38,7 +39,43 @@ int main() {
         exit(EXIT_FAILURE);
     }
     cJSON *cfg           = cJSON_Parse(config_blob);
-    int    hb_interval   = cJSON_GetObjectItem(cfg, "heartbeat_interval")->valueint;
+
+    int hb_interval = 5;
+
+
+    // Load configs safely
+
+    cJSON *js_temp = cJSON_GetObjectItem(cfg, "heartbeat_interval");
+    if(js_temp != NULL) { hb_interval = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain heartbeat_interval, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "server_port_http");
+    if(js_temp != NULL) { HTTP_PORT = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain server_port_http, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "server_threads");
+    if(js_temp != NULL) { LISTENER_COUNT = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain server_threads, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "server_listen_queue");
+    if(js_temp != NULL) { LISTEN_QUEUE = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain server_listen_queue, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "client_queue_size");
+    if(js_temp != NULL) { QUEUE_SIZE = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain client_queue_size, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "allow_file_search");
+    if(js_temp != NULL) { ALLOW_SEARCH = js_temp->valueint; } else { syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain allow_file_search, using default value."); }
+
+    js_temp = cJSON_GetObjectItem(cfg, "file_search_dir");
+    if(js_temp != NULL) {
+        FILE_SEARCH_DIR = malloc(strlen(js_temp->valuestring)+1);
+        if(FILE_SEARCH_DIR == NULL)
+        {
+            syslog(LOG_ERR, "<frontend/frontend_main.c> Memory allocation error for FILE_SEARCH_DIR, exiting.");
+            exit(EXIT_FAILURE);
+        }
+        strcpy(FILE_SEARCH_DIR, js_temp->valuestring);
+    } else {
+        syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain file_search_dir, using default value.");
+        FILE_SEARCH_DIR = "./htdocs";
+    }
 
     if (kill(daemon_pid, sig_number) == -1) {
         printf("Could not signal the daemon PPID\n");

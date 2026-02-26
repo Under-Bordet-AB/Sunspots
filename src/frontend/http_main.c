@@ -54,6 +54,19 @@ http_server* http_init()
         printf("Out of memory allocating http_server.\n");
         return NULL;
     }
+    server->workers = calloc(LISTENER_COUNT, sizeof(pthread_t));
+    if(server->workers == NULL)
+    {
+        printf("Out of memory allocating http_server->workers.\n");
+        return NULL;
+    }
+
+    client_queue = calloc(QUEUE_SIZE, sizeof(int));
+    if(client_queue == NULL)
+    {
+        printf("Out of memory allocating client_queue.\n");
+        return NULL;
+    }
 
     int flags = fcntl(server_fd, F_GETFL, 0);
     fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
