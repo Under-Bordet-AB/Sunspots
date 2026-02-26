@@ -328,7 +328,7 @@ static void daemon_epoll_setup(daemon_var_t *self)
 
 static void daemon_daemonize(void)
 {
-#ifndef DEBUGG
+#ifndef DEBUG
     pid_t init_pid = fork();
     if (init_pid < 0)
 	{
@@ -371,7 +371,9 @@ static void daemon_daemonize(void)
     		close(fd);	
 		}
     }
-#endif
+#else
+	printf("DEBUG MODE\n");
+#endif	
 }
 
 static void daemon_write_pidfile(const char *prj_root_folder)

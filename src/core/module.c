@@ -81,6 +81,7 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
         free(table[i].module_name);
         free(table[i].module_binary_path);
         free(table[i].module_config);
+		free(table[i].system_config);
         free(table[i].module_absolut_time);
     }
     
@@ -235,7 +236,6 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
             module_spawn(&new_table[j], prj_root_path, heartbeat_sig);
         }
     }
-
     cJSON_Delete(root);
     free(json_data);
     return i;
