@@ -1,27 +1,18 @@
 {
-  "system": {
-    "version": "1.0",
-    "name": "Sunspots Daemon",
-    "log_path": "/var/log/sunspots.log"
-  },
-  "modules": [
-    {
-      "name": "Service_Heartbeat_Mode",
-      "bin_path": "./src/core/SHM",
-      "Timer-type": 0,
-      "heartbeat_interval": 5
+    "system": {
+        "version": "1.1",
+        "name": "Sunspots Daemon",
+        "log_path": "./logs/daemon.log",
+        "socket_path": "./logs/sunspots.sock"
     },
-    {
-      "name": "Task_Absolute_Mode",
-      "bin_path": "./src/core/TAM",
-      "Timer-type": 1,
-      "Abs-time": "16:52"
-    },
-    {
-      "name": "Task_Relative_Mode",
-      "bin_path": "./src/core/TRM",
-      "Timer-type": 1,
-      "Rel-time": 30
-    }
-  ]
+    "modules": [
+        {
+            "name": "Logger",
+            "bin_path": "./src/core/logger",
+            "Timer-type": 0,
+            "heartbeat_interval": 3,
+            "log_path": "./logs/daemon.log",
+            "socket_path": "./logs/sunspots.sock"
+        }
+    ]
 }
