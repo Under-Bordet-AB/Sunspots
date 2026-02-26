@@ -1,7 +1,7 @@
 #include "client_queue.h"
 #include "http_constants.h"
 
-int client_queue[QUEUE_SIZE];
+int* client_queue;
 int q_head = 0;
 int q_tail = 0;
 int enqueues = 0;
