@@ -1,6 +1,8 @@
 #ifndef COMPUTE_MODEL_H
 #define COMPUTE_MODEL_H
 
+#include <stdint.h>
+
 #define SERIES_LEN 96
 
 typedef struct compute_data_t {
@@ -8,6 +10,7 @@ typedef struct compute_data_t {
     double cloudiness[SERIES_LEN];
     double temperature[SERIES_LEN];
     double price_kwh[SERIES_LEN];
+    int64_t timestamp[SERIES_LEN];
 
     int horizon_len;
 } compute_data_t;
@@ -17,6 +20,7 @@ typedef struct result_t {
     double direct_use[SERIES_LEN];
     double charge_battery[SERIES_LEN];
     double sell_excess[SERIES_LEN];
+    int64_t timestamp[SERIES_LEN];
 } result_t;
 
 #endif

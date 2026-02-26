@@ -70,8 +70,8 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
         const double price_norm = normalize(data_in->price_kwh[time_slot], min_price, max_price);
         const double cheap_score = 1.0 - price_norm;
 
-        sun_cap[time_slot] = 100.0 * sun_score;
-        cheap_cap[time_slot] = 100.0 * cheap_score;
+        sun_cap[time_slot] = sun_score;
+        cheap_cap[time_slot] = cheap_score;
     }
 
     glp_prob *problem = glp_create_prob();
@@ -90,22 +90,22 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
         const double cheap_score = 1.0 - price_norm;
         const double pricey_score = price_norm;
 
-        glp_set_col_bnds(problem, DIRECT_COL(time_slot), GLP_DB, 0.0, 100.0);
+        glp_set_col_bnds(problem, DIRECT_COL(time_slot), GLP_DB, 0.0, 1.0);
         if (cheap_cap[time_slot] <= 0.0) {
             glp_set_col_bnds(problem, BUY_COL(slots, time_slot), GLP_FX, 0.0, 0.0);
         } else {
             glp_set_col_bnds(problem, BUY_COL(slots, time_slot), GLP_DB, 0.0, cheap_cap[time_slot]);
         }
-        glp_set_col_bnds(problem, CHARGE_COL(slots, time_slot), GLP_DB, 0.0, 100.0);
-        glp_set_col_bnds(problem, SELL_COL(slots, time_slot), GLP_DB, 0.0, 100.0);
+        glp_set_col_bnds(problem, CHARGE_COL(slots, time_slot), GLP_DB, -1.0, 1.0);
+        glp_set_col_bnds(problem, SELL_COL(slots, time_slot), GLP_DB, 0.0, 1.0);
 
         glp_set_obj_coef(problem, DIRECT_COL(time_slot), 0.65 + 0.35 * cheap_score);
         glp_set_obj_coef(problem, BUY_COL(slots, time_slot), 0.30 + 0.70 * cheap_score);
-        glp_set_obj_coef(problem, CHARGE_COL(slots, time_slot), 0.40 + 0.60 * cheap_score);
+        glp_set_obj_coef(problem, CHARGE_COL(slots, time_slot), 0.80 * (cheap_score - pricey_score));
         glp_set_obj_coef(problem, SELL_COL(slots, time_slot), 0.20 + 0.80 * pricey_score);
 
         glp_set_row_bnds(problem, SOLAR_ROW(time_slot), GLP_UP, 0.0, sun_cap[time_slot]);
-        glp_set_row_bnds(problem, ACTIVITY_ROW(slots, time_slot), GLP_UP, 0.0, 100.0);
+        glp_set_row_bnds(problem, ACTIVITY_ROW(slots, time_slot), GLP_UP, 0.0, 1.0);
     }
 
     const int max_non_zero = 7 * slots;
