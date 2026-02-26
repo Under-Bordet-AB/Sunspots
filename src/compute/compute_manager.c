@@ -25,10 +25,8 @@ void cleanup(void);
 //          FORWARD DECLARATIONS           //
 //*****************************************//
 
-// Exponential backoff
-int wait_for_new_data();
-
 // Load data
+int wait_for_new_data();
 void init_compute_data(compute_data_t* data);
 int count_horizon_len_from_inputs(const compute_data_t* data, int max_len);
 int save_forecast(const compute_data_t* data);
