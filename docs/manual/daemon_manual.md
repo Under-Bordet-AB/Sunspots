@@ -83,5 +83,8 @@ All intervals for heartbeats and relative timers are defined in seconds.
 ## Running and stopping
 After building the project the binary can be found in `Sunspots/build/debug/src/core`. Use `./sunspots_daemon` to run the daemon. The PID of the daemon will be written to `Sunspots/logs/sunspots.pid`, to kill the daemon use `kill $(cat sunspots.pid)` (seen from `Sunspots/logs`).
 
+### Debug
+To build in debug mode uncomments `# target_compile_definitions(sunspots_daemon PRIVATE DEBUG)` in daemons `CMakeLists.txt` at `Sunspots/src/core/`. This skips over the detaching steps of the daemonizing process, in this mode the daemon can talk.
+
 ### Journald entries
 All `journald` entries related to this system starts with `"SUNSPOTS"`. 
