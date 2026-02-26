@@ -17,7 +17,7 @@
 
 #define ENDPOINTS_DIR "endpoints"
 #define ENDPOINTS_RESULT_FILE "endpoints/result.json"
-#define ENDPOINTS_WEATHER_FILE "endpoints/weather.json"
+#define ENDPOINTS_FORECAST_FILE "endpoints/forecast.json"
 #define SLOT_SECONDS 900
 
 void cleanup(void);
@@ -29,7 +29,7 @@ void cleanup(void);
 // Load data
 static void init_compute_data(compute_data_t* data);
 static int count_horizon_len_from_inputs(const compute_data_t* data, int max_len);
-int save_weather(const compute_data_t* data);
+int save_forecast(const compute_data_t* data);
 int load_data(compute_data_t* out);
 
 // Compute
@@ -40,7 +40,6 @@ int compute(const compute_data_t* data, result_t* out_result);
 static int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len);
 int save_result(const result_t* result, int horizon_len);
 
-//*************************//
 //          MAIN           //
 //*************************//
 
@@ -77,7 +76,6 @@ void cleanup(void) {
     closelog();
 }
 
-//******************************//
 //          LOAD DATA           //
 //******************************//
 
@@ -111,7 +109,7 @@ static int count_horizon_len_from_inputs(const compute_data_t* data, int max_len
     return len;
 }
 
-int save_weather(const compute_data_t* data) {
+int save_forecast(const compute_data_t* data) {
     if (!data) return -1;
 
     if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
@@ -143,10 +141,10 @@ int save_weather(const compute_data_t* data) {
     cJSON_Delete(root);
     if (!json) return -1;
 
-    FILE* f = fopen(ENDPOINTS_WEATHER_FILE, "w");
+    FILE* f = fopen(ENDPOINTS_FORECAST_FILE, "w");
     if (!f) {
         int err = errno;
-        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_WEATHER_FILE, strerror(err));
+        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_FORECAST_FILE, strerror(err));
         free(json);
         return -1;
     }
@@ -225,15 +223,14 @@ int load_data(compute_data_t* out) {
         return -1;
     }
 
-    if (save_weather(out) < 0) {
-        syslog(LOG_ERR, "Compute Manager - Failed to save weather data to endpoints folder.");
+    if (save_forecast(out) < 0) {
+        syslog(LOG_ERR, "Compute Manager - Failed to save forecast data to endpoints folder.");
         return -1;
     }
 
     return 0;
 }
 
-//****************************//
 //          COMPUTE           //
 //****************************//
 
@@ -258,7 +255,6 @@ int compute(const compute_data_t* data, result_t* out_result) {
     return 0;
 }
 
-//********************************//
 //          SAVE RESULT           //
 //********************************//
 
