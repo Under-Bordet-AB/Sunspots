@@ -146,8 +146,6 @@ int save_to_database(price_data_t* price_data) {
             syslog(LOG_WARNING, "Fetch API - Elprisjustnu - db_write failed at i=%d status=%d", i, (int)status);
             return -1;
         }
-
-        printf("Price nr. %d: %.6f\n", i, price_data->price_arr_SEK_per_kWh[i]);
     }
 
     return 0;

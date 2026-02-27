@@ -29,7 +29,7 @@ void cleanup(void);
 int wait_for_new_data();
 void init_compute_data(compute_data_t* data);
 int count_horizon_len_from_inputs(const compute_data_t* data, int max_len);
-int save_forecast(const compute_data_t* data);
+int save_forecast(const compute_data_t* data, int horizon_len);
 int load_data(compute_data_t* out);
 
 // Compute
@@ -120,7 +120,7 @@ int count_horizon_len_from_inputs(const compute_data_t* data, int max_len) {
     return len;
 }
 
-int save_forecast(const compute_data_t* data) {
+int save_forecast(const compute_data_t* data, int horizon_len) {
     if (!data) return -1;
 
     if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
@@ -138,10 +138,10 @@ int save_forecast(const compute_data_t* data) {
         return -1;
     }
 
-    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, SERIES_LEN) < 0 ||
-        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, SERIES_LEN) < 0 ||
-        add_series_to_json(forecast_obj, "temperature", data->temperature, SERIES_LEN) < 0 ||
-        add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, SERIES_LEN)) {
+    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "temperature", data->temperature, horizon_len) < 0 ||
+        add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, horizon_len)) {
         cJSON_Delete(forecast_obj);
         cJSON_Delete(root);
         return -1;
@@ -239,7 +239,7 @@ int load_data(compute_data_t* out) {
         return -1;
     }
 
-    if (save_forecast(out) < 0) {
+    if (save_forecast(out, out->horizon_len) < 0) {
         syslog(LOG_ERR, "Compute Manager - Failed to save forecast data to endpoints folder.");
         return -1;
     }
@@ -319,6 +319,7 @@ int add_int64_series_to_json(cJSON* parent, const char* name, const int64_t* val
 
     for (int i = 0; i < SERIES_LEN; i++) {
         cJSON* value_item;
+
         if (i >= valid_len) {
             value_item = cJSON_CreateNull();
         } else {
