@@ -429,6 +429,7 @@ const char* guess_mime_type(const char *path)
     if (strcasecmp(ext, "ogg")  == 0) return "video/ogg";
     if (strcasecmp(ext, "txt")  == 0) return "text/plain";
     if (strcasecmp(ext, "xml")  == 0) return "application/xml";
+	if (strcasecmp(ext, "log")  == 0) return "text/plain";
 
     return "application/octet-stream"; // fallback for unknown extensions
 }

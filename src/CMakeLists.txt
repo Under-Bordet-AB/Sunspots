@@ -1,6 +1,5 @@
 add_subdirectory(libs)
 add_subdirectory(utils)
-add_subdirectory(config)
 add_subdirectory(transform)
 add_subdirectory(sdk)
 add_subdirectory(frontend)
