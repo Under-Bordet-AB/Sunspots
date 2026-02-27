@@ -14,40 +14,61 @@
 
 char* load_file(const char* path, size_t* out_size)
 {
-    FILE* f = fopen(path, "rb");
-    if (!f)
+    if (!path)
         return NULL;
 
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
         return NULL;
-    }
 
-    long size = ftell(f);
-    if (size < 0) {
-        fclose(f);
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        close(fd);
         return NULL;
     }
 
-    rewind(f);
+    // Must be regular file
+    if (!S_ISREG(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
 
-    char* buffer = (char*)malloc(size + 1); // +1 for optional '\0'
+    // Reject symlinks explicitly (extra safety)
+    if (S_ISLNK(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
+
+    // Size validation
+    if (st.st_size < 0 || st.st_size == 9223372036854775807) {
+        close(fd);
+        return NULL;
+    }
+
+    size_t size = (size_t)st.st_size;
+
+    char* buffer = malloc(size + 1);
     if (!buffer) {
-        fclose(f);
+        close(fd);
         return NULL;
     }
 
-    size_t read = fread(buffer, 1, size, f);
-    fclose(f);
-
-    if (read != (size_t)size) {
-        free(buffer);
-        return NULL;
+    size_t total_read = 0;
+    while (total_read < size) {
+        ssize_t r = read(fd, buffer + total_read, size - total_read);
+        if (r <= 0) {
+            free(buffer);
+            close(fd);
+            return NULL;
+        }
+        total_read += (size_t)r;
     }
 
-    buffer[size] = '\0'; // safe even for binary
+    buffer[size] = '\0';  // safe for binary
+    close(fd);
+
     if (out_size)
-        *out_size = (size_t)size;
+        *out_size = size;
 
     return buffer;
 }
