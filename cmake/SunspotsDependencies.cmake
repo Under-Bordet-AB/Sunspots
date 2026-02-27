@@ -3,6 +3,33 @@ include(FetchContent)
 find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
 
+find_package(GLPK QUIET)
+if(NOT TARGET GLPK::GLPK)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(PC_GLPK QUIET glpk)
+  endif()
+
+  find_path(SUNSPOTS_GLPK_INCLUDE_DIR
+    NAMES glpk.h
+    HINTS ${PC_GLPK_INCLUDEDIR} ${PC_GLPK_INCLUDE_DIRS}
+  )
+  find_library(SUNSPOTS_GLPK_LIBRARY
+    NAMES glpk
+    HINTS ${PC_GLPK_LIBDIR} ${PC_GLPK_LIBRARY_DIRS}
+  )
+
+  if(SUNSPOTS_GLPK_INCLUDE_DIR AND SUNSPOTS_GLPK_LIBRARY)
+    add_library(GLPK::GLPK UNKNOWN IMPORTED)
+    set_target_properties(GLPK::GLPK PROPERTIES
+      IMPORTED_LOCATION ${SUNSPOTS_GLPK_LIBRARY}
+      INTERFACE_INCLUDE_DIRECTORIES ${SUNSPOTS_GLPK_INCLUDE_DIR}
+    )
+  else()
+    message(FATAL_ERROR "GLPK not found. Install development headers/libraries (e.g. libglpk-dev) or provide a package config.")
+  endif()
+endif()
+
 if(BUILD_TESTING)
   find_package(GTest CONFIG QUIET)
   if(NOT TARGET GTest::gtest)
