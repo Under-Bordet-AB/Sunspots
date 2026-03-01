@@ -96,6 +96,38 @@ double avg_c = sum / (double)n;
 - `quarters_to_fetch > 0` reads exactly that many 15-minute slots.
 - `quarters_to_fetch == 0` reads forward horizon (from start to latest available data).
 
+### Interpolation Behavior
+
+Interpolation is applied by SDK read selection (`ss_sdk_db_get_canonical`) when an exact slot value is missing.
+
+Slot selection order:
+
+1. For `ts <= now_slot`: prefer observation, then forecast, then interpolation (if policy allows).
+2. For `ts > now_slot`: prefer forecast first. For step-policy canonicals, observation can also be used as a direct fallback.
+
+Interpolation policies are fixed per canonical metric:
+
+1. `linear`: most continuous weather/FX metrics (for example temperature, humidity, wind, cloud cover, radiation, FX).
+2. `step`: spot price metrics (`energy.price.spot.*`).
+3. `none`: discrete metrics (for example symbol code, boolean day/night).
+
+Interpolation limits:
+
+1. Max interpolation span is 6 hours.
+2. If a required slot would need interpolation beyond that limit, read returns `SS_SDK_ERR_PARTIAL_DATA`.
+3. If some slots are missing after selection/interpolation, read returns `SS_SDK_ERR_PARTIAL_DATA` and may still return partial samples.
+
+Flags in returned samples:
+
+1. `SS_SDK_SAMPLE_OBSERVED`
+2. `SS_SDK_SAMPLE_FORECAST`
+3. `SS_SDK_SAMPLE_INTERPOLATED`
+
+Caller guidance:
+
+1. Treat `SS_SDK_ERR_PARTIAL_DATA` as an explicit completeness signal.
+2. Always call `ss_sdk_db_free_samples(&out)` when `out.samples` is non-NULL, including partial-data cases.
+
 ## Logging Usage
 
 ### Log Macros (One-Liner)

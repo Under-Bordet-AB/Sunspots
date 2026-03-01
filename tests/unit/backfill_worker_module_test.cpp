@@ -1,0 +1,279 @@
+#include <gtest/gtest.h>
+
+#include <cerrno>
+#include <cstdint>
+#include <ctime>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
+#include <limits.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern "C" {
+#include "sdk/ss_sdk.h"
+}
+
+namespace {
+
+class ScopedEnvVar {
+public:
+    explicit ScopedEnvVar(const char *name) : name_(name), had_old_(false)
+    {
+        const char *old = std::getenv(name_);
+        if (old != NULL) {
+            had_old_ = true;
+            old_value_ = old;
+        }
+    }
+
+    ~ScopedEnvVar()
+    {
+        if (had_old_) {
+            setenv(name_, old_value_.c_str(), 1);
+        } else {
+            unsetenv(name_);
+        }
+    }
+
+private:
+    const char *name_;
+    bool had_old_;
+    std::string old_value_;
+};
+
+std::string make_temp_dir()
+{
+    char tpl[] = "/tmp/sunspots_backfill_test_XXXXXX";
+    char *dir = mkdtemp(tpl);
+    if (dir == NULL) {
+        return "";
+    }
+    return std::string(dir);
+}
+
+void remove_file_if_exists(const std::string &path)
+{
+    (void)unlink(path.c_str());
+}
+
+void remove_dir_if_exists(const std::string &path)
+{
+    (void)rmdir(path.c_str());
+}
+
+int64_t align_to_slot(int64_t ts_utc)
+{
+    if (ts_utc < 0) {
+        return 0;
+    }
+    return ts_utc - (ts_utc % 900);
+}
+
+std::string format_utc_ymdhm(int64_t ts_utc)
+{
+    char out[32];
+    time_t tv = (time_t)ts_utc;
+    struct tm tmv;
+    std::memset(&tmv, 0, sizeof(tmv));
+    if (gmtime_r(&tv, &tmv) == NULL) {
+        return "";
+    }
+    if (strftime(out, sizeof(out), "%Y-%m-%dT%H:%M", &tmv) == 0U) {
+        return "";
+    }
+    return std::string(out);
+}
+
+bool write_mock_archive_json(const std::string &path, int64_t from_utc, int64_t to_utc)
+{
+    FILE *fp;
+    bool first = true;
+    int64_t ts;
+
+    fp = std::fopen(path.c_str(), "wb");
+    if (fp == NULL) {
+        return false;
+    }
+
+    std::fputs("{\"hourly\":{\"time\":[", fp);
+    for (ts = from_utc; ts <= to_utc; ts += 3600) {
+        const std::string t = format_utc_ymdhm(ts);
+        if (t.empty()) {
+            std::fclose(fp);
+            return false;
+        }
+        if (!first) {
+            std::fputs(",", fp);
+        }
+        std::fprintf(fp, "\"%s\"", t.c_str());
+        first = false;
+    }
+
+    first = true;
+    std::fputs("],\"temperature_2m\":[", fp);
+    for (ts = from_utc; ts <= to_utc; ts += 3600) {
+        const double v = 2.0 + (double)((ts / 3600) % 24);
+        if (!first) {
+            std::fputs(",", fp);
+        }
+        std::fprintf(fp, "%.2f", v);
+        first = false;
+    }
+
+    first = true;
+    std::fputs("],\"cloud_cover\":[", fp);
+    for (ts = from_utc; ts <= to_utc; ts += 3600) {
+        const double v = (double)((ts / 3600) % 100);
+        if (!first) {
+            std::fputs(",", fp);
+        }
+        std::fprintf(fp, "%.2f", v);
+        first = false;
+    }
+
+    first = true;
+    std::fputs("],\"shortwave_radiation\":[", fp);
+    for (ts = from_utc; ts <= to_utc; ts += 3600) {
+        const int hour = (int)((ts / 3600) % 24);
+        const double v = (hour >= 6 && hour <= 18) ? (200.0 + (double)(hour * 10)) : 0.0;
+        if (!first) {
+            std::fputs(",", fp);
+        }
+        std::fprintf(fp, "%.2f", v);
+        first = false;
+    }
+    std::fputs("]}}", fp);
+
+    if (std::fclose(fp) != 0) {
+        return false;
+    }
+    return true;
+}
+
+class BackfillWorkerFixture : public ::testing::Test {
+protected:
+    BackfillWorkerFixture()
+        : cfg_guard_("SUNSPOTS_CONFIG"),
+          db_path_guard_("SS_SDK_DB_PATH"),
+          log_level_guard_("SS_SDK_LOG_LEVEL"),
+          mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
+          mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
+    {}
+
+    void SetUp() override
+    {
+        dir_ = make_temp_dir();
+        ASSERT_FALSE(dir_.empty());
+        db_path_ = dir_ + "/sdk.db";
+        fixture_json_path_ = dir_ + "/archive.json";
+    }
+
+    void TearDown() override
+    {
+        ss_sdk_shutdown();
+        remove_file_if_exists(fixture_json_path_);
+        remove_file_if_exists(db_path_);
+        remove_dir_if_exists(dir_);
+    }
+
+    std::string dir_;
+    std::string db_path_;
+    std::string fixture_json_path_;
+
+    ScopedEnvVar cfg_guard_;
+    ScopedEnvVar db_path_guard_;
+    ScopedEnvVar log_level_guard_;
+    ScopedEnvVar mirror_enabled_guard_;
+    ScopedEnvVar mirror_path_guard_;
+};
+
+}  // namespace
+
+TEST_F(BackfillWorkerFixture, one_week_backfill_populates_required_metrics_and_is_idempotent)
+{
+    const int lag_minutes = 120;
+    const int64_t end_utc = align_to_slot((int64_t)time(NULL) - (int64_t)lag_minutes * 60);
+    const int64_t start_utc = align_to_slot(end_utc - (7LL * 86400LL));
+    const int64_t fixture_from = start_utc - 3600;
+    const int64_t fixture_to = end_utc + 3600;
+    std::string cfg;
+    std::string cmd;
+    int rc;
+    ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_TRUE(write_mock_archive_json(fixture_json_path_, fixture_from, fixture_to));
+
+    cfg =
+        "{"
+        "\"name\":\"BackfillOpenMeteo\","
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"mode\":\"oneshot\","
+        "\"required_history_days\":7,"
+        "\"chunk_days\":7,"
+        "\"retry_max_attempts\":2,"
+        "\"retry_base_backoff_ms\":50,"
+        "\"freshness_lag_minutes\":120,"
+        "\"request_interval_ms\":100,"
+        "\"max_requests_per_minute\":60,"
+        "\"max_requests_per_hour\":500,"
+        "\"max_requests_per_day\":2000,"
+        "\"endpoint\":\"file://" +
+        fixture_json_path_ +
+        "\","
+        "\"latitude\":52.52,"
+        "\"longitude\":13.41"
+        "},"
+        "\"sdk\":{"
+        "\"db_path\":\"" +
+        db_path_ +
+        "\","
+        "\"log_level\":\"error\","
+        "\"log_mirror_enabled\":false"
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_PATH", db_path_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "error", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
+
+    cmd = std::string(BACKFILL_BIN_PATH);
+    rc = std::system(cmd.c_str());
+    ASSERT_NE(rc, -1);
+    ASSERT_TRUE(WIFEXITED(rc));
+    ASSERT_EQ(WEXITSTATUS(rc), 0);
+
+    ASSERT_EQ(
+        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out),
+        SS_SDK_OK);
+    EXPECT_EQ(out.count, (size_t)672);
+    ss_sdk_db_free_samples(&out);
+
+    ASSERT_EQ(
+        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, &out),
+        SS_SDK_OK);
+    EXPECT_EQ(out.count, (size_t)672);
+    ss_sdk_db_free_samples(&out);
+
+    ASSERT_EQ(
+        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, &out),
+        SS_SDK_OK);
+    EXPECT_EQ(out.count, (size_t)672);
+    ss_sdk_db_free_samples(&out);
+
+    rc = std::system(cmd.c_str());
+    ASSERT_NE(rc, -1);
+    ASSERT_TRUE(WIFEXITED(rc));
+    ASSERT_EQ(WEXITSTATUS(rc), 0);
+
+    ASSERT_EQ(
+        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out),
+        SS_SDK_OK);
+    EXPECT_EQ(out.count, (size_t)672);
+    ss_sdk_db_free_samples(&out);
+}

@@ -161,6 +161,7 @@ Notes:
 - `sunspots_fetch_openmeteo`
 - `sunspots_fetch_elprisjustnu`
 - `sunspots_compute_manager`
+- `sunspots_backfill_openmeteo`
 
 ## SDK Runtime Config
 
@@ -174,10 +175,12 @@ Sample runtime config keys live in `config/sunspots.json` under `common.sdk`:
 ## Documentation
 
 - SDK manual: `docs/manual/sdk.md`
+- Backfill module manual: `docs/manual/backfill_openmeteo.md`
 - Build and quality workflow: `docs/manual/build_and_quality_system.md`
 - Static analysis ratcheting: `docs/manual/static_analysis_ratcheting.md`
 - Bug tracker doc: `docs/bugs.md`
 - Design notes: `docs/designs/SDK_public_db_API.md`
+- Backfill design: `docs/designs/backfill_worker_design.md`
 
 ## Bug Reporting
 
