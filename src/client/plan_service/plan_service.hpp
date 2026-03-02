@@ -19,11 +19,13 @@ class PlanService
    public:
     PlanService(HttpClient &client);
 
-    void showNow();
+    void getNow();
+    void displayNow();
     void showDay();
 
    private:
     HttpClient client;
+    Result cachedResult;
 
     Result parseResponse(const std::string &buffer);
     int getCurrentQuarterIndex();
