@@ -17,17 +17,17 @@
 #include <sys/timerfd.h>
 
 /* Ring Buffer Selection */
-#if   defined(RING_BUF_64)
+#if   defined(BUF_64)
     #define LOG_BUF_SIZE 65536
-#elif defined(RING_BUF_32)
+#elif defined(BUF_32)
     #define LOG_BUF_SIZE 32768
-#elif defined(RING_BUF_16)
+#elif defined(BUF_16)
     #define LOG_BUF_SIZE 16384
-#elif defined(RING_BUF_8)
+#elif defined(BUF_8)
     #define LOG_BUF_SIZE 8192
-#elif defined(RING_BUF_4)
+#elif defined(BUF_4)
     #define LOG_BUF_SIZE 4096
-#elif defined(RING_BUF_2)
+#elif defined(BUF_2)
     #define LOG_BUF_SIZE 2048
 #else
     #define LOG_BUF_SIZE 1024

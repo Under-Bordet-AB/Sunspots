@@ -2,7 +2,6 @@
  * @file daemon.c
  */
 
-
 #define _GNU_SOURCE
 #include <linux/limits.h>
 #include "daemon_logger.h"
@@ -61,15 +60,18 @@ void daemon_init(daemon_var_t **self_ptr)
     
     daemon_resolve_paths(self);	
     daemon_daemonize();    
-    openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
+
+	openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
 	daemon_epoll_setup(self);
     syslog(LOG_NOTICE, "Sunspots daemon started. Detached and darkened.");
 
-    module_init(&self->modules);	
-    self->n_modules_running = module_load(&self->modules, self->n_modules_running, self->prj_config_path, self->prj_root_folder, self->epoll_fd, self->hearbeat_sig);
+    module_init(&self->modules);
+	
+    self->n_modules_running = module_load(&self->modules, self->n_modules_running,
+										  self->prj_config_path, self->prj_root_folder,
+										  self->epoll_fd, self->hearbeat_sig);
     daemon_write_pidfile(self->prj_root_folder);
-	daemon_set_system_config(self);
-	daemon_logger_send("DAEMON", "Finished setting up daemon");
+	daemon_set_system_config(self);	
 	
     *self_ptr = self;
 }
@@ -79,7 +81,8 @@ void daemon_deinit(daemon_var_t **self_ptr)
     if (!self_ptr || !*self_ptr) return;
     
     daemon_var_t *self = *self_ptr;
-    syslog(LOG_NOTICE, "Shutting down daemon and cleaning up...");        
+    syslog(LOG_NOTICE, "Shutting down daemon and cleaning up...");
+	daemon_logger_send("DAEMON", "Shutting down daemon and cleaning up...");
     
     module_deinit(&self->modules, self->n_modules_running, self->epoll_fd);
     if (self->global_timer_fd > 0)
@@ -99,12 +102,15 @@ void daemon_deinit(daemon_var_t **self_ptr)
     	close(self->signal_fd);
 	}
     free(self);
-    *self_ptr = NULL;        
+    *self_ptr = NULL;
+	
     syslog(LOG_NOTICE, "Daemon vanished. All children reaped.");
+	daemon_logger_send("DAEMON", "Daemon vanished. All children reaped.");
+	
     closelog();
 }
 
-void daemon_run(daemon_var_t *self)
+void daemon_run(daemon_var_t *self)	
 {
     struct epoll_event events[MAX_EVENTS];    
     /** * fdsi is populated by the kernel when reading from signal_fd.
@@ -113,6 +119,7 @@ void daemon_run(daemon_var_t *self)
      */
     struct signalfd_siginfo fdsi;    
     syslog(LOG_NOTICE, "SUNSPOTS daemon setup complete! Waiting for events...");
+	daemon_logger_send("DAEMON", "SUNSPOTS daemon setup complete! Waiting for events...");
     while (self->alive)
     {
         int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, -1);
@@ -141,7 +148,6 @@ void daemon_run(daemon_var_t *self)
 					else if (fdsi.ssi_signo == (uint32_t)self->hearbeat_sig)
 					{
 						daemon_handle_heartbeat(self, fdsi.ssi_pid);
-						daemon_logger_send("DAEMON", "Handled heartbeat.");
 					}
                 }
             }
@@ -172,7 +178,11 @@ void daemon_run(daemon_var_t *self)
                             if (now - last_reload >= 1)
                             {
                                 syslog(LOG_NOTICE, "Config change detected. Performing hot-reload.");
-                                self->n_modules_running = module_load(&self->modules, self->n_modules_running, self->prj_config_path, self->prj_root_folder, self->epoll_fd, self->hearbeat_sig);
+								daemon_logger_send("DEAEMON", "Config change detected. Performing hot-reload.");
+                                self->n_modules_running = module_load(&self->modules, self->n_modules_running,
+																	  self->prj_config_path,
+																	  self->prj_root_folder,
+																	  self->epoll_fd, self->hearbeat_sig);
                                 last_reload = now;
                             }
                         }
@@ -351,7 +361,6 @@ static void daemon_daemonize(void)
 	{
 	    exit(EXIT_SUCCESS);	
 	}
-	printf("Daemon lives! Use 'kill $(cat <path/to>/Sunspots/logs/sunspots.pid)' to kill it\n");
     umask(0); 
     if (chdir("/") != 0)
 	{
@@ -373,6 +382,7 @@ static void daemon_daemonize(void)
     }
 #else
 	printf("DEBUG MODE\n");
+	printf("Daemon lives! Use 'kill $(cat <path/to>/Sunspots/logs/sunspots.pid)' to kill it\n");
 #endif	
 }
 
