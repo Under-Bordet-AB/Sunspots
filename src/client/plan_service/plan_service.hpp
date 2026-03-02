@@ -1,17 +1,17 @@
 #pragma once
 
+#include <vector>
 #include "config.hpp"
 #include "../http/http_client.hpp"
 
-struct Result 
+struct Result
 {
-    double buy_electricity = 0.0;
-    double direct_use = 0.0;
-    double charge_battery = 0.0;
-    double sell_excess = 0.0;
+    std::vector<double> buy_electricity;
+    std::vector<double> direct_use;
+    std::vector<double> charge_battery;
+    std::vector<double> sell_excess;
 
-    std::string date;
-    std::string time;
+    std::string timestamp;
 };
 
 class PlanService
@@ -21,11 +21,10 @@ class PlanService
 
     void showNow();
     void showDay();
-    void showWeek();
-    void showHistory();
 
    private:
     HttpClient client;
 
     Result parseResponse(const std::string &buffer);
+    int getCurrentQuarterIndex();
 };

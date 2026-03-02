@@ -15,7 +15,8 @@ SRCS = main.cpp \
        http/http_request.cpp \
        http/http_response.cpp \
        menu/menu.cpp \
-       menu/input/input.cpp \
+       utils/input.cpp \
+       utils/utils.cpp \
        plan_service/plan_service.cpp \
        ../libs/json/cJSON.c
 
@@ -35,7 +36,8 @@ HEADERS = config.hpp \
           http/http_response.hpp \
           http/http_status.hpp \
           menu/menu.hpp \
-          menu/input/input.hpp \
+          utils/input.hpp \
+          utils/utils.hpp \
           plan_service/plan_service.hpp \
           ../libs/json/cJSON.h
 
