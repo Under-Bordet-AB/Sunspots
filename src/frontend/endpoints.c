@@ -1,10 +1,13 @@
 #define _XOPEN_SOURCE 500
 
 #include <stdio.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "http_parser.h"
 
