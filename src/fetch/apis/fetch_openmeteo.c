@@ -85,13 +85,13 @@ int normalize_data(char* raw_in, weather_data_t** out) {
         return -1;
     }
 
-    if (transform_openmeteo_weather(json_obj, data) != TRANSFORM_OK) {
+    if (transform_openmeteo_solar(json_obj, data) != TRANSFORM_OK) {
         cJSON_Delete(json_obj);
         free(data);
         return -1;
     }
 
-    if (transform_openmeteo_solar(json_obj, data) != TRANSFORM_OK) {
+    if (transform_openmeteo_weather(json_obj, data) != TRANSFORM_OK) {
         cJSON_Delete(json_obj);
         free(data);
         return -1;

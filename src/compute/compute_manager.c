@@ -87,7 +87,67 @@ void cleanup(void) {
 //******************************//
 
 int wait_for_new_data() {
-    return 0;
+    const int poll_seconds = 3;
+    const int timeout_seconds = 5 * 60; // 5 minutes
+    const int max_cycles = timeout_seconds / poll_seconds;
+
+    int cycles = 0;
+
+    while (cycles < max_cycles) {
+        const int64_t now = (int64_t)time(NULL);
+        const int64_t window_start = now - 90 * 60;
+        const int64_t window_end = now + 90 * 60;
+
+        ss_metric_id metrics[3] = {
+            SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+            SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+        };
+
+        int observed_metrics_found = 0;
+
+        for (int m = 0; m < 3; m++) {
+            printf("Looking for samples...\n");
+            int metric_has_observed = 0;
+
+            ss_sdk_samples_out samples = {0};
+            ss_sdk_status status = ss_sdk_db_get_canonical(window_start, 13, metrics[m], &samples);
+
+            if (status != SS_SDK_OK && status != SS_SDK_ERR_PARTIAL_DATA) {
+                syslog(LOG_ERR, "Compute Manager - ss_sdk_db_get_canonical_failed for metric=%d status=%d", (int)metrics[m], (int)status);
+                return -1;
+            }
+
+            for (size_t i = 0; i < samples.count; i++) {
+                const ss_sdk_sample* s = &samples.samples[i];
+                if (s->value_type != SS_SDK_VALUE_F64) continue;
+                if (s->ts_utc < window_start || s->ts_utc > window_end) continue;
+                printf("Sample found: %d\n", i);
+
+                if ((s->flags & SS_SDK_SAMPLE_OBSERVED) != 0) {
+                    printf("Observed metric found.\n");
+                    metric_has_observed = 1;
+                    break;
+                }
+            }
+
+            ss_sdk_db_free_samples(&samples);
+
+            if (metric_has_observed) {
+                observed_metrics_found++;
+            }
+        }
+
+        if (observed_metrics_found == 3) {
+            return 0; // all required weather metrics observed
+        }
+
+        cycles++;
+        sleep(poll_seconds);
+    }
+
+    syslog(LOG_WARNING, "Compute Manager - Timeout waiting for new observed weather data.");
+    return -1;
 }
 
 void init_compute_data(compute_data_t* data) {
