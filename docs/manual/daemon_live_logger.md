@@ -3,9 +3,6 @@
 A lightweight utility that writes "live logs" to a file. The program leverages the fact that all processes spawned by the daemon are assigned the `"sunspots_system"` environment variable. It parses the UNIX domain socket path defined within that JSON configuration to determine where to send its messages.
 
 ## Usage
-To use the logger in your module, include the `daemon_logger.h` header file from the `./src/core/` directory.
-
-## Usage
 To use the logger in your module simply include the headerfiler `daemon_logger.h` from `./src/core/`. Call the function `daemon_logger_send("Module name", "Message from module");`.<br>The output is written to `.logs/daemon.log`. 
 
 ### Compile flags
