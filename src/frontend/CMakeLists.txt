@@ -5,6 +5,7 @@ add_library(sunspots_frontend_core STATIC
   http_parser.c
   http_worker.c
   http_constants.c
+  file_helpers.c
 )
 target_include_directories(sunspots_frontend_core
   PUBLIC

@@ -450,6 +450,10 @@ const char* http_response_stringify(http_response* response, size_t* outSize) {
     messageSize += 4 + response->bodyLen + 1; // 4 = \r\n\r\n
     // printf("We have to allocate %i bytes.\n",messageSize);
     char* status = malloc(messageSize);
+    if(status == NULL)
+    {
+        return NULL;
+    }
     // write first line
     int curPos = snprintf(status, messageSize, "%s %d %s", HTTP_VERSION, response->responseCode, message);
     // write headers

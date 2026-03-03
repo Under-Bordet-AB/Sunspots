@@ -36,7 +36,13 @@
       "client_queue_size": 32,
 
       "allow_file_search": true,
-      "file_search_dir": "./htdocs"
+      "file_search_dir": "./htdocs",
+      "aliases": [
+        {
+          "target_url": "/README",
+          "target_file": "./README.md"
+        }
+      ]
     }
   ]
 }

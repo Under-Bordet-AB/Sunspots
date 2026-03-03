@@ -1,84 +1,49 @@
 #define _XOPEN_SOURCE 500
 
 #include <stdio.h>
-#include <unistd.h>
-#include <limits.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "http_parser.h"
+#include "file_helpers.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 256
 #endif
 
-char* load_file(const char* path, size_t* out_size)
+// If a folder is requested when auto-serving files, search for "index.*" with the following file types and serve the first one found.
+static const char *index_fallbacks[] = {
+    "html",
+    "htm",
+    "txt",
+    "xml",
+    "json",
+    "css"
+};
+#define FALLBACK_COUNT 6
+
+int resolve_index_file(const char *dir_path, char *out_path, size_t out_size)
 {
-    FILE* f = fopen(path, "rb");
-    if (!f)
-        return NULL;
+    struct stat st;
 
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
+    for (int i = 0; i < FALLBACK_COUNT; i++) {
+        char temp[PATH_MAX];
+
+        snprintf(temp, sizeof(temp), "%s/index.%s",
+                 dir_path, index_fallbacks[i]);
+
+        if (stat(temp, &st) == 0 && S_ISREG(st.st_mode)) {
+            if (strlen(temp) >= out_size)
+                return -1;
+
+            strcpy(out_path, temp);
+            return 0;
+        }
     }
 
-    long size = ftell(f);
-    if (size < 0) {
-        fclose(f);
-        return NULL;
-    }
-
-    rewind(f);
-
-    char* buffer = (char*)malloc(size + 1); // +1 for optional '\0'
-    if (!buffer) {
-        fclose(f);
-        return NULL;
-    }
-
-    size_t read = fread(buffer, 1, size, f);
-    fclose(f);
-
-    if (read != (size_t)size) {
-        free(buffer);
-        return NULL;
-    }
-
-    buffer[size] = '\0'; // safe even for binary
-    if (out_size)
-        *out_size = (size_t)size;
-
-    return buffer;
-}
-
-int sanitize_path(const char* url_path, char* out_path, size_t out_size)
-{
-    // Must start with /
-    if (url_path[0] != '/')
-        return -1;
-
-    // Reject traversal attempts
-    if (strstr(url_path, ".."))
-        return -1;
-
-    // Resolve document root
-    char doc_root[PATH_MAX];
-    if (!realpath(FILE_SEARCH_DIR, doc_root))
-        return -1;
-
-    // Build the final path
-    char temp[PATH_MAX];
-    snprintf(temp, sizeof(temp), "%s%s", doc_root, url_path);
-
-    // Ensure we didn't overflow
-    if (strlen(temp) >= PATH_MAX)
-        return -1;
-
-    strncpy(out_path, temp, out_size - 1);
-    out_path[out_size - 1] = '\0';
-
-    return 0;
+    return -1;
 }
 
 http_response* process_request(http_request* req)
@@ -116,34 +81,113 @@ http_response* process_request(http_request* req)
         return resp;
     }
 
-    // Treat URL as file path
+    // Match URL against aliases
 
-    if(ALLOW_SEARCH)
+    if(URL_ALIASES != NULL)
     {
-        char file_path[PATH_MAX];
-        if(sanitize_path(req->path, file_path, sizeof(file_path)) == 0)
+        LinkedList_foreach(URL_ALIASES, node)
         {
-            size_t file_size;
-            char* file_data = load_file(file_path, &file_size);
-            if (!file_data)
+            url_alias* alias = (url_alias*)node->item;
+            if(strcmp(req->path, alias->target_url) == 0)
             {
-                http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
-                if(!resp)
+                size_t file_size;
+                char* file_data = load_file(alias->target_file, &file_size);
+                if (!file_data)
+                {
+                    http_response* resp = http_response_init(500, "The requested URL is misconfigured internally, could not find the file path pointed to by target_file.", HTTPRESPONSE_BODYLEN_AUTODETECT);
+                    if(!resp)
+                        return NULL;
+                    http_response_add_header(resp, "Content-Type", "text/plain");
+                    return resp;
+                }
+
+                http_response* resp = http_response_init(200, file_data, file_size);
+                if (!resp) {
+                    free(file_data);
                     return NULL;
-                http_response_add_header(resp, "Content-Type", "text/plain");
+                }
+
+                http_response_add_header(resp, "Content-Type", guess_mime_type(alias->target_file));
+
+                free(file_data);
                 return resp;
             }
+        }
+    }
 
-            http_response* resp = http_response_init(200, file_data, file_size);
-            if (!resp) {
-                free(file_data);
-                return NULL;
+    // Treat URL as file path
+
+    if (ALLOW_SEARCH)
+    {
+        char file_path[PATH_MAX];
+
+        if (sanitize_path(req->path, file_path, sizeof(file_path)) == 0)
+        {
+            struct stat st;
+
+            if (stat(file_path, &st) == 0)
+            {
+                // Case 1: Regular file
+                if (S_ISREG(st.st_mode))
+                {
+                    size_t file_size;
+                    char* file_data = load_file(file_path, &file_size);
+                    if (!file_data)
+                    {
+                        http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
+                        if(!resp)
+                            return NULL;
+                        http_response_add_header(resp, "Content-Type", "text/plain");
+                        return resp;
+                    }
+
+                    http_response* resp = http_response_init(200, file_data, file_size);
+                    if (!resp) {
+                        free(file_data);
+                        return NULL;
+                    }
+
+                    http_response_add_header(resp, "Content-Type", guess_mime_type(file_path));
+                    free(file_data);
+                    return resp;
+                }
+
+                // Case 2: Directory → try index
+                if (S_ISDIR(st.st_mode))
+                {
+                    char index_path[PATH_MAX];
+
+                    if (resolve_index_file(file_path, index_path, sizeof(index_path)) == 0)
+                    {
+                        size_t file_size;
+                        char* file_data = load_file(index_path, &file_size);
+                        if (!file_data)
+                        {
+                            http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
+                            if(!resp)
+                                return NULL;
+                            http_response_add_header(resp, "Content-Type", "text/plain");
+                            return resp;
+                        }
+
+                        http_response* resp = http_response_init(200, file_data, file_size);
+                        if (!resp) {
+                            free(file_data);
+                            return NULL;
+                        }
+
+                        http_response_add_header(resp, "Content-Type", guess_mime_type(index_path));
+                        free(file_data);
+                        return resp;
+                    } else {
+                        http_response* resp = http_response_init(404, "Not Found", HTTPRESPONSE_BODYLEN_AUTODETECT);
+                        if(!resp)
+                            return NULL;
+                        http_response_add_header(resp, "Content-Type", "text/plain");
+                        return resp;
+                    }
+                }
             }
-
-            http_response_add_header(resp, "Content-Type", guess_mime_type(file_path));
-
-            free(file_data);
-            return resp;
         }
     }
 
