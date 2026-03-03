@@ -20,9 +20,10 @@ static const char *index_fallbacks[] = {
     "txt",
     "xml",
     "json",
-    "css"
+    "css",
+    "js"
 };
-#define FALLBACK_COUNT 6
+#define FALLBACK_COUNT 7
 
 int resolve_index_file(const char *dir_path, char *out_path, size_t out_size)
 {
