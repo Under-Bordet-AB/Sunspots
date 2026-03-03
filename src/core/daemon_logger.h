@@ -52,7 +52,7 @@ static inline void daemon_logger_send(const char *sending_module, const char *ms
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_path, sizeof(socket_path) -1);
+    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 	
     /** Get the current time for timestamp */
 	struct timeval tv;
