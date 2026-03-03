@@ -13,6 +13,7 @@
 #include "../libs/json/cJSON.h"
 
 #include "compute_models.h"
+#include "algorithms/compute_heuristic.h"
 #include "algorithms/compute_lp.h"
 
 #define ENDPOINTS_DIR "endpoints"
@@ -265,10 +266,20 @@ int compute(const compute_data_t* data, result_t* out_result) {
 
     init_result_data(out_result);
 
-    if (compute_lp(data, out_result) < 0) {
-        return -1;
+    int compute_method = 0;
+    switch (compute_method) {
+        case 0:
+            if (compute_heuristic(data, out_result) < 0) {
+                return -1;
+            }
+            break;
+        case 1:
+            if (compute_lp(data, out_result) < 0) {
+                return -1;
+            }
+            break;
     }
-
+    
     for (int i = 0; i < data->horizon_len; i++) {
         out_result->timestamp[i] = data->timestamp[i];
     }
