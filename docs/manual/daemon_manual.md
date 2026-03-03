@@ -5,7 +5,7 @@
 ## Operations
 The daemon can spawn three types of processes:
 1. **Heartbeat Process**: The child process checks in with the daemon on a predetermined interval (in seconds). A successful check-in sets an `alive` flag, which the daemon verifies during its health check.
-2. **Relative Timer Process**: The child process is spawned whenever a predetermined time interval (in seconds) expires. If the previous process is still running, a second instance will start, and so on.
+2. **Relative Timer Process**: The child process is spawned whenever a predetermined time interval (in seconds) expires. If the previous process is still running, a second instance will start, and so on. Modules with relative timer can also set flag `"boot_from_start"` in `sunspots.json`. It does what the name suggests and then reverts back to waiting for the duration of the timer.
 3. **Absolute Timer Process**: The child process is spawned at a specific absolute time, such as `"14:50"`. After spawning the process, the daemon resets the timer. This logic accounts for leap years and daylight savings time to ensure the timer remains absolute.
 
 ### Child Processes
@@ -47,6 +47,7 @@ The configuration file `sunspots.json` is located in the `Sunspots/config` folde
         {
             "name": "Task_Relative_Mode",
             "bin_path": "./path/to/binary/from/root",
+            "Start_at_boot": 1, // Set only if module should fire immediately at boot of system, otherwise field not needed
             "Timer-type": 1,
             "Rel-time": 30,
             "start_immediately": true
