@@ -288,19 +288,27 @@ cleanup:
 static int daemon_logger_set_config(journal_log_t *self)
 {
     char *config_env = getenv("SUNSPOTS_CONFIG");
+	char *system_env = getenv("SUNSPOTS_CONFIG");
+	
     if (!config_env) return -1;
-    cJSON *mod = cJSON_Parse(config_env);
-    if (!mod) return -1;
+    cJSON *conf = cJSON_Parse(config_env);
+    if (!conf) return -1;
 
-    cJSON *path = cJSON_GetObjectItemCaseSensitive(mod, "log_path");
-    cJSON *sock = cJSON_GetObjectItemCaseSensitive(mod, "socket_path");
-    cJSON *hb   = cJSON_GetObjectItemCaseSensitive(mod, "heartbeat_interval");
+	if (!system_env) return -1;
+	cJSON *syst = cJSON_Parse(system_env);
+	if (!syst) return -1;
+	
+
+    cJSON *path = cJSON_GetObjectItemCaseSensitive(conf, "log_path");
+    cJSON *sock = cJSON_GetObjectItemCaseSensitive(syst, "socket_path");
+    cJSON *hb   = cJSON_GetObjectItemCaseSensitive(conf, "heartbeat_interval");
 
     if (cJSON_IsString(path)) self->path_to_log = strdup(path->valuestring);
     if (cJSON_IsString(sock)) self->socket_path = strdup(sock->valuestring);
     if (cJSON_IsNumber(hb))   self->hb_interval = hb->valueint;
 
-    cJSON_Delete(mod);
+    cJSON_Delete(conf);
+	cJSON_Delete(syst);
 
     char *sig_env = getenv("SUNSPOTS_SIGNAL");
     if (sig_env) self->sig_number = atoi(sig_env);

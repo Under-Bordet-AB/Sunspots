@@ -23,7 +23,7 @@ target_link_libraries(sunspots_logger
   PRIVATE
     sunspots_cjson
 )
-target_compile_definitions(sunspots_logger PRIVATE RING_BUF_4)
+target_compile_definitions(sunspots_logger PRIVATE BUF_8)
 target_compile_features(sunspots_logger PRIVATE c_std_99)
 target_compile_options(sunspots_logger PRIVATE -Wformat=0)
 sunspots_apply_target_defaults(sunspots_logger)
