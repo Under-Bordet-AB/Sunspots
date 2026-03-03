@@ -28,7 +28,8 @@ Behavior:
 
 1. It runs once immediately on daemon startup.
 2. It can run again by timer schedule.
-3. Daemon does not fail startup if backfill fails.
+3. On daemon hot-reload, `start_immediately: true` triggers one new immediate run.
+4. Daemon does not fail startup if backfill fails.
 
 ## Backfill Modes
 
@@ -47,7 +48,7 @@ Current module writes:
 
 ## Configuration Keys
 
-The daemon passes module JSON as `SUNSPOTS_CONFIG`. Module reads `backfill` and `sdk` blocks.
+The daemon passes module JSON as `SUNSPOTS_CONFIG`. Backfill reads `backfill` from module config, location from `SUNSPOTS_SYSTEM.location`, and SDK runtime config from exported `SS_SDK_*` env vars (typically sourced from shared `system.sdk`).
 
 `backfill` keys:
 
@@ -65,10 +66,18 @@ The daemon passes module JSON as `SUNSPOTS_CONFIG`. Module reads `backfill` and 
 12. `progress_log_interval_sec` (int): default `10`
 13. `daily_hole_check_interval_sec` (int): default `86400`
 14. `endpoint` (string): default `https://archive-api.open-meteo.com/v1/archive`
-15. `latitude` (double): default `52.52`
-16. `longitude` (double): default `13.41`
 
-`sdk` keys follow SDK conventions (for example `db_path`, `log_level`, mirror settings).
+Shared `system.sdk` keys follow SDK conventions (for example `db_dir`, `log_level`, mirror settings).
+
+Shared location keys under `system.location`:
+
+1. `name` (string): user-facing location label (for example `Main residence`)
+2. `latitude` (double)
+3. `longitude` (double)
+4. `elprisomrade` (string, for example `SE3`)
+
+Backfill requires `system.location.latitude` and `system.location.longitude`.
+If either is missing, module startup fails with `backfill.config.invalid_location`.
 
 ## Open-Meteo Rate Limit Notes
 
@@ -95,7 +104,31 @@ Module emits SDK logs with event names:
 9. `backfill.fill_failed`
 10. `backfill.verify_failed`
 
-## Example Module Config
+## Example Config Snippets
+
+Shared SDK block:
+
+```json
+{
+  "system": {
+    "location": {
+      "name": "Main residence",
+      "latitude": 59.3293,
+      "longitude": 18.0686,
+      "elprisomrade": "SE3"
+    },
+    "sdk": {
+      "db_dir": "db",
+      "log_level": "info",
+      "log_mirror_enabled": true,
+      "log_mirror_path": "logs/sdk.log",
+      "log_mirror_max_bytes": "5242880"
+    }
+  }
+}
+```
+
+Backfill module entry:
 
 ```json
 {
@@ -118,15 +151,7 @@ Module emits SDK logs with event names:
     "max_requests_per_day": 8000,
     "progress_log_interval_sec": 10,
     "daily_hole_check_interval_sec": 86400,
-    "endpoint": "https://archive-api.open-meteo.com/v1/archive",
-    "latitude": 52.52,
-    "longitude": 13.41
-  },
-  "sdk": {
-    "db_path": "db/ss_sdk.db",
-    "log_level": "info",
-    "log_mirror_enabled": true,
-    "log_mirror_path": "logs/sdk.log"
+    "endpoint": "https://archive-api.open-meteo.com/v1/archive"
   }
 }
 ```

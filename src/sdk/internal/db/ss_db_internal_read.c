@@ -95,9 +95,6 @@ bool ss_raw_rows_append(ss_raw_row **rows, size_t *count, size_t *cap, const ss_
 {
     ss_raw_row *grown;
     size_t next_cap;
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    int fail_alloc = 0;
-#endif
 
     if (*count == *cap) {
         next_cap = (*cap == 0U) ? 64U : (*cap * 2U);
@@ -105,12 +102,9 @@ bool ss_raw_rows_append(ss_raw_row **rows, size_t *count, size_t *cap, const ss_
             return false;
         }
 
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-        fail_alloc = ss_test_consume(&g_db_test_hooks.fail_realloc);
-#endif
         grown = (ss_raw_row *)realloc(*rows, next_cap * sizeof(ss_raw_row));
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
-        if (fail_alloc) {
+        if (ss_test_consume(&g_db_test_hooks.fail_realloc)) {
             free(grown);
             grown = NULL;
             errno = ENOMEM;

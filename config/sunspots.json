@@ -3,7 +3,20 @@
         "version": "1.1",
         "name": "Sunspots Daemon",
         "log_path": "./logs/daemon.log",
-        "socket_path": "./logs/sunspots.sock"
+        "socket_path": "./logs/sunspots.sock",
+        "location": {
+            "name": "Stockholm",
+            "latitude": 59.3293,
+            "longitude": 18.0686,
+            "elprisomrade": "SE3"
+        },
+        "sdk": {
+            "db_dir": "db",
+            "log_level": "info",
+            "log_mirror_enabled": true,
+            "log_mirror_path": "logs/sdk.log",
+            "log_mirror_max_bytes": "5242880"
+        }
     },
     "modules": [
     {
@@ -38,36 +51,28 @@
     	"Timer-type": 1,
     	"Rel-time": 100
 	},
-	{
-		"name": "BackfillOpenMeteo",
-		"bin_path": "./build/debug/src/backfill/sunspots_backfill_openmeteo",
-		"Timer-type": 1,
-		"Rel-time": 86400,
-		"start_immediately": true,
-		"backfill": {
-			"enabled": true,
-			"mode": "oneshot",
-			"required_history_days": 14,
-			"chunk_days": 7,
-			"retry_max_attempts": 5,
-			"retry_base_backoff_ms": 1000,
-			"freshness_lag_minutes": 120,
-			"request_interval_ms": 250,
-			"max_requests_per_minute": 240,
-			"max_requests_per_hour": 2000,
-			"max_requests_per_day": 8000,
-			"progress_log_interval_sec": 10,
-			"daily_hole_check_interval_sec": 86400,
-			"latitude": 52.52,
-			"longitude": 13.41
-		},
-		"sdk": {
-			"db_path": "db/ss_sdk.db",
-			"log_level": "info",
-			"log_mirror_enabled": true,
-			"log_mirror_path": "logs/sdk.log"
-		}
-	},
+    {
+      "name": "BackfillOpenMeteo",
+      "bin_path": "./build/debug/src/backfill/sunspots_backfill_openmeteo",
+      "Timer-type": 1,
+      "Rel-time": 86400,
+      "start_immediately": true,
+      "backfill": {
+        "enabled": true,
+        "mode": "oneshot",
+        "required_history_days": 14,
+        "chunk_days": 7,
+        "retry_max_attempts": 5,
+        "retry_base_backoff_ms": 1000,
+        "freshness_lag_minutes": 120,
+        "request_interval_ms": 250,
+        "max_requests_per_minute": 240,
+        "max_requests_per_hour": 2000,
+        "max_requests_per_day": 8000,
+        "progress_log_interval_sec": 10,
+        "daily_hole_check_interval_sec": 86400
+      }
+    },
     {
       "name": "Frontend",
       "bin_path": "./build/debug/src/frontend/sunspots_frontend",

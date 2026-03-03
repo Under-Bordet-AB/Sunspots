@@ -183,20 +183,47 @@ if (st != SS_SDK_OK) {
 - Optional SDK file mirror is controlled by env vars:
   - `SS_SDK_LOG_MIRROR_ENABLED=1` (accepted truthy tokens: `1`, `true`, `yes`, `on`)
   - `SS_SDK_LOG_MIRROR_PATH=/path/to/sdk.log`
-- DB path is controlled by `SS_SDK_DB_PATH`.
+  - `SS_SDK_LOG_MIRROR_MAX_BYTES=5242880` (truncate mirror when file size reaches/exceeds this cap)
+- DB directory is controlled by `SS_SDK_DB_DIR`.
 - Config convention for daemon/module config blobs:
-  - `common.sdk.db_path`
-  - `common.sdk.log_level`
-  - `common.sdk.log_mirror_enabled`
-  - `common.sdk.log_mirror_path`
+  - `system.sdk.db_dir`
+  - `system.sdk.log_level`
+  - `system.sdk.log_mirror_enabled`
+  - `system.sdk.log_mirror_path`
+  - `system.sdk.log_mirror_max_bytes`
 - Default behavior with no SDK config/env:
-  - DB path defaults to `db/ss_sdk.db`
+  - DB path defaults to `db/ss_sdk_loc_<lat_micro>_<lon_micro>.db` (requires `SUNSPOTS_SYSTEM.location`)
   - Log level defaults to `debug`
   - Mirror defaults to on
   - Default mirror path is `logs/sdk.log` (if no path is provided)
+  - Mirror max file size defaults to `5242880` bytes (5 MiB)
 - With SDK mirror enabled, mirror writes are blocking per call: each log call locks the mirror file, writes, then unlocks.
 - Performance guideline: avoid logging inside tight loops; collect state in loop variables and emit one summary log at the end (for example via a final `switch`/result branch).
 - Recommended pattern for larger modules: use enum + lookup table for stable event strings.
+
+### Team Config Handoff (Copy/Paste)
+
+When teammates ask for the "SDK/DB/log strings", use one shared block under `system`:
+
+```json
+"system": {
+  "...": "...",
+  "sdk": {
+    "db_dir": "db",
+    "log_level": "info",
+    "log_mirror_enabled": true,
+    "log_mirror_path": "logs/sdk.log",
+    "log_mirror_max_bytes": "5242880"
+  }
+}
+```
+
+Notes:
+
+1. Keep exactly one shared SDK config under `system.sdk`.
+2. Do not place SDK keys anywhere else in config.
+3. `log_mirror_max_bytes` is a hard cap trigger: when the mirror file reaches/exceeds the cap, SDK truncates it before writing the next line.
+4. No fallback locations are supported; only `system.sdk` is read.
 
 ## See Also
 

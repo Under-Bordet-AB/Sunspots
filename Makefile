@@ -54,22 +54,30 @@ ALLOW_DURING_ALL ?= 0
 
 CMAKE_FLAGS_DEBUG := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=$(CONFIG) \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
 	-DSUNSPOTS_ENABLE_SANITIZERS=ON \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
 CMAKE_FLAGS_VALGRIND := -G "$(GENERATOR)" -S . -B "$(VALGRIND_BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
 	-DSUNSPOTS_ENABLE_SANITIZERS=OFF \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
 CMAKE_FLAGS_TIDY := -G "$(GENERATOR)" -S . -B "$(TIDY_BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=Debug \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
 	-DSUNSPOTS_ENABLE_SANITIZERS=OFF \
 	-DSUNSPOTS_ENABLE_CLANG_TIDY=ON \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
+
+LOG_NO_COLOR_ENV := env NO_COLOR=1 CLICOLOR=0 CLICOLOR_FORCE=0 GCC_COLORS= TERM=dumb GTEST_COLOR=no
 
 ifeq ($(NO_COLOR),1)
 C_RESET :=
@@ -153,7 +161,7 @@ all:
 build:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure debug build\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
 		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
 		exit 1; \
@@ -162,14 +170,14 @@ build:
 	if [ -n "$$requested_modules" ] && [ "$$requested_modules" != "all" ]; then \
 		targets=$$($(MODULE_TARGET_HELPER) resolve "$(BUILD_DIR)" "$$requested_modules" | tr '\n' ' '); \
 		printf "%b[2/2]%b build debug targets (M=%s)\n" "$(C_CYAN)" "$(C_RESET)" "$$requested_modules"; \
-		$(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
 			tail -n 40 "$(DEBUG_BUILD_LOG)"; \
 			exit 1; \
 		}; \
 	else \
 		printf "%b[2/2]%b build debug targets\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) --build "$(BUILD_DIR)" --parallel > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
 			tail -n 40 "$(DEBUG_BUILD_LOG)"; \
 			exit 1; \
@@ -183,7 +191,7 @@ build:
 build-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure valgrind build (sanitizers OFF)\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_CONFIG_LOG)"; \
 		tail -n 40 "$(VALGRIND_CONFIG_LOG)"; \
 		exit 1; \
@@ -192,14 +200,14 @@ build-valgrind:
 	if [ -n "$$requested_modules" ] && [ "$$requested_modules" != "all" ]; then \
 		targets=$$($(MODULE_TARGET_HELPER) resolve "$(VALGRIND_BUILD_DIR)" "$$requested_modules" | tr '\n' ' '); \
 		printf "%b[2/2]%b build valgrind targets (M=%s)\n" "$(C_CYAN)" "$(C_RESET)" "$$requested_modules"; \
-		$(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_BUILD_LOG)"; \
 			tail -n 40 "$(VALGRIND_BUILD_LOG)"; \
 			exit 1; \
 		}; \
 	else \
 		printf "%b[2/2]%b build valgrind targets\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_BUILD_LOG)"; \
 			tail -n 40 "$(VALGRIND_BUILD_LOG)"; \
 			exit 1; \
@@ -317,7 +325,7 @@ run-valgrind:
 build-tests:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure debug test build\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
 		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
 		exit 1; \
@@ -335,7 +343,7 @@ build-tests:
 		printf "      hint: run 'make list-modules' to inspect available module targets\n"; \
 		exit 1; \
 	fi; \
-	$(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_TESTS_BUILD_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_TESTS_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b test build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_TESTS_BUILD_LOG)"; \
 		tail -n 60 "$(DEBUG_TESTS_BUILD_LOG)"; \
 		exit 1; \
@@ -347,7 +355,7 @@ build-tests:
 build-tests-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure valgrind test build\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_CONFIG_LOG)"; \
 		tail -n 40 "$(VALGRIND_CONFIG_LOG)"; \
 		exit 1; \
@@ -365,7 +373,7 @@ build-tests-valgrind:
 		printf "      hint: run 'make list-modules-valgrind' to inspect available module targets\n"; \
 		exit 1; \
 	fi; \
-	$(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_TESTS_BUILD_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_TESTS_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b test build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_TESTS_BUILD_LOG)"; \
 		tail -n 60 "$(VALGRIND_TESTS_BUILD_LOG)"; \
 		exit 1; \
@@ -377,13 +385,13 @@ build-tests-valgrind:
 tidy:
 	@mkdir -p "$(TIDY_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure tidy build (clang-tidy ON)\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_TIDY) > "$(TIDY_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_TIDY) > "$(TIDY_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tidy configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(TIDY_CONFIG_LOG)"; \
 		tail -n 40 "$(TIDY_CONFIG_LOG)"; \
 		exit 1; \
 	}
 	@printf "%b[2/2]%b build tidy targets\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) --build "$(TIDY_BUILD_DIR)" --parallel > "$(TIDY_BUILD_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(TIDY_BUILD_DIR)" --parallel > "$(TIDY_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tidy build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(TIDY_BUILD_LOG)"; \
 		tail -n 60 "$(TIDY_BUILD_LOG)"; \
 		exit 1; \
@@ -397,7 +405,7 @@ cppcheck:
 	@mkdir -p "$(dir $(CPPCHECK_LOG))"
 	@printf "%b[run]%b cppcheck (src/ tests/)\n" "$(C_CYAN)" "$(C_RESET)"
 	@if command -v cppcheck >/dev/null 2>&1; then \
-		cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
+		$(LOG_NO_COLOR_ENV) cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
 			--template='[{file}:{line}]: ({severity}) {message}' \
 			src tests 2> "$(CPPCHECK_LOG)" || true; \
 		printf "%b[ok]%b cppcheck complete\n" "$(C_GREEN)" "$(C_RESET)"; \
@@ -410,11 +418,11 @@ lizard:
 	@mkdir -p "$(dir $(LIZARD_LOG))"
 	@printf "%b[run]%b lizard (src/ tests/)\n" "$(C_CYAN)" "$(C_RESET)"
 	@if command -v lizard >/dev/null 2>&1; then \
-		lizard -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
+		$(LOG_NO_COLOR_ENV) lizard -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
 		printf "%b[ok]%b lizard complete\n" "$(C_GREEN)" "$(C_RESET)"; \
 		printf "      log: %s\n" "$(LIZARD_LOG)"; \
 	elif python3 -c "import lizard" >/dev/null 2>&1; then \
-		python3 -m lizard -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
+		$(LOG_NO_COLOR_ENV) python3 -m lizard -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
 		printf "%b[ok]%b lizard complete\n" "$(C_GREEN)" "$(C_RESET)"; \
 		printf "      log: %s\n" "$(LIZARD_LOG)"; \
 	else \
@@ -451,7 +459,7 @@ run-tests:
 	set -- --test-dir "$(BUILD_DIR)" --output-on-failure; \
 	if [ -n "$$ctest_regex" ]; then set -- "$$@" -R "$$ctest_regex"; fi; \
 	env ASAN_OPTIONS="$$asan_opts" UBSAN_OPTIONS="$$ubsan_opts" \
-	$(CTEST) "$$@" > "$(DEBUG_TEST_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CTEST) "$$@" > "$(DEBUG_TEST_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tests failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_TEST_LOG)"; \
 		tail -n 60 "$(DEBUG_TEST_LOG)"; \
 		exit 1; \
@@ -480,7 +488,7 @@ run-tests-valgrind:
 	fi; \
 	set -- --test-dir "$(VALGRIND_BUILD_DIR)" --output-on-failure -L valgrind; \
 	if [ -n "$$ctest_regex" ]; then set -- "$$@" -R "$$ctest_regex"; fi; \
-	$(CTEST) "$$@" > "$(VALGRIND_TEST_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CTEST) "$$@" > "$(VALGRIND_TEST_LOG)" 2>&1 || { \
 		printf "%b[fail]%b valgrind tests failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_TEST_LOG)"; \
 		tail -n 80 "$(VALGRIND_TEST_LOG)"; \
 		exit 1; \
@@ -492,7 +500,7 @@ list-modules:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@if [ ! -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
 		printf "%b[run]%b configure debug build for module discovery\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
 			printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
 			tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
 			exit 1; \
@@ -506,7 +514,7 @@ list-modules-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@if [ ! -f "$(VALGRIND_BUILD_DIR)/CMakeCache.txt" ]; then \
 		printf "%b[run]%b configure valgrind build for module discovery\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
 			printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_CONFIG_LOG)"; \
 			tail -n 40 "$(VALGRIND_CONFIG_LOG)"; \
 			exit 1; \
@@ -573,7 +581,7 @@ warnings:
 					lizard_cmd="python3 -m lizard"; \
 				fi; \
 				if command -v cppcheck >/dev/null 2>&1; then \
-					cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
+					$(LOG_NO_COLOR_ENV) cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
 						--template='[{file}:{line}]: ({severity}) {message}' \
 						src tests 2> "$(CPPCHECK_LOG)" || true; \
 					source_cppcheck_run="yes"; \

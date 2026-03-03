@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -284,6 +285,31 @@ static int ss_env_bool_enabled(const char *value)
     return 0;
 }
 
+static size_t ss_log_mirror_max_bytes(void)
+{
+    const char *raw = getenv(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES);
+    unsigned long long parsed = 0;
+    char *end_ptr = NULL;
+
+    if (raw == NULL || raw[0] == '\0') {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+
+    errno = 0;
+    parsed = strtoull(raw, &end_ptr, 10);
+    if (errno != 0 || end_ptr == raw || (end_ptr != NULL && *end_ptr != '\0')) {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+    if (parsed == 0ULL) {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+    if (parsed > (unsigned long long)SIZE_MAX) {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+
+    return (size_t)parsed;
+}
+
 static int ss_write_all(int fd, const char *buf, size_t len)
 {
     size_t write_offset = 0;
@@ -491,6 +517,8 @@ static ss_sdk_status ss_log_write_mirror_line(const char *line)
 {
     char path[SS_SDK_PATH_BUFFER_SIZE];
     int fd;
+    struct stat st;
+    size_t max_bytes;
 
     if (ss_get_log_path(path, sizeof(path)) != 0) {
         return SS_SDK_ERR_INTERNAL;
@@ -499,6 +527,7 @@ static ss_sdk_status ss_log_write_mirror_line(const char *line)
     if (path[0] == '\0') {
         return SS_SDK_OK;
     }
+    max_bytes = ss_log_mirror_max_bytes();
 
     if (ss_ensure_parent_dirs(path) != 0) {
         return SS_SDK_ERR_INTERNAL;
@@ -518,6 +547,20 @@ static ss_sdk_status ss_log_write_mirror_line(const char *line)
     ) {
         close(fd);
         return SS_SDK_ERR_INTERNAL;
+    }
+
+    /* Keep sdk.log bounded in size; once cap is reached, start from empty file. */
+    if (fstat(fd, &st) != 0) {
+        flock(fd, LOCK_UN);
+        close(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (st.st_size >= 0 && (size_t)st.st_size >= max_bytes) {
+        if (ftruncate(fd, 0) != 0 || lseek(fd, 0, SEEK_SET) < 0) {
+            flock(fd, LOCK_UN);
+            close(fd);
+            return SS_SDK_ERR_INTERNAL;
+        }
     }
 
     if (ss_write_all(fd, line, strlen(line)) != 0) {
@@ -655,25 +698,23 @@ static int ss_log_escape_base_fields(
 
 static int ss_log_escape_optional_fields(ss_log_escaped_fields *escaped, const ss_sdk_log_fields *fields)
 {
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    int force_fail = ss_log_test_consume(&g_log_test_hooks.fail_escape_optional);
-#else
-    int force_fail = 0;
-#endif
-
     if (fields == NULL) {
-        if (force_fail) {
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+        if (ss_log_test_consume(&g_log_test_hooks.fail_escape_optional)) {
             return -1;
         }
+#endif
         return 0;
     }
 
     escaped->module = ss_escape_text(fields->module == NULL ? "" : fields->module);
     escaped->source_api = ss_escape_text(fields->source_api == NULL ? "" : fields->source_api);
-    if (force_fail) {
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (ss_log_test_consume(&g_log_test_hooks.fail_escape_optional)) {
         free(escaped->source_api);
         escaped->source_api = NULL;
     }
+#endif
     if (escaped->module == NULL || escaped->source_api == NULL) {
         return -1;
     }

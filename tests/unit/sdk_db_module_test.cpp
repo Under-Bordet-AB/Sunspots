@@ -164,7 +164,8 @@ ss_sdk_status write_i64_record(ss_metric_id metric, int64_t value, int64_t ts_st
 class SdkDbFixture : public ::testing::Test {
 protected:
     SdkDbFixture()
-        : db_path_guard_("SS_SDK_DB_PATH"),
+        : db_dir_guard_("SS_SDK_DB_DIR"),
+          system_guard_("SUNSPOTS_SYSTEM"),
           sdk_log_level_guard_("SS_SDK_LOG_LEVEL"),
           sdk_log_mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           sdk_log_mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
@@ -174,22 +175,33 @@ protected:
     {
         dir_ = make_temp_dir();
         ASSERT_FALSE(dir_.empty());
-        db_path_ = dir_ + "/sdk.db";
-        ASSERT_EQ(setenv("SS_SDK_DB_PATH", db_path_.c_str(), 1), 0);
+        db_dir_ = dir_ + "/db";
+        ASSERT_EQ(mkdir(db_dir_.c_str(), 0775), 0);
+        db_path_ = db_dir_ + "/ss_sdk_loc_59329300_18068600.db";
+        ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
+        ASSERT_EQ(
+            setenv(
+                "SUNSPOTS_SYSTEM",
+                "{\"location\":{\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
+                1),
+            0);
     }
 
     void TearDown() override
     {
         ss_sdk_shutdown();
         remove_file_if_exists(db_path_);
+        remove_dir_if_exists(db_dir_);
         remove_dir_if_exists(dir_);
     }
 
-    ScopedEnvVar db_path_guard_;
+    ScopedEnvVar db_dir_guard_;
+    ScopedEnvVar system_guard_;
     ScopedEnvVar sdk_log_level_guard_;
     ScopedEnvVar sdk_log_mirror_enabled_guard_;
     ScopedEnvVar sdk_log_mirror_path_guard_;
     std::string dir_;
+    std::string db_dir_;
     std::string db_path_;
 };
 
@@ -762,7 +774,7 @@ TEST_F(SdkDbFixture, get_canonical_resets_out_on_error_paths)
     EXPECT_EQ(out.count, (size_t)0);
 }
 
-TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
+TEST_F(SdkDbFixture, switch_db_dir_uses_new_database)
 {
     const int64_t slot = now_slot_utc() - 900;
     ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_WIND_SPEED_10M_MS, 4.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
@@ -772,8 +784,9 @@ TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
     ASSERT_EQ(out_first.count, (size_t)1);
     ss_sdk_db_free_samples(&out_first);
 
-    const std::string path_two = dir_ + "/sdk_two.db";
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", path_two.c_str(), 1), 0);
+    const std::string dir_two = dir_ + "/db_two";
+    ASSERT_EQ(mkdir(dir_two.c_str(), 0775), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", dir_two.c_str(), 1), 0);
 
     ss_sdk_samples_out out_second = {NULL, 0};
     ASSERT_EQ(
@@ -782,7 +795,8 @@ TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
     EXPECT_EQ(out_second.samples, (ss_sdk_sample *)NULL);
     EXPECT_EQ(out_second.count, (size_t)0);
 
-    remove_file_if_exists(path_two);
+    remove_file_if_exists(dir_two + "/ss_sdk_loc_59329300_18068600.db");
+    remove_dir_if_exists(dir_two);
 }
 
 TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_write)
@@ -821,7 +835,7 @@ TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_read)
 }
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
-TEST_F(SdkDbFixture, test_helpers_cover_default_path_and_argument_guards)
+TEST_F(SdkDbFixture, test_helpers_cover_path_argument_guards)
 {
     ASSERT_EQ(ss_sdk_internal_db_test_ensure_parent_dirs(NULL), -1);
     EXPECT_EQ(errno, EINVAL);
@@ -830,10 +844,7 @@ TEST_F(SdkDbFixture, test_helpers_cover_default_path_and_argument_guards)
 
     ASSERT_EQ(ss_sdk_internal_db_test_strdup_local(NULL), (char *)NULL);
 
-    ScopedCwd cwd(dir_);
-    ASSERT_TRUE(cwd.ok());
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", "", 1), 0);
-    EXPECT_STREQ(ss_sdk_internal_db_test_db_path(), "db/ss_sdk.db");
+    EXPECT_STREQ(ss_sdk_internal_db_test_db_path(), db_path_.c_str());
 }
 
 TEST_F(SdkDbFixture, test_hooks_force_internal_error_paths)
@@ -991,11 +1002,11 @@ TEST_F(SdkDbFixture, db_open_error_variants_cover_pragmas_schema_strdup_and_open
         SS_SDK_ERR_INTERNAL);
 
     ss_sdk_shutdown();
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", "/", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", "/", 1), 0);
     EXPECT_EQ(
         write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 3.0, slot + 9000, SS_SDK_DATA_OBSERVATION),
         SS_SDK_ERR_INTERNAL);
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", db_path_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
 }
 
 TEST_F(SdkDbFixture, internal_exec_and_parent_dir_failures_are_exercised)

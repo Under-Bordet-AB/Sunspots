@@ -12,6 +12,7 @@
 #include "../fetch/fetch_utils.h"
 #include "../libs/json/cJSON.h"
 #include "../sdk/ss_sdk.h"
+#include "../sdk/internal/ss_sdk_config_util.h"
 
 #define SLOT_SECONDS 900
 #define MAX_READ_SLOTS 672
@@ -35,6 +36,9 @@ typedef struct {
     int max_requests_per_day;
     double latitude;
     double longitude;
+    int has_system_location;
+    char location_name[64];
+    char elprisomrade[16];
     char mode[16];
     char endpoint[MAX_URL_LEN];
 } backfill_config;
@@ -59,6 +63,37 @@ typedef struct {
     int day_count;
 } rate_limiter;
 
+typedef struct {
+    cJSON *times;
+    cJSON *temp;
+    cJSON *cloud;
+    cJSON *rad;
+} archive_hourly_arrays;
+
+typedef struct {
+    cJSON *array;
+    int index;
+    ss_metric_id metric;
+    int64_t ts_utc;
+    size_t *writes;
+} metric_write_ctx;
+
+typedef struct {
+    int64_t win_start;
+    int64_t win_end;
+    uint16_t quarters;
+    const ss_sdk_samples_out *samples;
+    bool **out_present;
+} present_mark_ctx;
+
+typedef struct {
+    const char *key;
+    int min_v;
+    int *field;
+} cfg_int_binding;
+
+static int write_f64_metric(ss_metric_id metric, int64_t ts_utc, double v);
+
 static int64_t now_utc(void)
 {
     return (int64_t)time(NULL);
@@ -78,6 +113,26 @@ static int clamp_min_int(int v, int min_v, int fallback)
         return fallback;
     }
     return v;
+}
+
+static void copy_string_safe(char *dst, size_t dst_sz, const char *src)
+{
+    int n;
+    if (dst == NULL || dst_sz == 0U) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    n = snprintf(dst, dst_sz, "%s", src);
+    if (n < 0) {
+        dst[0] = '\0';
+        return;
+    }
+    if ((size_t)n >= dst_sz) {
+        dst[dst_sz - 1U] = '\0';
+    }
 }
 
 static void sleep_ms(int ms)
@@ -191,148 +246,226 @@ static void backfill_config_defaults(backfill_config *cfg)
     cfg->max_requests_per_minute = 240;
     cfg->max_requests_per_hour = 2000;
     cfg->max_requests_per_day = 8000;
-    cfg->latitude = 52.52;
-    cfg->longitude = 13.41;
-    snprintf(cfg->mode, sizeof(cfg->mode), "%s", "oneshot");
-    snprintf(cfg->endpoint, sizeof(cfg->endpoint), "%s", "https://archive-api.open-meteo.com/v1/archive");
+    cfg->latitude = 0.0;
+    cfg->longitude = 0.0;
+    cfg->has_system_location = 0;
+    cfg->location_name[0] = '\0';
+    cfg->elprisomrade[0] = '\0';
+    copy_string_safe(cfg->mode, sizeof(cfg->mode), "oneshot");
+    copy_string_safe(cfg->endpoint, sizeof(cfg->endpoint), "https://archive-api.open-meteo.com/v1/archive");
+}
+
+static void backfill_config_apply_system_location(backfill_config *cfg)
+{
+    ss_sdk_cfg_location location;
+    ss_sdk_cfg_status status;
+
+    if (cfg == NULL) {
+        return;
+    }
+
+    status = ss_sdk_cfg_get_location_from_system_env(&location);
+    if (status != SS_SDK_CFG_OK) {
+        return;
+    }
+
+    cfg->latitude = location.latitude;
+    cfg->longitude = location.longitude;
+    cfg->has_system_location = 1;
+    if (location.name[0] != '\0') {
+        copy_string_safe(cfg->location_name, sizeof(cfg->location_name), location.name);
+    }
+    if (location.elprisomrade[0] != '\0') {
+        copy_string_safe(cfg->elprisomrade, sizeof(cfg->elprisomrade), location.elprisomrade);
+    }
+}
+
+static int backfill_cfg_path(char *out, size_t out_sz, const char *key, int with_backfill_prefix)
+{
+    int n;
+    if (out == NULL || out_sz == 0U || key == NULL || key[0] == '\0') {
+        return -1;
+    }
+    if (with_backfill_prefix) {
+        n = snprintf(out, out_sz, "backfill.%s", key);
+    } else {
+        n = snprintf(out, out_sz, "%s", key);
+    }
+    if (n <= 0 || (size_t)n >= out_sz) {
+        return -1;
+    }
+    return 0;
+}
+
+static int backfill_cfg_try_get_bool(const char *key, int *out_bool)
+{
+    char path[64];
+    if (out_bool == NULL || key == NULL) {
+        return 0;
+    }
+
+    if (backfill_cfg_path(path, sizeof(path), key, 1) == 0 &&
+        ss_sdk_cfg_get_bool_from_env_json("SUNSPOTS_CONFIG", path, out_bool) == SS_SDK_CFG_OK) {
+        return 1;
+    }
+    if (backfill_cfg_path(path, sizeof(path), key, 0) == 0 &&
+        ss_sdk_cfg_get_bool_from_env_json("SUNSPOTS_CONFIG", path, out_bool) == SS_SDK_CFG_OK) {
+        return 1;
+    }
+    return 0;
+}
+
+static int backfill_cfg_try_get_int(const char *key, int *out_int)
+{
+    char path[64];
+    if (out_int == NULL || key == NULL) {
+        return 0;
+    }
+
+    if (backfill_cfg_path(path, sizeof(path), key, 1) == 0 &&
+        ss_sdk_cfg_get_int_from_env_json("SUNSPOTS_CONFIG", path, INT_MIN, INT_MAX, out_int) == SS_SDK_CFG_OK) {
+        return 1;
+    }
+    if (backfill_cfg_path(path, sizeof(path), key, 0) == 0 &&
+        ss_sdk_cfg_get_int_from_env_json("SUNSPOTS_CONFIG", path, INT_MIN, INT_MAX, out_int) == SS_SDK_CFG_OK) {
+        return 1;
+    }
+    return 0;
+}
+
+static int backfill_cfg_try_get_string(const char *key, char *out, size_t out_sz)
+{
+    char path[64];
+    if (out == NULL || out_sz == 0U || key == NULL) {
+        return 0;
+    }
+
+    if (backfill_cfg_path(path, sizeof(path), key, 1) == 0 &&
+        ss_sdk_cfg_get_string_from_env_json("SUNSPOTS_CONFIG", path, out, out_sz) == SS_SDK_CFG_OK) {
+        return 1;
+    }
+    if (backfill_cfg_path(path, sizeof(path), key, 0) == 0 &&
+        ss_sdk_cfg_get_string_from_env_json("SUNSPOTS_CONFIG", path, out, out_sz) == SS_SDK_CFG_OK) {
+        return 1;
+    }
+    return 0;
+}
+
+static void backfill_cfg_apply_int(const char *key, int min_v, int *field)
+{
+    int value = 0;
+    if (key == NULL || field == NULL) {
+        return;
+    }
+    if (backfill_cfg_try_get_int(key, &value)) {
+        *field = clamp_min_int(value, min_v, *field);
+    }
 }
 
 static void backfill_config_parse(backfill_config *cfg)
 {
-    const char *blob;
-    cJSON *root = NULL;
-    cJSON *bf = NULL;
-    cJSON *item;
+    int value = 0;
+    cfg_int_binding int_bindings[] = {
+        {"required_history_days", 1, &cfg->required_history_days},
+        {"chunk_days", 1, &cfg->chunk_days},
+        {"retry_max_attempts", 1, &cfg->retry_max_attempts},
+        {"retry_base_backoff_ms", 100, &cfg->retry_base_backoff_ms},
+        {"progress_log_interval_sec", 1, &cfg->progress_log_interval_sec},
+        {"daily_hole_check_interval_sec", 60, &cfg->daily_hole_check_interval_sec},
+        {"freshness_lag_minutes", 0, &cfg->freshness_lag_minutes},
+        {"request_interval_ms", 50, &cfg->request_interval_ms},
+        {"max_requests_per_minute", 1, &cfg->max_requests_per_minute},
+        {"max_requests_per_hour", 1, &cfg->max_requests_per_hour},
+        {"max_requests_per_day", 1, &cfg->max_requests_per_day},
+    };
+    size_t i;
 
     backfill_config_defaults(cfg);
 
-    blob = getenv("SUNSPOTS_CONFIG");
-    if (blob == NULL || blob[0] == '\0') {
-        return;
+    if (backfill_cfg_try_get_bool("enabled", &value)) {
+        cfg->enabled = value ? 1 : 0;
     }
 
-    root = cJSON_Parse(blob);
-    if (root == NULL) {
-        return;
-    }
-
-    bf = cJSON_GetObjectItemCaseSensitive(root, "backfill");
-    if (!cJSON_IsObject(bf)) {
-        bf = root;
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "enabled");
-    if (cJSON_IsBool(item)) {
-        cfg->enabled = cJSON_IsTrue(item) ? 1 : 0;
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "required_history_days");
-    if (cJSON_IsNumber(item)) {
-        cfg->required_history_days = clamp_min_int(item->valueint, 1, cfg->required_history_days);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "chunk_days");
-    if (cJSON_IsNumber(item)) {
-        cfg->chunk_days = clamp_min_int(item->valueint, 1, cfg->chunk_days);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "retry_max_attempts");
-    if (cJSON_IsNumber(item)) {
-        cfg->retry_max_attempts = clamp_min_int(item->valueint, 1, cfg->retry_max_attempts);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "retry_base_backoff_ms");
-    if (cJSON_IsNumber(item)) {
-        cfg->retry_base_backoff_ms = clamp_min_int(item->valueint, 100, cfg->retry_base_backoff_ms);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "progress_log_interval_sec");
-    if (cJSON_IsNumber(item)) {
-        cfg->progress_log_interval_sec = clamp_min_int(item->valueint, 1, cfg->progress_log_interval_sec);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "daily_hole_check_interval_sec");
-    if (cJSON_IsNumber(item)) {
-        cfg->daily_hole_check_interval_sec = clamp_min_int(item->valueint, 60, cfg->daily_hole_check_interval_sec);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "freshness_lag_minutes");
-    if (cJSON_IsNumber(item)) {
-        cfg->freshness_lag_minutes = clamp_min_int(item->valueint, 0, cfg->freshness_lag_minutes);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "request_interval_ms");
-    if (cJSON_IsNumber(item)) {
-        cfg->request_interval_ms = clamp_min_int(item->valueint, 50, cfg->request_interval_ms);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(bf, "max_requests_per_minute");
-    if (cJSON_IsNumber(item)) {
-        cfg->max_requests_per_minute = clamp_min_int(item->valueint, 1, cfg->max_requests_per_minute);
+    for (i = 0U; i < sizeof(int_bindings) / sizeof(int_bindings[0]); ++i) {
+        backfill_cfg_apply_int(int_bindings[i].key, int_bindings[i].min_v, int_bindings[i].field);
     }
     if (cfg->max_requests_per_minute > OPENMETEO_LIMIT_PER_MIN) {
         cfg->max_requests_per_minute = OPENMETEO_LIMIT_PER_MIN;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(bf, "max_requests_per_hour");
-    if (cJSON_IsNumber(item)) {
-        cfg->max_requests_per_hour = clamp_min_int(item->valueint, 1, cfg->max_requests_per_hour);
-    }
     if (cfg->max_requests_per_hour > OPENMETEO_LIMIT_PER_HOUR) {
         cfg->max_requests_per_hour = OPENMETEO_LIMIT_PER_HOUR;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(bf, "max_requests_per_day");
-    if (cJSON_IsNumber(item)) {
-        cfg->max_requests_per_day = clamp_min_int(item->valueint, 1, cfg->max_requests_per_day);
-    }
     if (cfg->max_requests_per_day > OPENMETEO_LIMIT_PER_DAY) {
         cfg->max_requests_per_day = OPENMETEO_LIMIT_PER_DAY;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(bf, "latitude");
-    if (cJSON_IsNumber(item)) {
-        cfg->latitude = item->valuedouble;
+    (void)backfill_cfg_try_get_string("mode", cfg->mode, sizeof(cfg->mode));
+    (void)backfill_cfg_try_get_string("endpoint", cfg->endpoint, sizeof(cfg->endpoint));
+    backfill_config_apply_system_location(cfg);
+}
+
+static int archive_extract_arrays(cJSON *root, archive_hourly_arrays *arrays)
+{
+    cJSON *hourly = NULL;
+    if (root == NULL || arrays == NULL) {
+        return -1;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(bf, "longitude");
-    if (cJSON_IsNumber(item)) {
-        cfg->longitude = item->valuedouble;
+    memset(arrays, 0, sizeof(*arrays));
+    hourly = cJSON_GetObjectItemCaseSensitive(root, "hourly");
+    if (!cJSON_IsObject(hourly)) {
+        return -1;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(bf, "mode");
-    if (cJSON_IsString(item) && item->valuestring != NULL) {
-        snprintf(cfg->mode, sizeof(cfg->mode), "%s", item->valuestring);
+    arrays->times = cJSON_GetObjectItemCaseSensitive(hourly, "time");
+    arrays->temp = cJSON_GetObjectItemCaseSensitive(hourly, "temperature_2m");
+    arrays->cloud = cJSON_GetObjectItemCaseSensitive(hourly, "cloud_cover");
+    arrays->rad = cJSON_GetObjectItemCaseSensitive(hourly, "shortwave_radiation");
+    if (!cJSON_IsArray(arrays->times)) {
+        return -1;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(bf, "endpoint");
-    if (cJSON_IsString(item) && item->valuestring != NULL) {
-        snprintf(cfg->endpoint, sizeof(cfg->endpoint), "%s", item->valuestring);
-    }
+    return 0;
+}
 
-    cJSON_Delete(root);
+static void write_metric_from_array(const metric_write_ctx *ctx)
+{
+    cJSON *v = NULL;
+    if (ctx == NULL || ctx->array == NULL || ctx->writes == NULL || !cJSON_IsArray(ctx->array)) {
+        return;
+    }
+    v = cJSON_GetArrayItem(ctx->array, ctx->index);
+    if (cJSON_IsNumber(v) && write_f64_metric(ctx->metric, ctx->ts_utc, v->valuedouble) == 0) {
+        *ctx->writes += 1U;
+    }
 }
 
 static void log_cfg(const backfill_config *cfg)
 {
-    char msg[256];
-    snprintf(msg,
-             sizeof(msg),
-             "enabled=%d mode=%s history_days=%d chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s",
-             cfg->enabled,
-             cfg->mode,
-             cfg->required_history_days,
-             cfg->chunk_days,
-             cfg->retry_max_attempts,
-             cfg->retry_base_backoff_ms,
-             cfg->freshness_lag_minutes,
-             cfg->request_interval_ms,
-             cfg->max_requests_per_minute,
-             cfg->max_requests_per_hour,
-             cfg->max_requests_per_day,
-             cfg->latitude,
-             cfg->longitude,
-             cfg->endpoint);
+    char msg[384];
+    if (snprintf(msg,
+                 sizeof(msg),
+                 "enabled=%d mode=%s location=%s area=%s history_days=%d chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s",
+                 cfg->enabled,
+                 cfg->mode,
+                 cfg->location_name,
+                 cfg->elprisomrade,
+                 cfg->required_history_days,
+                 cfg->chunk_days,
+                 cfg->retry_max_attempts,
+                 cfg->retry_base_backoff_ms,
+                 cfg->freshness_lag_minutes,
+                 cfg->request_interval_ms,
+                 cfg->max_requests_per_minute,
+                 cfg->max_requests_per_hour,
+                 cfg->max_requests_per_day,
+                 cfg->latitude,
+                 cfg->longitude,
+                 cfg->endpoint) < 0) {
+        copy_string_safe(msg, sizeof(msg), "config logging failed");
+    }
     (void)SS_LOG_INFO("backfill.config", msg);
 }
 
@@ -355,17 +488,8 @@ static int compute_wait_seconds(int64_t now_utc, bool hit_minute, bool hit_hour,
     int wait_sec = 0;
 
     sec_to_minute = 60 - (int)(now_utc % 60);
-    if (sec_to_minute <= 0) {
-        sec_to_minute = 1;
-    }
     sec_to_hour = 3600 - (int)(now_utc % 3600);
-    if (sec_to_hour <= 0) {
-        sec_to_hour = 1;
-    }
     sec_to_day = 86400 - (int)(now_utc % 86400);
-    if (sec_to_day <= 0) {
-        sec_to_day = 1;
-    }
 
     if (hit_minute) {
         wait_sec = sec_to_minute;
@@ -417,7 +541,9 @@ static void rate_limiter_maybe_wait(rate_limiter *rl, const backfill_config *cfg
         }
 
         wait_sec = compute_wait_seconds(nowv, hit_minute, hit_hour, hit_day);
-        snprintf(msg, sizeof(msg), "throttling wait=%ds", wait_sec);
+        if (snprintf(msg, sizeof(msg), "throttling wait=%ds", wait_sec) < 0) {
+            copy_string_safe(msg, sizeof(msg), "throttling wait");
+        }
         (void)SS_LOG_WARN("backfill.rate_limit_wait", msg);
         sleep_ms(wait_sec * 1000);
     }
@@ -426,7 +552,6 @@ static void rate_limiter_maybe_wait(rate_limiter *rl, const backfill_config *cfg
 static int fetch_json_with_retry(const char *url, int max_attempts, int base_backoff_ms, char **out_buf)
 {
     int attempt;
-    int wait_ms;
     char msg[256];
     int rc = -1;
 
@@ -442,8 +567,10 @@ static int fetch_json_with_retry(const char *url, int max_attempts, int base_bac
             return 0;
         }
         free(buf);
-        wait_ms = base_backoff_ms * attempt;
-        snprintf(msg, sizeof(msg), "attempt=%d/%d fetch failed, sleeping %dms", attempt, max_attempts, wait_ms);
+        int wait_ms = base_backoff_ms * attempt;
+        if (snprintf(msg, sizeof(msg), "attempt=%d/%d fetch failed, sleeping %dms", attempt, max_attempts, wait_ms) < 0) {
+            copy_string_safe(msg, sizeof(msg), "fetch retry");
+        }
         (void)SS_LOG_WARN("backfill.fetch_retry", msg);
         sleep_ms(wait_ms);
         rc = -1;
@@ -466,11 +593,7 @@ static int write_f64_metric(ss_metric_id metric, int64_t ts_utc, double v)
 static int write_archive_payload(const char *json_text, size_t *out_writes)
 {
     cJSON *root = NULL;
-    cJSON *hourly = NULL;
-    cJSON *times = NULL;
-    cJSON *temp = NULL;
-    cJSON *cloud = NULL;
-    cJSON *rad = NULL;
+    archive_hourly_arrays arrays;
     int len = 0;
     int i;
     size_t writes = 0U;
@@ -484,24 +607,14 @@ static int write_archive_payload(const char *json_text, size_t *out_writes)
         return -1;
     }
 
-    hourly = cJSON_GetObjectItemCaseSensitive(root, "hourly");
-    if (!cJSON_IsObject(hourly)) {
+    if (archive_extract_arrays(root, &arrays) != 0) {
         cJSON_Delete(root);
         return -1;
     }
 
-    times = cJSON_GetObjectItemCaseSensitive(hourly, "time");
-    temp = cJSON_GetObjectItemCaseSensitive(hourly, "temperature_2m");
-    cloud = cJSON_GetObjectItemCaseSensitive(hourly, "cloud_cover");
-    rad = cJSON_GetObjectItemCaseSensitive(hourly, "shortwave_radiation");
-    if (!cJSON_IsArray(times)) {
-        cJSON_Delete(root);
-        return -1;
-    }
-
-    len = cJSON_GetArraySize(times);
+    len = cJSON_GetArraySize(arrays.times);
     for (i = 0; i < len; ++i) {
-        cJSON *jt = cJSON_GetArrayItem(times, i);
+        cJSON *jt = cJSON_GetArrayItem(arrays.times, i);
         int64_t ts_utc;
 
         if (!cJSON_IsString(jt) || jt->valuestring == NULL) {
@@ -511,24 +624,13 @@ static int write_archive_payload(const char *json_text, size_t *out_writes)
             continue;
         }
 
-        if (cJSON_IsArray(temp)) {
-            cJSON *v = cJSON_GetArrayItem(temp, i);
-            if (cJSON_IsNumber(v) && write_f64_metric(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, ts_utc, v->valuedouble) == 0) {
-                writes += 1U;
-            }
-        }
-        if (cJSON_IsArray(cloud)) {
-            cJSON *v = cJSON_GetArrayItem(cloud, i);
-            if (cJSON_IsNumber(v) && write_f64_metric(SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, ts_utc, v->valuedouble) == 0) {
-                writes += 1U;
-            }
-        }
-        if (cJSON_IsArray(rad)) {
-            cJSON *v = cJSON_GetArrayItem(rad, i);
-            if (cJSON_IsNumber(v) && write_f64_metric(SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, ts_utc, v->valuedouble) == 0) {
-                writes += 1U;
-            }
-        }
+        metric_write_ctx write_temp = {arrays.temp, i, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, ts_utc, &writes};
+        metric_write_ctx write_cloud = {arrays.cloud, i, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, ts_utc, &writes};
+        metric_write_ctx write_rad = {arrays.rad, i, SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, ts_utc, &writes};
+
+        write_metric_from_array(&write_temp);
+        write_metric_from_array(&write_cloud);
+        write_metric_from_array(&write_rad);
     }
 
     cJSON_Delete(root);
@@ -574,25 +676,97 @@ static int build_archive_url(char out_url[MAX_URL_LEN], const backfill_config *c
     return 0;
 }
 
+static int detect_holes_window_end(int64_t win_start, int64_t end_utc, int64_t *out_end, uint16_t *out_quarters)
+{
+    int64_t win_end;
+    int64_t span_slots;
+    if (out_end == NULL || out_quarters == NULL) {
+        return -1;
+    }
+
+    win_end = win_start + ((int64_t)MAX_READ_SLOTS * SLOT_SECONDS);
+    if (win_end > end_utc) {
+        win_end = end_utc;
+    }
+
+    span_slots = (win_end - win_start) / SLOT_SECONDS;
+    if (span_slots <= 0 || span_slots > UINT16_MAX) {
+        return -1;
+    }
+
+    *out_end = win_end;
+    *out_quarters = (uint16_t)span_slots;
+    return 0;
+}
+
+static int mark_present_slots(const present_mark_ctx *ctx)
+{
+    bool *present = NULL;
+    size_t i;
+
+    if (ctx == NULL || ctx->samples == NULL || ctx->out_present == NULL) {
+        return -1;
+    }
+
+    present = (bool *)calloc((size_t)ctx->quarters, sizeof(bool));
+    if (present == NULL) {
+        return -1;
+    }
+
+    for (i = 0U; i < ctx->samples->count; ++i) {
+        int64_t ts = ctx->samples->samples[i].ts_utc;
+        if (ts >= ctx->win_start && ts < ctx->win_end) {
+            size_t idx = (size_t)((ts - ctx->win_start) / SLOT_SECONDS);
+            if (idx < (size_t)ctx->quarters) {
+                present[idx] = true;
+            }
+        }
+    }
+
+    *ctx->out_present = present;
+    return 0;
+}
+
+static int push_missing_ranges(int64_t win_start, uint16_t quarters, const bool *present, hole_list *holes)
+{
+    size_t i = 0U;
+
+    if (present == NULL || holes == NULL) {
+        return -1;
+    }
+
+    while (i < (size_t)quarters) {
+        if (!present[i]) {
+            size_t miss_start = i;
+            while (i < (size_t)quarters && !present[i]) {
+                i += 1U;
+            }
+            if (!hole_list_push_merge(
+                    holes,
+                    win_start + ((int64_t)miss_start * SLOT_SECONDS),
+                    win_start + ((int64_t)i * SLOT_SECONDS))) {
+                return -1;
+            }
+        } else {
+            i += 1U;
+        }
+    }
+
+    return 0;
+}
+
 static int detect_holes_for_metric(ss_metric_id metric, int64_t start_utc, int64_t end_utc, hole_list *holes)
 {
     int64_t win_start = start_utc;
     while (win_start < end_utc) {
-        int64_t win_end;
-        int64_t span_slots;
+        int64_t win_end = 0;
         uint16_t quarters;
         ss_sdk_samples_out out = {0};
         bool *present = NULL;
-        size_t i;
+        present_mark_ctx mark_ctx;
         ss_sdk_status st;
 
-        win_end = win_start + ((int64_t)MAX_READ_SLOTS * SLOT_SECONDS);
-        if (win_end > end_utc) {
-            win_end = end_utc;
-        }
-        span_slots = (win_end - win_start) / SLOT_SECONDS;
-        quarters = (uint16_t)span_slots;
-        if (quarters == 0U) {
+        if (detect_holes_window_end(win_start, end_utc, &win_end, &quarters) != 0) {
             break;
         }
 
@@ -602,40 +776,20 @@ static int detect_holes_for_metric(ss_metric_id metric, int64_t start_utc, int64
             return -1;
         }
 
-        present = (bool *)calloc((size_t)quarters, sizeof(bool));
-        if (present == NULL) {
+        mark_ctx.win_start = win_start;
+        mark_ctx.win_end = win_end;
+        mark_ctx.quarters = quarters;
+        mark_ctx.samples = &out;
+        mark_ctx.out_present = &present;
+        if (mark_present_slots(&mark_ctx) != 0) {
             ss_sdk_db_free_samples(&out);
             return -1;
         }
 
-        for (i = 0U; i < out.count; ++i) {
-            int64_t ts = out.samples[i].ts_utc;
-            if (ts >= win_start && ts < win_end) {
-                size_t idx = (size_t)((ts - win_start) / SLOT_SECONDS);
-                if (idx < (size_t)quarters) {
-                    present[idx] = true;
-                }
-            }
-        }
-
-        i = 0U;
-        while (i < (size_t)quarters) {
-            if (!present[i]) {
-                size_t miss_start = i;
-                while (i < (size_t)quarters && !present[i]) {
-                    i += 1U;
-                }
-                if (!hole_list_push_merge(
-                        holes,
-                        win_start + ((int64_t)miss_start * SLOT_SECONDS),
-                        win_start + ((int64_t)i * SLOT_SECONDS))) {
-                    free(present);
-                    ss_sdk_db_free_samples(&out);
-                    return -1;
-                }
-            } else {
-                i += 1U;
-            }
+        if (push_missing_ranges(win_start, quarters, present, holes) != 0) {
+            free(present);
+            ss_sdk_db_free_samples(&out);
+            return -1;
         }
 
         free(present);
@@ -705,7 +859,9 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
             part_start = next_end;
 
             if ((int)(time(NULL) - last_progress) >= cfg->progress_log_interval_sec) {
-                snprintf(msg, sizeof(msg), "progress hole=%zu/%zu records_written=%zu", i + 1U, holes->count, records_written);
+                if (snprintf(msg, sizeof(msg), "progress hole=%zu/%zu records_written=%zu", i + 1U, holes->count, records_written) < 0) {
+                    copy_string_safe(msg, sizeof(msg), "backfill progress");
+                }
                 (void)SS_LOG_INFO("backfill.progress", msg);
                 last_progress = time(NULL);
             }
@@ -740,7 +896,9 @@ static int run_backfill_once(const backfill_config *cfg)
         return 1;
     }
 
-    snprintf(msg, sizeof(msg), "window_start=%" PRId64 " window_end=%" PRId64 " holes_before=%zu", start_utc, end_utc, before.count);
+    if (snprintf(msg, sizeof(msg), "window_start=%" PRId64 " window_end=%" PRId64 " holes_before=%zu", start_utc, end_utc, before.count) < 0) {
+        copy_string_safe(msg, sizeof(msg), "backfill analyze");
+    }
     (void)SS_LOG_INFO("backfill.analyze", msg);
 
     if (before.count > 0U) {
@@ -758,16 +916,17 @@ static int run_backfill_once(const backfill_config *cfg)
         return 1;
     }
 
-    snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu", records_written, after.count);
+    if (snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu", records_written, after.count) < 0) {
+        copy_string_safe(msg, sizeof(msg), "backfill verify");
+    }
     if (after.count == 0U) {
         (void)SS_LOG_INFO("backfill.complete", msg);
         hole_list_free(&after);
         return 0;
-    } else {
-        (void)SS_LOG_WARN("backfill.partial", msg);
-        hole_list_free(&after);
-        return 1;
     }
+    (void)SS_LOG_WARN("backfill.partial", msg);
+    hole_list_free(&after);
+    return 1;
 }
 
 int main(void)
@@ -781,6 +940,12 @@ int main(void)
         (void)SS_LOG_INFO("backfill.disabled", "backfill disabled by config");
         ss_sdk_shutdown();
         return EXIT_SUCCESS;
+    }
+
+    if (!cfg.has_system_location) {
+        (void)SS_LOG_ERROR("backfill.config.invalid_location", "missing system.location latitude/longitude");
+        ss_sdk_shutdown();
+        return EXIT_FAILURE;
     }
 
     if (strcmp(cfg.mode, "maintenance") == 0) {

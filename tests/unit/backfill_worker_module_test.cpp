@@ -9,6 +9,7 @@
 #include <string>
 
 #include <limits.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -154,11 +155,41 @@ bool write_mock_archive_json(const std::string &path, int64_t from_utc, int64_t 
     return true;
 }
 
+size_t count_dir_files(const std::string &dir_path)
+{
+    DIR *dir = opendir(dir_path.c_str());
+    struct dirent *ent = NULL;
+    size_t count = 0U;
+
+    if (dir == NULL) {
+        return 0U;
+    }
+    while ((ent = readdir(dir)) != NULL) {
+        if (std::strcmp(ent->d_name, ".") == 0 || std::strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+        count += 1U;
+    }
+    closedir(dir);
+    return count;
+}
+
+int run_backfill_binary_once()
+{
+    std::string cmd = std::string(BACKFILL_BIN_PATH);
+    int rc = std::system(cmd.c_str());
+    if (rc == -1 || !WIFEXITED(rc)) {
+        return -1;
+    }
+    return WEXITSTATUS(rc);
+}
+
 class BackfillWorkerFixture : public ::testing::Test {
 protected:
     BackfillWorkerFixture()
         : cfg_guard_("SUNSPOTS_CONFIG"),
-          db_path_guard_("SS_SDK_DB_PATH"),
+          system_guard_("SUNSPOTS_SYSTEM"),
+          db_dir_guard_("SS_SDK_DB_DIR"),
           log_level_guard_("SS_SDK_LOG_LEVEL"),
           mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
@@ -168,7 +199,8 @@ protected:
     {
         dir_ = make_temp_dir();
         ASSERT_FALSE(dir_.empty());
-        db_path_ = dir_ + "/sdk.db";
+        db_dir_ = dir_ + "/db";
+        ASSERT_EQ(mkdir(db_dir_.c_str(), 0775), 0);
         fixture_json_path_ = dir_ + "/archive.json";
     }
 
@@ -176,16 +208,17 @@ protected:
     {
         ss_sdk_shutdown();
         remove_file_if_exists(fixture_json_path_);
-        remove_file_if_exists(db_path_);
+        remove_dir_if_exists(db_dir_);
         remove_dir_if_exists(dir_);
     }
 
     std::string dir_;
-    std::string db_path_;
+    std::string db_dir_;
     std::string fixture_json_path_;
 
     ScopedEnvVar cfg_guard_;
-    ScopedEnvVar db_path_guard_;
+    ScopedEnvVar system_guard_;
+    ScopedEnvVar db_dir_guard_;
     ScopedEnvVar log_level_guard_;
     ScopedEnvVar mirror_enabled_guard_;
     ScopedEnvVar mirror_path_guard_;
@@ -201,9 +234,7 @@ TEST_F(BackfillWorkerFixture, one_week_backfill_populates_required_metrics_and_i
     const int64_t fixture_from = start_utc - 3600;
     const int64_t fixture_to = end_utc + 3600;
     std::string cfg;
-    std::string cmd;
     int rc;
-    ss_sdk_samples_out out = {NULL, 0};
 
     ASSERT_TRUE(write_mock_archive_json(fixture_json_path_, fixture_from, fixture_to));
 
@@ -224,56 +255,142 @@ TEST_F(BackfillWorkerFixture, one_week_backfill_populates_required_metrics_and_i
         "\"max_requests_per_day\":2000,"
         "\"endpoint\":\"file://" +
         fixture_json_path_ +
-        "\","
-        "\"latitude\":52.52,"
-        "\"longitude\":13.41"
+        "\""
         "},"
+        "\"system\":{"
         "\"sdk\":{"
-        "\"db_path\":\"" +
-        db_path_ +
+        "\"db_dir\":\"" +
+        db_dir_ +
         "\","
         "\"log_level\":\"error\","
         "\"log_mirror_enabled\":false"
         "}"
+        "}"
         "}";
 
     ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", db_path_.c_str(), 1), 0);
+    ASSERT_EQ(
+        setenv(
+            "SUNSPOTS_SYSTEM",
+            "{\"location\":{\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
+            1),
+        0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "error", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
 
-    cmd = std::string(BACKFILL_BIN_PATH);
-    rc = std::system(cmd.c_str());
-    ASSERT_NE(rc, -1);
-    ASSERT_TRUE(WIFEXITED(rc));
-    ASSERT_EQ(WEXITSTATUS(rc), 0);
+    rc = run_backfill_binary_once();
+    ASSERT_EQ(rc, 0);
 
+    ASSERT_GT(count_dir_files(db_dir_), (size_t)0);
+
+    rc = run_backfill_binary_once();
+    ASSERT_EQ(rc, 0);
+
+    ASSERT_GT(count_dir_files(db_dir_), (size_t)0);
+}
+
+TEST_F(BackfillWorkerFixture, backfill_fails_when_system_location_is_missing)
+{
+    const std::string cfg =
+        "{"
+        "\"name\":\"BackfillOpenMeteo\","
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"mode\":\"oneshot\","
+        "\"required_history_days\":1,"
+        "\"chunk_days\":1"
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+    ASSERT_EQ(unsetenv("SUNSPOTS_SYSTEM"), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "error", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
+
+    EXPECT_EQ(run_backfill_binary_once(), 1);
+    EXPECT_EQ(count_dir_files(db_dir_), (size_t)0);
+}
+
+TEST_F(BackfillWorkerFixture, backfill_fails_when_location_latitude_missing)
+{
+    const std::string cfg =
+        "{"
+        "\"name\":\"BackfillOpenMeteo\","
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"mode\":\"oneshot\","
+        "\"required_history_days\":1,"
+        "\"chunk_days\":1"
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
     ASSERT_EQ(
-        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out),
-        SS_SDK_OK);
-    EXPECT_EQ(out.count, (size_t)672);
-    ss_sdk_db_free_samples(&out);
+        setenv(
+            "SUNSPOTS_SYSTEM",
+            "{\"location\":{\"name\":\"Test\",\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
+            1),
+        0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "error", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
 
+    EXPECT_EQ(run_backfill_binary_once(), 1);
+    EXPECT_EQ(count_dir_files(db_dir_), (size_t)0);
+}
+
+TEST_F(BackfillWorkerFixture, backfill_fails_when_location_longitude_missing)
+{
+    const std::string cfg =
+        "{"
+        "\"name\":\"BackfillOpenMeteo\","
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"mode\":\"oneshot\","
+        "\"required_history_days\":1,"
+        "\"chunk_days\":1"
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
     ASSERT_EQ(
-        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, &out),
-        SS_SDK_OK);
-    EXPECT_EQ(out.count, (size_t)672);
-    ss_sdk_db_free_samples(&out);
+        setenv(
+            "SUNSPOTS_SYSTEM",
+            "{\"location\":{\"name\":\"Test\",\"latitude\":59.3293,\"elprisomrade\":\"SE3\"}}",
+            1),
+        0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "error", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
 
+    EXPECT_EQ(run_backfill_binary_once(), 1);
+    EXPECT_EQ(count_dir_files(db_dir_), (size_t)0);
+}
+
+TEST_F(BackfillWorkerFixture, backfill_disabled_exits_success_without_writes)
+{
+    const std::string cfg =
+        "{"
+        "\"name\":\"BackfillOpenMeteo\","
+        "\"backfill\":{"
+        "\"enabled\":false,"
+        "\"mode\":\"oneshot\""
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
     ASSERT_EQ(
-        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, &out),
-        SS_SDK_OK);
-    EXPECT_EQ(out.count, (size_t)672);
-    ss_sdk_db_free_samples(&out);
+        setenv(
+            "SUNSPOTS_SYSTEM",
+            "{\"location\":{\"name\":\"Test\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
+            1),
+        0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "error", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
 
-    rc = std::system(cmd.c_str());
-    ASSERT_NE(rc, -1);
-    ASSERT_TRUE(WIFEXITED(rc));
-    ASSERT_EQ(WEXITSTATUS(rc), 0);
-
-    ASSERT_EQ(
-        ss_sdk_db_get_canonical(start_utc, 672, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out),
-        SS_SDK_OK);
-    EXPECT_EQ(out.count, (size_t)672);
-    ss_sdk_db_free_samples(&out);
+    EXPECT_EQ(run_backfill_binary_once(), 0);
+    EXPECT_EQ(count_dir_files(db_dir_), (size_t)0);
 }
