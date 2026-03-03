@@ -1,6 +1,7 @@
 #include "sdk/internal/db/ss_db_internal.h"
 #include "sdk/internal/db/ss_db_internal_shared.h"
 #include "sdk/internal/ss_sdk_config.h"
+#include "sdk/internal/ss_sdk_config_util.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -13,6 +14,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 // Lookup table for all SQL queries
@@ -47,6 +49,46 @@ const char *ss_db_sql_text(ss_db_sql_id sql_id)
 static pthread_mutex_t g_db_mu = PTHREAD_MUTEX_INITIALIZER;
 static sqlite3 *g_db = NULL;
 static char *g_db_open_path = NULL;
+
+typedef struct {
+    double latitude;
+    double longitude;
+    long long lat_micro;
+    long long lon_micro;
+    char location_id[96];
+    char nickname[64];
+    char elprisomrade[16];
+} ss_location_ctx;
+
+typedef struct {
+    int has_identity;
+    char location_id[96];
+    long long lat_micro;
+    long long lon_micro;
+} ss_location_identity_row;
+
+typedef struct {
+    int has_meta;
+    char nickname[64];
+    char elprisomrade[16];
+} ss_location_meta_row;
+
+typedef struct {
+    ss_sdk_status status;
+    const char *log_event;
+    const char *log_message;
+} ss_db_write_result;
+
+static ss_sdk_status ss_exec(sqlite3 *db, const char *sql);
+
+static long long ss_coord_to_micro(double v)
+{
+    double scaled = v * 1000000.0;
+    if (scaled >= 0.0) {
+        return (long long)(scaled + 0.5);
+    }
+    return (long long)(scaled - 0.5);
+}
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
 ss_db_test_hooks g_db_test_hooks;
@@ -157,21 +199,266 @@ static void ss_db_debug_log_path(const char *event, const char *path)
     (void)SS_LOG_DEBUG(event, msg);
 }
 
+static int ss_location_ctx_from_system_env(ss_location_ctx *out)
+{
+    ss_sdk_cfg_location location;
+    ss_sdk_cfg_status status;
+
+    if (out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+
+    status = ss_sdk_cfg_get_location_from_system_env(&location);
+    if (status != SS_SDK_CFG_OK) {
+        return -1;
+    }
+
+    out->latitude = location.latitude;
+    out->longitude = location.longitude;
+
+    out->lat_micro = ss_coord_to_micro(out->latitude);
+    out->lon_micro = ss_coord_to_micro(out->longitude);
+    if (snprintf(out->location_id, sizeof(out->location_id), "loc_%lld_%lld", out->lat_micro, out->lon_micro) <= 0) {
+        return -1;
+    }
+    (void)snprintf(out->nickname, sizeof(out->nickname), "%s", location.name);
+    (void)snprintf(out->elprisomrade, sizeof(out->elprisomrade), "%s", location.elprisomrade);
+    return 0;
+}
+
 static const char *ss_db_path(void)
 {
     static int sdk_env_bootstrapped = 0;
+    static char dynamic_path[SS_SDK_PATH_BUFFER_SIZE];
+    ss_location_ctx loc;
+    const char *dir_override;
+    int n = 0;
+
     if (!sdk_env_bootstrapped) {
         ss_sdk_config_bootstrap_env_from_blob();
         sdk_env_bootstrapped = 1;
     }
 
-    // if we have env variable set, read from that instead
-    const char *override = getenv(SS_SDK_ENV_DB_PATH);
-    if (override != NULL && override[0] != '\0') {
-        return override;
+    dir_override = getenv(SS_SDK_ENV_DB_DIR);
+    if (dir_override == NULL || dir_override[0] == '\0') {
+        dir_override = SS_SDK_DB_DEFAULT_DIR;
     }
 
-    return SS_SDK_DB_DEFAULT_PATH;
+    if (ss_location_ctx_from_system_env(&loc) != 0) {
+        return NULL;
+    }
+    n = snprintf(dynamic_path, sizeof(dynamic_path), "%s/%lld_%lld.db", dir_override, loc.lat_micro, loc.lon_micro);
+    if (n <= 0 || (size_t)n >= sizeof(dynamic_path)) {
+        return NULL;
+    }
+    return dynamic_path;
+}
+
+static ss_sdk_status ss_db_ensure_location_meta_schema(sqlite3 *db)
+{
+    static const char *k_meta_schema_sql =
+        "CREATE TABLE IF NOT EXISTS location_identity ("
+        "location_id TEXT PRIMARY KEY,"
+        "latitude REAL NOT NULL,"
+        "longitude REAL NOT NULL,"
+        "created_utc INTEGER NOT NULL"
+        ") STRICT;"
+        "CREATE TABLE IF NOT EXISTS location_meta_history ("
+        "effective_from_utc INTEGER NOT NULL,"
+        "nickname TEXT NOT NULL,"
+        "elprisomrade TEXT NOT NULL"
+        ") STRICT;"
+        "CREATE INDEX IF NOT EXISTS idx_location_meta_history_effective "
+        "ON location_meta_history(effective_from_utc);";
+    return ss_exec(db, k_meta_schema_sql);
+}
+
+static ss_sdk_status ss_db_read_identity_row(sqlite3 *db, ss_location_identity_row *out_row)
+{
+    static const char *k_select_identity_sql =
+        "SELECT location_id, latitude, longitude FROM location_identity LIMIT 1;";
+    sqlite3_stmt *stmt = NULL;
+    int sqlite_result;
+
+    if (db == NULL || out_row == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    memset(out_row, 0, sizeof(*out_row));
+
+    sqlite_result = sqlite3_prepare_v2(db, k_select_identity_sql, -1, &stmt, NULL);
+    if (sqlite_result != SQLITE_OK) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    sqlite_result = sqlite3_step(stmt);
+    if (sqlite_result == SQLITE_ROW) {
+        const unsigned char *id_text = sqlite3_column_text(stmt, 0);
+        double lat = sqlite3_column_double(stmt, 1);
+        double lon = sqlite3_column_double(stmt, 2);
+        if (id_text == NULL) {
+            sqlite3_finalize(stmt);
+            return SS_SDK_ERR_INTERNAL;
+        }
+        (void)snprintf(out_row->location_id, sizeof(out_row->location_id), "%s", (const char *)id_text);
+        out_row->lat_micro = ss_coord_to_micro(lat);
+        out_row->lon_micro = ss_coord_to_micro(lon);
+        out_row->has_identity = 1;
+    } else if (sqlite_result != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    sqlite3_finalize(stmt);
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_db_insert_identity_row(sqlite3 *db, const ss_location_ctx *loc)
+{
+    static const char *k_insert_identity_sql =
+        "INSERT INTO location_identity(location_id, latitude, longitude, created_utc) VALUES(?1, ?2, ?3, ?4);";
+    sqlite3_stmt *stmt = NULL;
+    int sqlite_result;
+
+    if (db == NULL || loc == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    sqlite_result = sqlite3_prepare_v2(db, k_insert_identity_sql, -1, &stmt, NULL);
+    if (sqlite_result != SQLITE_OK) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    sqlite3_bind_text(stmt, 1, loc->location_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 2, loc->latitude);
+    sqlite3_bind_double(stmt, 3, loc->longitude);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)time(NULL));
+    sqlite_result = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (sqlite_result == SQLITE_DONE) ? SS_SDK_OK : SS_SDK_ERR_INTERNAL;
+}
+
+static ss_sdk_status ss_db_validate_or_insert_identity(
+    sqlite3 *db,
+    const ss_location_ctx *loc,
+    const ss_location_identity_row *identity_row)
+{
+    if (db == NULL || loc == NULL || identity_row == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    if (!identity_row->has_identity) {
+        return ss_db_insert_identity_row(db, loc);
+    }
+
+    if (strcmp(identity_row->location_id, loc->location_id) != 0 || identity_row->lat_micro != loc->lat_micro ||
+        identity_row->lon_micro != loc->lon_micro) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_db_read_latest_meta_row(sqlite3 *db, ss_location_meta_row *out_row)
+{
+    static const char *k_select_latest_meta_sql =
+        "SELECT nickname, elprisomrade FROM location_meta_history ORDER BY effective_from_utc DESC LIMIT 1;";
+    sqlite3_stmt *stmt = NULL;
+    int sqlite_result;
+
+    if (db == NULL || out_row == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    memset(out_row, 0, sizeof(*out_row));
+
+    sqlite_result = sqlite3_prepare_v2(db, k_select_latest_meta_sql, -1, &stmt, NULL);
+    if (sqlite_result != SQLITE_OK) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    sqlite_result = sqlite3_step(stmt);
+    if (sqlite_result == SQLITE_ROW) {
+        const unsigned char *nick = sqlite3_column_text(stmt, 0);
+        const unsigned char *area = sqlite3_column_text(stmt, 1);
+        if (nick != NULL) {
+            (void)snprintf(out_row->nickname, sizeof(out_row->nickname), "%s", (const char *)nick);
+        }
+        if (area != NULL) {
+            (void)snprintf(out_row->elprisomrade, sizeof(out_row->elprisomrade), "%s", (const char *)area);
+        }
+        out_row->has_meta = 1;
+    } else if (sqlite_result != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    sqlite3_finalize(stmt);
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_db_insert_meta_row(sqlite3 *db, const ss_location_ctx *loc)
+{
+    static const char *k_insert_meta_sql =
+        "INSERT INTO location_meta_history(effective_from_utc, nickname, elprisomrade) VALUES(?1, ?2, ?3);";
+    sqlite3_stmt *stmt = NULL;
+    int sqlite_result;
+
+    if (db == NULL || loc == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    sqlite_result = sqlite3_prepare_v2(db, k_insert_meta_sql, -1, &stmt, NULL);
+    if (sqlite_result != SQLITE_OK) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)time(NULL));
+    sqlite3_bind_text(stmt, 2, loc->nickname, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, loc->elprisomrade, -1, SQLITE_TRANSIENT);
+    sqlite_result = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (sqlite_result == SQLITE_DONE) ? SS_SDK_OK : SS_SDK_ERR_INTERNAL;
+}
+
+static ss_sdk_status ss_db_append_meta_if_changed(sqlite3 *db, const ss_location_ctx *loc, const ss_location_meta_row *meta_row)
+{
+    if (db == NULL || loc == NULL || meta_row == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    if (!meta_row->has_meta || strcmp(meta_row->nickname, loc->nickname) != 0 ||
+        strcmp(meta_row->elprisomrade, loc->elprisomrade) != 0) {
+        return ss_db_insert_meta_row(db, loc);
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_db_sync_location_metadata(sqlite3 *db)
+{
+    ss_location_ctx loc;
+    ss_location_identity_row identity_row;
+    ss_location_meta_row meta_row;
+    ss_sdk_status status;
+
+    if (ss_location_ctx_from_system_env(&loc) != 0) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    status = ss_db_ensure_location_meta_schema(db);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    status = ss_db_read_identity_row(db, &identity_row);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+    status = ss_db_validate_or_insert_identity(db, &loc, &identity_row);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    status = ss_db_read_latest_meta_row(db, &meta_row);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+    return ss_db_append_meta_if_changed(db, &loc, &meta_row);
 }
 
 // Create missing parent folders. Walks path backwards and creates any missing folders in path.
@@ -323,17 +610,90 @@ static void ss_db_close_locked(void)
     g_db_open_path = NULL;
 }
 
+static ss_sdk_status ss_db_open_sqlite_handle(const char *path, sqlite3 **out_db)
+{
+    int sqlite_result;
+    sqlite3 *opened_db = NULL;
+
+    if (path == NULL || out_db == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    sqlite_result = sqlite3_open_v2(path, &opened_db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (g_db_test_hooks.fail_sqlite_open > 0) {
+        g_db_test_hooks.fail_sqlite_open -= 1;
+        if (g_db_test_hooks.fail_sqlite_open == 0) {
+            sqlite_result = SQLITE_ERROR;
+        }
+    }
+#endif
+    if (sqlite_result != SQLITE_OK || opened_db == NULL) {
+        if (opened_db != NULL) {
+            (void)sqlite3_close(opened_db);
+        }
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    *out_db = opened_db;
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_db_initialize_open_handle(sqlite3 *opened_db)
+{
+    ss_sdk_status status;
+
+    if (opened_db == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    status = ss_db_apply_pragmas(opened_db);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    status = ss_db_create_canonical_data_schema(opened_db);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    return ss_db_sync_location_metadata(opened_db);
+}
+
+static ss_sdk_status ss_db_adopt_open_handle(sqlite3 *opened_db, const char *path)
+{
+    char *opened_path;
+
+    if (opened_db == NULL || path == NULL || path[0] == '\0') {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    opened_path = ss_strdup_local(path);
+    if (opened_path == NULL) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    g_db = opened_db;
+    g_db_open_path = opened_path;
+    return SS_SDK_OK;
+}
+
 static ss_sdk_status ss_db_open_locked(void)
 {
     const char *path = ss_db_path();
     sqlite3 *opened_db = NULL;
     ss_sdk_status status;
-    int sqlite_result;
+    bool db_is_open;
+    bool paths_match;
 
-    bool db_is_open = (g_db != NULL);
-    bool paths_match = db_is_open &&
-                g_db_open_path != NULL &&
-                strcmp(g_db_open_path, path) == 0;
+    if (path == NULL || path[0] == '\0') {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    db_is_open = (g_db != NULL);
+    paths_match = db_is_open &&
+                 g_db_open_path != NULL &&
+                 strcmp(g_db_open_path, path) == 0;
 
     ss_db_debug_log_path("sdk.db.path.selected", path);
 
@@ -354,208 +714,409 @@ static ss_sdk_status ss_db_open_locked(void)
         return SS_SDK_ERR_INTERNAL;
     }
 
-    sqlite_result = sqlite3_open_v2(path, &opened_db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    if (g_db_test_hooks.fail_sqlite_open > 0) {
-        g_db_test_hooks.fail_sqlite_open -= 1;
-        if (g_db_test_hooks.fail_sqlite_open == 0) {
-            sqlite_result = SQLITE_ERROR;
-        }
-    }
-#endif
-    if (sqlite_result != SQLITE_OK || opened_db == NULL) {
-        if (opened_db != NULL) {
-            (void)sqlite3_close(opened_db);
-        }
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    // apply DB settings
-    status = ss_db_apply_pragmas(opened_db);
+    status = ss_db_open_sqlite_handle(path, &opened_db);
     if (status != SS_SDK_OK) {
-        (void)sqlite3_close(opened_db);
         return status;
     }
-    
-    status = ss_db_create_canonical_data_schema(opened_db);
+
+    status = ss_db_initialize_open_handle(opened_db);
     if (status != SS_SDK_OK) {
         (void)sqlite3_close(opened_db);
         return status;
     }
 
-    g_db_open_path = ss_strdup_local(path);
-    if (g_db_open_path == NULL) {
+    status = ss_db_adopt_open_handle(opened_db, path);
+    if (status != SS_SDK_OK) {
         (void)sqlite3_close(opened_db);
-        return SS_SDK_ERR_INTERNAL;
+        return status;
     }
-
-    g_db = opened_db;
     ss_db_debug_log_path("sdk.db.opened", path);
     return SS_SDK_OK;
 }
 
+static ss_db_write_result ss_db_prepare_insert_stmt(sqlite3_stmt **out_stmt)
+{
+    const char *sql_text = ss_db_sql_text(SS_DB_SQL_INSERT_RECORD);
+    ss_db_write_result result = {SS_SDK_ERR_INTERNAL, NULL, NULL};
+    int sqlite_result;
+
+    if (out_stmt == NULL || sql_text == NULL) {
+        return result;
+    }
+
+    sqlite_result = sqlite3_prepare_v2(g_db, sql_text, -1, out_stmt, NULL);
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (ss_test_consume(&g_db_test_hooks.fail_sqlite_prepare)) {
+        sqlite_result = SQLITE_ERROR;
+    }
+#endif
+    if (sqlite_result != SQLITE_OK || *out_stmt == NULL) {
+        result.log_event = "sdk.db.prepare_failed";
+        result.log_message = "sqlite prepare failed for insert statement";
+        return result;
+    }
+
+    result.status = SS_SDK_OK;
+    return result;
+}
+
+static int ss_db_bind_value_columns(sqlite3_stmt *stmt, const ss_sdk_record *record)
+{
+    int bind_error_count = 0;
+
+    if (stmt == NULL || record == NULL) {
+        return 1;
+    }
+
+    if (record->value_type == SS_SDK_VALUE_I64) {
+        bind_error_count += (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)record->value.i64) != SQLITE_OK);
+        bind_error_count += (sqlite3_bind_null(stmt, 4) != SQLITE_OK);
+        bind_error_count += (sqlite3_bind_null(stmt, 5) != SQLITE_OK);
+    } else if (record->value_type == SS_SDK_VALUE_F64) {
+        bind_error_count += (sqlite3_bind_null(stmt, 3) != SQLITE_OK);
+        bind_error_count += (sqlite3_bind_double(stmt, 4, record->value.f64) != SQLITE_OK);
+        bind_error_count += (sqlite3_bind_null(stmt, 5) != SQLITE_OK);
+    } else if (record->value_type == SS_SDK_VALUE_BOOL) {
+        bind_error_count += (sqlite3_bind_null(stmt, 3) != SQLITE_OK);
+        bind_error_count += (sqlite3_bind_null(stmt, 4) != SQLITE_OK);
+        bind_error_count += (sqlite3_bind_int(stmt, 5, record->value.boolean ? 1 : 0) != SQLITE_OK);
+    } else {
+        return -1;
+    }
+
+    return bind_error_count;
+}
+
+static ss_db_write_result ss_db_bind_insert_record(sqlite3_stmt *stmt, const ss_sdk_record *record)
+{
+    ss_db_write_result result = {SS_SDK_ERR_INTERNAL, NULL, NULL};
+    int bind_error_count = 0;
+    int value_bind_status;
+
+    if (stmt == NULL || record == NULL) {
+        return result;
+    }
+
+    bind_error_count += (sqlite3_bind_int(stmt, 1, (int)record->metric) != SQLITE_OK);
+    bind_error_count += (sqlite3_bind_int(stmt, 2, (int)record->value_type) != SQLITE_OK);
+
+    value_bind_status = ss_db_bind_value_columns(stmt, record);
+    if (value_bind_status < 0) {
+        result.status = SS_SDK_ERR_VALIDATION;
+        result.log_event = "sdk.db.bind_invalid_type";
+        result.log_message = "record value_type was invalid during bind";
+        return result;
+    }
+    bind_error_count += value_bind_status;
+
+    bind_error_count += (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)record->ts_start_utc) != SQLITE_OK);
+    bind_error_count += (sqlite3_bind_int64(stmt, 7, (sqlite3_int64)record->ts_end_utc) != SQLITE_OK);
+    bind_error_count += (sqlite3_bind_int(stmt, 8, (int)record->data_kind) != SQLITE_OK);
+
+    if (bind_error_count != 0) {
+        result.log_event = "sdk.db.bind_failed";
+        result.log_message = "sqlite bind failed for insert statement";
+        return result;
+    }
+
+    result.status = SS_SDK_OK;
+    return result;
+}
+
+static ss_db_write_result ss_db_execute_insert_step(sqlite3_stmt *stmt)
+{
+    ss_db_write_result result = {SS_SDK_ERR_INTERNAL, NULL, NULL};
+    int sqlite_result;
+
+    if (stmt == NULL) {
+        return result;
+    }
+
+    sqlite_result = sqlite3_step(stmt);
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (ss_test_consume(&g_db_test_hooks.fail_sqlite_step)) {
+        sqlite_result = SQLITE_ERROR;
+    }
+#endif
+
+    if (sqlite_result == SQLITE_DONE) {
+        if (sqlite3_changes(g_db) == 0) {
+            result.log_event = "sdk.db.dedupe_drop";
+            result.log_message = "duplicate canonical slot ignored";
+        }
+        result.status = SS_SDK_OK;
+        return result;
+    }
+    if (sqlite_result == SQLITE_CONSTRAINT) {
+        result.status = SS_SDK_ERR_VALIDATION;
+        result.log_event = "sdk.db.step_constraint";
+        result.log_message = "sqlite constraint rejected insert";
+        return result;
+    }
+
+    result.status = SS_SDK_ERR_INTERNAL;
+    result.log_event = "sdk.db.step_internal_error";
+    result.log_message = "sqlite step failed during insert";
+    return result;
+}
+
+static void ss_db_log_write_result(const ss_db_write_result *result)
+{
+    if (result == NULL || result->log_event == NULL || result->log_message == NULL) {
+        return;
+    }
+
+    if (strcmp(result->log_event, "sdk.db.dedupe_drop") == 0) {
+        SS_LOG_DEBUG(result->log_event, result->log_message);
+        return;
+    }
+    SS_LOG_ERROR(result->log_event, result->log_message);
+}
+
 ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record)
-{ 
+{
+    sqlite3_stmt *insert_statment = NULL;
+    ss_db_write_result write_result = {SS_SDK_ERR_INTERNAL, NULL, NULL};
+
     if (record == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
 
     ss_db_debug_log("sdk.db.write.begin", "internal db write started");
 
-    const char *sql_text = ss_db_sql_text(SS_DB_SQL_INSERT_RECORD);
-
-    sqlite3_stmt *insert_statment = NULL;
-    ss_sdk_status status = SS_SDK_ERR_INTERNAL;
-    int sqlite_result = SQLITE_OK;
-    int bind_error_count = 0;
-    int lock_held = 0;
-    const char *log_event = NULL;
-    const char *log_message = NULL;
-
     pthread_mutex_lock(&g_db_mu);
-    lock_held = 1;
 
-    status = ss_db_open_locked();
-    if (status != SS_SDK_OK) {
-        log_event = "sdk.db.open_failed";
-        log_message = "failed to open sqlite connection for write";
+    write_result.status = ss_db_open_locked();
+    if (write_result.status != SS_SDK_OK) {
+        write_result.log_event = "sdk.db.open_failed";
+        write_result.log_message = "failed to open sqlite connection for write";
         goto cleanup;
     }
 
-    // Compile SQL text into prepared statement (parse + validate SQL).
-    sqlite_result = sqlite3_prepare_v2(g_db, sql_text, -1, &insert_statment, NULL);
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    if (ss_test_consume(&g_db_test_hooks.fail_sqlite_prepare)) {
-        sqlite_result = SQLITE_ERROR;
-    }
-#endif
-    if (sqlite_result != SQLITE_OK) {
-        status = SS_SDK_ERR_INTERNAL;
-        log_event = "sdk.db.prepare_failed";
-        log_message = "sqlite prepare failed for insert statement";
+    write_result = ss_db_prepare_insert_stmt(&insert_statment);
+    if (write_result.status != SS_SDK_OK) {
         goto cleanup;
     }
 
-    // Bind calls just fill the VALUES slots in insert_statment; no DB write happens until sqlite3_step.
-    bind_error_count += (sqlite3_bind_int(insert_statment, 1, (int)record->metric) != SQLITE_OK);              // ?1 canonical metric id
-    bind_error_count += (sqlite3_bind_int(insert_statment, 2, (int)record->value_type) != SQLITE_OK);          // ?2 value type discriminator
-
-    // Schema CHECK rules enforce union-like storage: value_type selects exactly one of
-    // value_i64/value_f64/value_bool to be non-NULL, and the other two must be SQL NULL.
-    if (record->value_type == SS_SDK_VALUE_I64) {
-        bind_error_count += (sqlite3_bind_int64(insert_statment, 3, (sqlite3_int64)record->value.i64) != SQLITE_OK); // ?3 integer value payload
-        bind_error_count += (sqlite3_bind_null(insert_statment, 4) != SQLITE_OK);                                        // Typed storage rule: only one value column is set; others are bound as SQL NULL.
-        bind_error_count += (sqlite3_bind_null(insert_statment, 5) != SQLITE_OK);
-    } else if (record->value_type == SS_SDK_VALUE_F64) {
-        bind_error_count += (sqlite3_bind_null(insert_statment, 3) != SQLITE_OK);
-        bind_error_count += (sqlite3_bind_double(insert_statment, 4, record->value.f64) != SQLITE_OK);                // ?4 real value payload
-        bind_error_count += (sqlite3_bind_null(insert_statment, 5) != SQLITE_OK);
-    } else if (record->value_type == SS_SDK_VALUE_BOOL) {
-        bind_error_count += (sqlite3_bind_null(insert_statment, 3) != SQLITE_OK);
-        bind_error_count += (sqlite3_bind_null(insert_statment, 4) != SQLITE_OK);
-        bind_error_count += (sqlite3_bind_int(insert_statment, 5, record->value.boolean ? 1 : 0) != SQLITE_OK);       // ?5 bool value payload
-    } else {
-        status = SS_SDK_ERR_VALIDATION;
-        log_event = "sdk.db.bind_invalid_type";
-        log_message = "record value_type was invalid during bind";
+    write_result = ss_db_bind_insert_record(insert_statment, record);
+    if (write_result.status != SS_SDK_OK) {
         goto cleanup;
     }
 
-    bind_error_count += (sqlite3_bind_int64(insert_statment, 6, (sqlite3_int64)record->ts_start_utc) != SQLITE_OK);  // ?6 slot start (UTC)
-    bind_error_count += (sqlite3_bind_int64(insert_statment, 7, (sqlite3_int64)record->ts_end_utc) != SQLITE_OK);    // ?7 slot end (UTC)
-    bind_error_count += (sqlite3_bind_int(insert_statment, 8, (int)record->data_kind) != SQLITE_OK);                 // ?8 observation/forecast kind
-
-    if (bind_error_count != 0) {
-        status = SS_SDK_ERR_INTERNAL;
-        log_event = "sdk.db.bind_failed";
-        log_message = "sqlite bind failed for insert statement";
-        goto cleanup;
-    }
-
-    // Execute the prepared SQL against SQLite now (sends statment into SQLite, blocking but should be fast).
-    sqlite_result = sqlite3_step(insert_statment);
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    if (ss_test_consume(&g_db_test_hooks.fail_sqlite_step)) {
-        sqlite_result = SQLITE_ERROR;
-    }
-#endif
-    if (sqlite_result == SQLITE_DONE) {
-        if (sqlite3_changes(g_db) == 0) {
-            log_event = "sdk.db.dedupe_drop";
-            log_message = "duplicate canonical slot ignored";
-        }
-        status = SS_SDK_OK;
-    } else if (sqlite_result == SQLITE_CONSTRAINT) {
-        status = SS_SDK_ERR_VALIDATION;
-        log_event = "sdk.db.step_constraint";
-        log_message = "sqlite constraint rejected insert";
-    } else {
-        status = SS_SDK_ERR_INTERNAL;
-        log_event = "sdk.db.step_internal_error";
-        log_message = "sqlite step failed during insert";
-    }
+    write_result = ss_db_execute_insert_step(insert_statment);
 
 cleanup:
     if (insert_statment != NULL) {
         sqlite3_finalize(insert_statment);
     }
-    if (lock_held) {
-        pthread_mutex_unlock(&g_db_mu);
+    pthread_mutex_unlock(&g_db_mu);
+    ss_db_log_write_result(&write_result);
+    return write_result.status;
+}
+
+ss_sdk_status ss_sdk_internal_db_write_records(
+    const ss_sdk_record *records,
+    size_t count,
+    size_t *out_written)
+{
+    sqlite3_stmt *insert_statement = NULL;
+    ss_db_write_result write_result = {SS_SDK_ERR_INTERNAL, NULL, NULL};
+    ss_sdk_status status = SS_SDK_ERR_INTERNAL;
+    size_t inserted_rows = 0U;
+    size_t i;
+
+    if (records == NULL || out_written == NULL || count == 0U) {
+        return SS_SDK_ERR_INVALID_ARG;
     }
-    if (log_event != NULL && log_message != NULL) {
-        if (strcmp(log_event, "sdk.db.dedupe_drop") == 0) {
-            SS_LOG_DEBUG(log_event, log_message);
-        } else {
-            SS_LOG_ERROR(log_event, log_message);
+    *out_written = 0U;
+
+    pthread_mutex_lock(&g_db_mu);
+
+    status = ss_db_open_locked();
+    if (status != SS_SDK_OK) {
+        goto cleanup;
+    }
+
+    status = ss_exec(g_db, "BEGIN IMMEDIATE;");
+    if (status != SS_SDK_OK) {
+        goto cleanup;
+    }
+
+    write_result = ss_db_prepare_insert_stmt(&insert_statement);
+    if (write_result.status != SS_SDK_OK) {
+        status = write_result.status;
+        goto rollback;
+    }
+
+    for (i = 0U; i < count; ++i) {
+        write_result = ss_db_bind_insert_record(insert_statement, &records[i]);
+        if (write_result.status != SS_SDK_OK) {
+            status = write_result.status;
+            goto rollback;
         }
+
+        write_result = ss_db_execute_insert_step(insert_statement);
+        if (write_result.status != SS_SDK_OK) {
+            status = write_result.status;
+            goto rollback;
+        }
+        if (!(write_result.log_event != NULL && strcmp(write_result.log_event, "sdk.db.dedupe_drop") == 0)) {
+            inserted_rows += 1U;
+        }
+
+        if (sqlite3_reset(insert_statement) != SQLITE_OK) {
+            status = SS_SDK_ERR_INTERNAL;
+            goto rollback;
+        }
+        (void)sqlite3_clear_bindings(insert_statement);
     }
+
+    status = ss_exec(g_db, "COMMIT;");
+    if (status == SS_SDK_OK) {
+        *out_written = inserted_rows;
+        goto cleanup;
+    }
+
+rollback:
+    (void)ss_exec(g_db, "ROLLBACK;");
+    ss_db_log_write_result(&write_result);
+
+cleanup:
+    if (insert_statement != NULL) {
+        sqlite3_finalize(insert_statement);
+    }
+    pthread_mutex_unlock(&g_db_mu);
     return status;
 }
 
-ss_sdk_status ss_sdk_internal_db_get_canonical(
+static bool ss_select_exact_row_for_slot(
+    const ss_raw_row *rows,
+    size_t row_count,
+    int64_t ts_utc,
+    bool is_future,
+    ss_interp_policy policy,
+    ss_raw_row *out_row,
+    ss_sdk_sample_flags *out_flags)
+{
+    if (rows == NULL || out_row == NULL || out_flags == NULL) {
+        return false;
+    }
+
+    if (!is_future) {
+        if (ss_find_exact_row(rows, row_count, ts_utc, SS_SDK_DATA_OBSERVATION, out_row)) {
+            *out_flags = SS_SDK_SAMPLE_OBSERVED;
+            return true;
+        }
+        if (ss_find_exact_row(rows, row_count, ts_utc, SS_SDK_DATA_FORECAST, out_row)) {
+            *out_flags = SS_SDK_SAMPLE_FORECAST;
+            return true;
+        }
+        return false;
+    }
+
+    if (ss_find_exact_row(rows, row_count, ts_utc, SS_SDK_DATA_FORECAST, out_row)) {
+        *out_flags = SS_SDK_SAMPLE_FORECAST;
+        return true;
+    }
+
+    if (policy == SS_INTERP_POLICY_STEP &&
+        ss_find_exact_row(rows, row_count, ts_utc, SS_SDK_DATA_OBSERVATION, out_row)) {
+        *out_flags = SS_SDK_SAMPLE_OBSERVED;
+        return true;
+    }
+
+    return false;
+}
+
+static bool ss_fill_interpolated_row_for_slot(
     ss_metric_id canonical,
+    ss_sdk_value_type value_type,
+    const ss_raw_row *rows,
+    size_t row_count,
+    int64_t ts_utc,
+    bool is_future,
+    ss_interp_policy policy,
+    ss_raw_row *out_row,
+    ss_sdk_sample_flags *out_flags,
+    bool *out_interp_too_long)
+{
+    ss_sdk_value interpolated;
+    bool allow_obs_interp;
+    bool allow_fc_interp = true;
+
+    if (out_row == NULL || out_flags == NULL || out_interp_too_long == NULL) {
+        return false;
+    }
+    *out_interp_too_long = false;
+
+    allow_obs_interp = (!is_future) || (policy == SS_INTERP_POLICY_STEP);
+    if (!ss_try_interpolate(
+            canonical,
+            value_type,
+            rows,
+            row_count,
+            ts_utc,
+            allow_obs_interp,
+            allow_fc_interp,
+            out_interp_too_long,
+            &interpolated)) {
+        return false;
+    }
+
+    out_row->ts_utc = ts_utc;
+    out_row->data_kind = SS_SDK_DATA_FORECAST;
+    out_row->value_type = value_type;
+    out_row->value = interpolated;
+    *out_flags = SS_SDK_SAMPLE_INTERPOLATED;
+    return true;
+}
+
+static void ss_sample_write_slot(
+    ss_sdk_sample *dst,
+    ss_metric_id canonical,
+    ss_sdk_value_type value_type,
+    int64_t ts_utc,
+    const ss_raw_row *row,
+    ss_sdk_sample_flags flags)
+{
+    dst->ts_utc = ts_utc;
+    dst->canonical = canonical;
+    dst->value_type = value_type;
+    dst->value = row->value;
+    dst->flags = flags;
+}
+
+static ss_sdk_status ss_db_load_window_rows(
+    ss_metric_id canonical,
+    ss_sdk_value_type value_type,
     int64_t start_utc,
     int64_t end_utc,
-    ss_sdk_samples_out *out)
+    ss_raw_row **out_rows,
+    size_t *out_count)
 {
-    const ss_metric_meta *metric_metadata;
-    ss_raw_row *window_rows = NULL;
-    size_t window_row_count = 0;
-    ss_sdk_sample *samples = NULL;
-    size_t sample_count = 0;
-    size_t expected_slots;
-    int64_t now_slot;
-    int64_t ts_utc;
-    ss_interp_policy policy;
     ss_sdk_status status;
-
-    if (out == NULL) {
+    if (out_rows == NULL || out_count == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
 
-    ss_db_debug_log("sdk.db.get.begin", "internal canonical range read started");
+    *out_rows = NULL;
+    *out_count = 0U;
 
-    out->samples = NULL;
-    out->count = 0;
+    pthread_mutex_lock(&g_db_mu);
+    status = ss_db_open_locked();
+    if (status == SS_SDK_OK) {
+        status = ss_load_rows_for_window(g_db, canonical, value_type, start_utc, end_utc, out_rows, out_count);
+    }
+    pthread_mutex_unlock(&g_db_mu);
+    return status;
+}
 
-    if (start_utc < 0 || end_utc <= start_utc || ((end_utc - start_utc) % SS_SLOT_SECONDS) != 0) {
+static ss_sdk_status ss_alloc_samples_buffer(size_t expected_slots, ss_sdk_sample **out_samples)
+{
+    ss_sdk_sample *samples = NULL;
+    if (out_samples == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
-
-    metric_metadata = ss_metric_meta_get(canonical);
-    if (metric_metadata == NULL || !ss_value_type_is_supported(metric_metadata->value_type)) {
-        return SS_SDK_ERR_INVALID_ARG;
-    }
-
-    if (!ss_all_metrics_have_interpolation_policy()) {
-        return SS_SDK_ERR_INTERNAL;
-    }
-    policy = ss_interpolation_policy(canonical);
-    if (policy == SS_INTERP_POLICY_INVALID) {
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    expected_slots = (size_t)((end_utc - start_utc) / SS_SLOT_SECONDS);
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
     if (ss_test_consume(&g_db_test_hooks.fail_calloc)) {
         samples = NULL;
@@ -568,96 +1129,64 @@ ss_sdk_status ss_sdk_internal_db_get_canonical(
     if (samples == NULL) {
         return SS_SDK_ERR_INTERNAL;
     }
+    *out_samples = samples;
+    return SS_SDK_OK;
+}
 
-    pthread_mutex_lock(&g_db_mu);
+static ss_sdk_status ss_process_slot(
+    ss_metric_id canonical,
+    ss_sdk_value_type value_type,
+    const ss_raw_row *window_rows,
+    size_t window_row_count,
+    int64_t now_slot,
+    int64_t ts_utc,
+    ss_interp_policy policy,
+    ss_raw_row *out_row,
+    ss_sdk_sample_flags *out_flags,
+    bool *out_have_value)
+{
+    bool is_future;
+    bool have_value;
+    bool interpolation_length_exceeded = false;
 
-    status = ss_db_open_locked();
-    if (status != SS_SDK_OK) {
-        pthread_mutex_unlock(&g_db_mu);
-        free(samples);
-        return status;
+    if (out_row == NULL || out_flags == NULL || out_have_value == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    *out_have_value = false;
+
+    is_future = (ts_utc > now_slot);
+    have_value = ss_select_exact_row_for_slot(window_rows, window_row_count, ts_utc, is_future, policy, out_row, out_flags);
+
+    if (!have_value) {
+        have_value = ss_fill_interpolated_row_for_slot(
+            canonical,
+            value_type,
+            window_rows,
+            window_row_count,
+            ts_utc,
+            is_future,
+            policy,
+            out_row,
+            out_flags,
+            &interpolation_length_exceeded);
     }
 
-    status = ss_load_rows_for_window(g_db, canonical, metric_metadata->value_type, start_utc, end_utc, &window_rows, &window_row_count);
-    pthread_mutex_unlock(&g_db_mu);
-    if (status != SS_SDK_OK) {
-        free(samples);
-        return status;
+    if (!have_value && interpolation_length_exceeded) {
+        return SS_SDK_ERR_PARTIAL_DATA;
     }
+    *out_have_value = have_value;
+    return SS_SDK_OK;
+}
 
-    now_slot = ss_now_slot_utc();
-
-    for (ts_utc = start_utc; ts_utc < end_utc; ts_utc += SS_SLOT_SECONDS) {
-        ss_raw_row selected_row;
-        bool have_value = false;
-        bool is_future = (ts_utc > now_slot);
-        bool allow_obs_interp;
-        bool allow_fc_interp;
-        ss_sdk_sample_flags sample_flags = 0;
-
-        if (!is_future) {
-            if (ss_find_exact_row(window_rows, window_row_count, ts_utc, SS_SDK_DATA_OBSERVATION, &selected_row)) {
-                have_value = true;
-                sample_flags = SS_SDK_SAMPLE_OBSERVED;
-            } else if (ss_find_exact_row(window_rows, window_row_count, ts_utc, SS_SDK_DATA_FORECAST, &selected_row)) {
-                have_value = true;
-                sample_flags = SS_SDK_SAMPLE_FORECAST;
-            }
-        } else {
-            if (ss_find_exact_row(window_rows, window_row_count, ts_utc, SS_SDK_DATA_FORECAST, &selected_row)) {
-                have_value = true;
-                sample_flags = SS_SDK_SAMPLE_FORECAST;
-            } else if (policy == SS_INTERP_POLICY_STEP &&
-                       ss_find_exact_row(window_rows, window_row_count, ts_utc, SS_SDK_DATA_OBSERVATION, &selected_row)) {
-                have_value = true;
-                sample_flags = SS_SDK_SAMPLE_OBSERVED;
-            }
-        }
-
-        if (!have_value) {
-            ss_sdk_value interpolated;
-            bool interpolation_length_exceeded = false;
-
-            allow_obs_interp = (!is_future) || (policy == SS_INTERP_POLICY_STEP);
-            allow_fc_interp = true;
-            if (ss_try_interpolate(
-                    canonical,
-                    metric_metadata->value_type,
-                    window_rows,
-                    window_row_count,
-                    ts_utc,
-                    allow_obs_interp,
-                    allow_fc_interp,
-                    &interpolation_length_exceeded,
-                    &interpolated)) {
-                selected_row.ts_utc = ts_utc;
-                selected_row.data_kind = SS_SDK_DATA_FORECAST;
-                selected_row.value_type = metric_metadata->value_type;
-                selected_row.value = interpolated;
-                have_value = true;
-                sample_flags = SS_SDK_SAMPLE_INTERPOLATED;
-            } else if (interpolation_length_exceeded) {
-                free(window_rows);
-                free(samples);
-                out->samples = NULL;
-                out->count = 0;
-                return SS_SDK_ERR_PARTIAL_DATA;
-            }
-        }
-
-        if (!have_value) {
-            continue;
-        }
-
-        samples[sample_count].ts_utc = ts_utc;
-        samples[sample_count].canonical = canonical;
-        samples[sample_count].value_type = metric_metadata->value_type;
-        samples[sample_count].value = selected_row.value;
-        samples[sample_count].flags = sample_flags;
-        sample_count += 1U;
+static ss_sdk_status ss_finalize_samples_out(
+    ss_sdk_sample *samples,
+    size_t sample_count,
+    size_t expected_slots,
+    ss_sdk_samples_out *out)
+{
+    if (samples == NULL || out == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
     }
-
-    free(window_rows);
 
     if (sample_count == 0U) {
         free(samples);
@@ -681,25 +1210,189 @@ ss_sdk_status ss_sdk_internal_db_get_canonical(
     return SS_SDK_OK;
 }
 
-ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
-    ss_metric_id canonical,
+typedef struct ss_canonical_query_ctx {
+    const ss_metric_meta *metric_metadata;
+    ss_interp_policy policy;
+    size_t expected_slots;
+    ss_raw_row *window_rows;
+    size_t window_row_count;
+    ss_sdk_sample *samples;
+} ss_canonical_query_ctx;
+
+static bool ss_interp_policy_map_complete_cached(void)
+{
+    return ss_all_metrics_have_interpolation_policy();
+}
+
+static ss_sdk_status ss_validate_canonical_query_args(
     int64_t start_utc,
+    int64_t end_utc,
     ss_sdk_samples_out *out)
 {
-    const char *sql_text = ss_db_sql_text(SS_DB_SQL_SELECT_MAX_TS_FROM_START);
-
-    sqlite3_stmt *max_statement = NULL;
-    int sqlite_result;
-    int has_value = 0;
-    int64_t max_ts_start = 0;
-    int64_t end_utc;
-    ss_sdk_status status;
-
-    if (out == NULL || start_utc < 0) {
+    if (out == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
+
     out->samples = NULL;
     out->count = 0;
+    if (start_utc < 0 || end_utc <= start_utc || ((end_utc - start_utc) % SS_SLOT_SECONDS) != 0) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_prepare_canonical_query_ctx(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t end_utc,
+    ss_canonical_query_ctx *ctx)
+{
+    ss_sdk_status status;
+    if (ctx == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    memset(ctx, 0, sizeof(*ctx));
+
+    ctx->metric_metadata = ss_metric_meta_get(canonical);
+    if (ctx->metric_metadata == NULL || !ss_value_type_is_supported(ctx->metric_metadata->value_type)) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    if (!ss_interp_policy_map_complete_cached()) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    ctx->policy = ss_interpolation_policy(canonical);
+    if (ctx->policy == SS_INTERP_POLICY_INVALID) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    ctx->expected_slots = (size_t)((end_utc - start_utc) / SS_SLOT_SECONDS);
+    status = ss_alloc_samples_buffer(ctx->expected_slots, &ctx->samples);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    status = ss_db_load_window_rows(
+        canonical,
+        ctx->metric_metadata->value_type,
+        start_utc,
+        end_utc,
+        &ctx->window_rows,
+        &ctx->window_row_count);
+    if (status != SS_SDK_OK) {
+        free(ctx->samples);
+        ctx->samples = NULL;
+        return status;
+    }
+
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_collect_canonical_samples(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t end_utc,
+    const ss_canonical_query_ctx *ctx,
+    size_t *out_sample_count)
+{
+    int64_t now_slot;
+    int64_t ts_utc;
+    size_t sample_count = 0U;
+
+    if (ctx == NULL || out_sample_count == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    *out_sample_count = 0U;
+
+    now_slot = ss_now_slot_utc();
+    for (ts_utc = start_utc; ts_utc < end_utc; ts_utc += SS_SLOT_SECONDS) {
+        ss_raw_row selected_row;
+        bool have_value = false;
+        ss_sdk_sample_flags sample_flags = 0;
+        ss_sdk_status slot_status;
+
+        slot_status = ss_process_slot(
+            canonical,
+            ctx->metric_metadata->value_type,
+            ctx->window_rows,
+            ctx->window_row_count,
+            now_slot,
+            ts_utc,
+            ctx->policy,
+            &selected_row,
+            &sample_flags,
+            &have_value);
+        if (slot_status == SS_SDK_ERR_PARTIAL_DATA) {
+            return SS_SDK_ERR_PARTIAL_DATA;
+        }
+        if (!have_value) {
+            continue;
+        }
+
+        ss_sample_write_slot(
+            &ctx->samples[sample_count],
+            canonical,
+            ctx->metric_metadata->value_type,
+            ts_utc,
+            &selected_row,
+            sample_flags);
+        sample_count += 1U;
+    }
+
+    *out_sample_count = sample_count;
+    return SS_SDK_OK;
+}
+
+ss_sdk_status ss_sdk_internal_db_get_canonical(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t end_utc,
+    ss_sdk_samples_out *out)
+{
+    ss_canonical_query_ctx ctx;
+    size_t sample_count = 0;
+    ss_sdk_status status;
+
+    ss_db_debug_log("sdk.db.get.begin", "internal canonical range read started");
+
+    status = ss_validate_canonical_query_args(start_utc, end_utc, out);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    status = ss_prepare_canonical_query_ctx(canonical, start_utc, end_utc, &ctx);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+
+    status = ss_collect_canonical_samples(canonical, start_utc, end_utc, &ctx, &sample_count);
+    free(ctx.window_rows);
+    if (status != SS_SDK_OK) {
+        free(ctx.samples);
+        out->samples = NULL;
+        out->count = 0;
+        return status;
+    }
+
+    return ss_finalize_samples_out(ctx.samples, sample_count, ctx.expected_slots, out);
+}
+
+static ss_sdk_status ss_db_select_max_ts_from_start(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t *out_max_ts_start,
+    bool *out_has_value)
+{
+    const char *sql_text = ss_db_sql_text(SS_DB_SQL_SELECT_MAX_TS_FROM_START);
+    sqlite3_stmt *max_statement = NULL;
+    int sqlite_result;
+    ss_sdk_status status;
+
+    if (out_max_ts_start == NULL || out_has_value == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    *out_max_ts_start = 0;
+    *out_has_value = false;
 
     pthread_mutex_lock(&g_db_mu);
     status = ss_db_open_locked();
@@ -710,9 +1403,6 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
 
     sqlite_result = sqlite3_prepare_v2(g_db, sql_text, -1, &max_statement, NULL);
     if (sqlite_result != SQLITE_OK) {
-        if (max_statement != NULL) {
-            sqlite3_finalize(max_statement);
-        }
         pthread_mutex_unlock(&g_db_mu);
         return SS_SDK_ERR_INTERNAL;
     }
@@ -723,8 +1413,8 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
     sqlite_result = sqlite3_step(max_statement);
     if (sqlite_result == SQLITE_ROW) {
         if (sqlite3_column_type(max_statement, 0) != SQLITE_NULL) {
-            max_ts_start = (int64_t)sqlite3_column_int64(max_statement, 0);
-            has_value = 1;
+            *out_max_ts_start = (int64_t)sqlite3_column_int64(max_statement, 0);
+            *out_has_value = true;
         }
     } else if (sqlite_result != SQLITE_DONE) {
         sqlite3_finalize(max_statement);
@@ -734,6 +1424,29 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
 
     sqlite3_finalize(max_statement);
     pthread_mutex_unlock(&g_db_mu);
+    return SS_SDK_OK;
+}
+
+ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    ss_sdk_samples_out *out)
+{
+    bool has_value = false;
+    int64_t max_ts_start = 0;
+    int64_t end_utc;
+    ss_sdk_status status;
+
+    if (out == NULL || start_utc < 0) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    out->samples = NULL;
+    out->count = 0;
+
+    status = ss_db_select_max_ts_from_start(canonical, start_utc, &max_ts_start, &has_value);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
 
     if (!has_value) {
         return SS_SDK_ERR_PARTIAL_DATA;

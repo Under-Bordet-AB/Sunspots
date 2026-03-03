@@ -111,6 +111,15 @@ std::string read_text_file(const std::string &path)
     return out;
 }
 
+off_t file_size_bytes(const std::string &path)
+{
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) {
+        return -1;
+    }
+    return st.st_size;
+}
+
 void remove_file_if_exists(const std::string &path)
 {
     (void)unlink(path.c_str());
@@ -128,7 +137,8 @@ protected:
           log_level_guard_("SS_SDK_LOG_LEVEL"),
           mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH"),
-          db_path_guard_("SS_SDK_DB_PATH")
+          mirror_max_bytes_guard_("SS_SDK_LOG_MIRROR_MAX_BYTES"),
+          db_dir_guard_("SS_SDK_DB_DIR")
     {}
 
     void SetUp() override
@@ -157,7 +167,8 @@ protected:
     ScopedEnvVar log_level_guard_;
     ScopedEnvVar mirror_enabled_guard_;
     ScopedEnvVar mirror_path_guard_;
-    ScopedEnvVar db_path_guard_;
+    ScopedEnvVar mirror_max_bytes_guard_;
+    ScopedEnvVar db_dir_guard_;
     std::string dir_;
     std::string nested_dir_;
     std::string log_path_;
@@ -221,6 +232,25 @@ TEST_F(SdkLogFixture, mirror_path_env_is_used)
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find("sdk.log.good_path"), std::string::npos);
+}
+
+TEST_F(SdkLogFixture, mirror_file_is_truncated_when_size_cap_is_reached)
+{
+    use_log_path("bounded.log");
+    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_MAX_BYTES", "256", 1), 0);
+
+    for (int i = 0; i < 40; ++i) {
+        ASSERT_EQ(
+            ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.cap", "this line should force truncation eventually", __FILE__, __LINE__, __func__),
+            SS_SDK_OK);
+    }
+
+    const off_t size = file_size_bytes(log_path_);
+    ASSERT_GE(size, 0);
+    EXPECT_LT(size, 1024);
+
+    const std::string text = read_text_file(log_path_);
+    EXPECT_NE(text.find("sdk.log.cap"), std::string::npos);
 }
 
 TEST_F(SdkLogFixture, overlong_log_path_returns_internal_error)

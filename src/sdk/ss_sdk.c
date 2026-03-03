@@ -236,6 +236,60 @@ ss_sdk_status ss_sdk_db_write_record(const ss_sdk_record *record)
     return validation_status;
 }
 
+ss_sdk_status ss_sdk_db_write_records(
+    const ss_sdk_record *records,
+    size_t count,
+    size_t *out_written)
+{
+    ss_sdk_record *normalized_records = NULL;
+    size_t i;
+    size_t written = 0U;
+    ss_sdk_status status = SS_SDK_ERR_INTERNAL;
+
+    ss_sdk_debug_log("sdk.api.db_write_batch.begin", "public batch db write called");
+
+    if (out_written == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    *out_written = 0U;
+
+    if (records == NULL || count == 0U) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    normalized_records = (ss_sdk_record *)calloc(count, sizeof(*normalized_records));
+    if (normalized_records == NULL) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    for (i = 0U; i < count; ++i) {
+        normalized_records[i] = records[i];
+        if (normalized_records[i].ts_start_utc < 0) {
+            free(normalized_records);
+            return SS_SDK_ERR_VALIDATION;
+        }
+        normalized_records[i].ts_start_utc = ss_sdk_align_utc_to_slot(normalized_records[i].ts_start_utc);
+        if (normalized_records[i].ts_start_utc > INT64_MAX - SS_SLOT_SECONDS) {
+            free(normalized_records);
+            return SS_SDK_ERR_VALIDATION;
+        }
+        normalized_records[i].ts_end_utc = normalized_records[i].ts_start_utc + SS_SLOT_SECONDS;
+        status = ss_sdk_validate_record(&normalized_records[i]);
+        if (status != SS_SDK_OK) {
+            free(normalized_records);
+            return status;
+        }
+    }
+
+    status = ss_sdk_internal_db_write_records(normalized_records, count, &written);
+    free(normalized_records);
+    if (status == SS_SDK_OK) {
+        *out_written = written;
+        ss_sdk_debug_log("sdk.api.db_write_batch.ok", "public batch db write succeeded");
+    }
+    return status;
+}
+
 ss_sdk_status ss_sdk_db_get_canonical(
     int64_t from_utc,
     uint16_t quarters_to_fetch,
