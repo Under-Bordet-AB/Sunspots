@@ -20,6 +20,9 @@ target_link_libraries(sunspots_frontend_core
     Threads::Threads
 )
 target_compile_features(sunspots_frontend_core PUBLIC c_std_99)
+target_compile_definitions(sunspots_frontend_core
+  PUBLIC _POSIX_C_SOURCE=200809L
+)
 sunspots_apply_target_defaults(sunspots_frontend_core)
 
 add_executable(sunspots_frontend

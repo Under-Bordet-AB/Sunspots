@@ -1,8 +1,6 @@
 #include "file_helpers.h"
 #include "http_constants.h"
 
-#define _GNU_SOURCE
-
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
