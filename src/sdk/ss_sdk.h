@@ -55,6 +55,7 @@ typedef struct ss_sdk_record {
     int64_t ts_start_utc; // 15-minute slot start timestamp (UTC epoch seconds).
     int64_t ts_end_utc; // 15-minute slot end timestamp (UTC epoch seconds).
     ss_sdk_data_kind data_kind; // Observation/forecast marker.
+    int64_t ingested_utc; // Optional ingest/release timestamp override (UTC epoch seconds). 0 => SDK uses current time.
 } ss_sdk_record;
 
 typedef uint8_t ss_sdk_sample_flags;

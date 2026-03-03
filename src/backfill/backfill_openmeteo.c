@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 
 #include "../fetch/fetch_utils.h"
 #include "../libs/json/cJSON.h"
@@ -20,10 +21,14 @@
 #define OPENMETEO_LIMIT_PER_MIN 600
 #define OPENMETEO_LIMIT_PER_HOUR 5000
 #define OPENMETEO_LIMIT_PER_DAY 10000
+#define FORECAST_RUN_STEP_SECONDS 3600
+#define FORECAST_DAYS_PER_RUN 16
+#define SINGLE_RUNS_ENDPOINT "https://single-runs-api.open-meteo.com/v1/forecast"
+#define BACKFILL_USAGE_DAILY_PATH "logs/backfill_usage_daily.log"
+#define BACKFILL_USAGE_KEEP_DAYS 34
 
 typedef struct {
     int enabled;
-    int required_history_days;
     int chunk_days;
     int retry_max_attempts;
     int retry_base_backoff_ms;
@@ -39,6 +44,9 @@ typedef struct {
     char location_name[64];
     char elprisomrade[16];
     char endpoint[MAX_URL_LEN];
+    char usage_daily_path[MAX_URL_LEN];
+    char start_date_utc[11];
+    int64_t start_date_epoch_utc;
 } backfill_config;
 
 typedef struct {
@@ -81,6 +89,11 @@ typedef struct {
     int min_v;
     int *field;
 } cfg_int_binding;
+
+typedef struct {
+    char date[11];
+    int64_t count;
+} usage_day_count;
 
 static int64_t now_utc(void)
 {
@@ -132,6 +145,118 @@ static void sleep_ms(int ms)
     req.tv_sec = ms / 1000;
     req.tv_nsec = (long)(ms % 1000) * 1000000L;
     nanosleep(&req, NULL);
+}
+
+static int usage_day_today(char out_date[11])
+{
+    time_t nowv;
+    struct tm tmv;
+
+    if (out_date == NULL) {
+        return -1;
+    }
+
+    nowv = time(NULL);
+    if (gmtime_r(&nowv, &tmv) == NULL) {
+        return -1;
+    }
+    if (strftime(out_date, 11, "%Y-%m-%d", &tmv) != 10U) {
+        return -1;
+    }
+    return 0;
+}
+
+static int usage_day_cutoff(char out_date[11])
+{
+    time_t nowv;
+    struct tm tmv;
+
+    if (out_date == NULL) {
+        return -1;
+    }
+
+    nowv = time(NULL) - (time_t)(BACKFILL_USAGE_KEEP_DAYS - 1) * 86400;
+    if (gmtime_r(&nowv, &tmv) == NULL) {
+        return -1;
+    }
+    if (strftime(out_date, 11, "%Y-%m-%d", &tmv) != 10U) {
+        return -1;
+    }
+    return 0;
+}
+
+static void usage_bump_daily_count(const char *path, int delta)
+{
+    usage_day_count rows[BACKFILL_USAGE_KEEP_DAYS + 8];
+    size_t row_count = 0U;
+    char today[11];
+    char cutoff[11];
+    FILE *fp;
+    size_t i;
+    int found_today = 0;
+    const char *use_path = path;
+
+    if (delta <= 0) {
+        return;
+    }
+    if (use_path == NULL || use_path[0] == '\0') {
+        use_path = BACKFILL_USAGE_DAILY_PATH;
+    }
+    if (usage_day_today(today) != 0 || usage_day_cutoff(cutoff) != 0) {
+        return;
+    }
+
+    (void)mkdir("logs", 0775);
+
+    fp = fopen(use_path, "r");
+    if (fp != NULL) {
+        char line[128];
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            char date[11];
+            long long count_ll = 0;
+
+            if (sscanf(line, "%10s %lld", date, &count_ll) != 2) {
+                continue;
+            }
+            if (strcmp(date, cutoff) < 0) {
+                continue;
+            }
+            if (row_count >= sizeof(rows) / sizeof(rows[0])) {
+                continue;
+            }
+            copy_string_safe(rows[row_count].date, sizeof(rows[row_count].date), date);
+            rows[row_count].count = (int64_t)count_ll;
+            row_count += 1U;
+        }
+        (void)fclose(fp);
+    }
+
+    for (i = 0U; i < row_count; ++i) {
+        if (strcmp(rows[i].date, today) == 0) {
+            rows[i].count += (int64_t)delta;
+            found_today = 1;
+            break;
+        }
+    }
+    if (!found_today && row_count < sizeof(rows) / sizeof(rows[0])) {
+        copy_string_safe(rows[row_count].date, sizeof(rows[row_count].date), today);
+        rows[row_count].count = (int64_t)delta;
+        row_count += 1U;
+    }
+
+    while (row_count > BACKFILL_USAGE_KEEP_DAYS) {
+        memmove(&rows[0], &rows[1], (row_count - 1U) * sizeof(rows[0]));
+        row_count -= 1U;
+    }
+
+    fp = fopen(use_path, "w");
+    if (fp == NULL) {
+        return;
+    }
+    for (i = 0U; i < row_count; ++i) {
+        (void)fprintf(fp, "%s %" PRId64 "\n", rows[i].date, rows[i].count);
+    }
+    (void)fclose(fp);
 }
 
 static bool hole_list_push_merge(hole_list *holes, int64_t from_utc, int64_t to_utc)
@@ -202,6 +327,33 @@ static int parse_utc_hour(const char *s, int64_t *out_epoch)
     return 0;
 }
 
+static int parse_utc_date(const char *s, int64_t *out_epoch)
+{
+    struct tm tmv;
+    char *endp;
+    time_t epoch;
+
+    if (s == NULL || out_epoch == NULL) {
+        return -1;
+    }
+
+    memset(&tmv, 0, sizeof(tmv));
+    endp = strptime(s, "%Y-%m-%d", &tmv);
+    if (endp == NULL || *endp != '\0') {
+        return -1;
+    }
+    tmv.tm_hour = 0;
+    tmv.tm_min = 0;
+    tmv.tm_sec = 0;
+
+    epoch = timegm(&tmv);
+    if (epoch < 0) {
+        return -1;
+    }
+    *out_epoch = (int64_t)epoch;
+    return 0;
+}
+
 static int epoch_to_ymd_utc(int64_t ts_utc, char out[11])
 {
     time_t tv;
@@ -219,11 +371,27 @@ static int epoch_to_ymd_utc(int64_t ts_utc, char out[11])
     return 0;
 }
 
+static int epoch_to_ymdhm_utc(int64_t ts_utc, char out[17])
+{
+    time_t tv;
+    struct tm tmv;
+    if (out == NULL) {
+        return -1;
+    }
+    tv = (time_t)ts_utc;
+    if (gmtime_r(&tv, &tmv) == NULL) {
+        return -1;
+    }
+    if (strftime(out, 17, "%Y-%m-%dT%H:%M", &tmv) != 16U) {
+        return -1;
+    }
+    return 0;
+}
+
 static void backfill_config_defaults(backfill_config *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
     cfg->enabled = 1;
-    cfg->required_history_days = 14;
     cfg->chunk_days = 7;
     cfg->retry_max_attempts = 5;
     cfg->retry_base_backoff_ms = 1000;
@@ -239,6 +407,9 @@ static void backfill_config_defaults(backfill_config *cfg)
     cfg->location_name[0] = '\0';
     cfg->elprisomrade[0] = '\0';
     copy_string_safe(cfg->endpoint, sizeof(cfg->endpoint), "https://archive-api.open-meteo.com/v1/archive");
+    copy_string_safe(cfg->usage_daily_path, sizeof(cfg->usage_daily_path), BACKFILL_USAGE_DAILY_PATH);
+    copy_string_safe(cfg->start_date_utc, sizeof(cfg->start_date_utc), "2025-01-01");
+    cfg->start_date_epoch_utc = 1735689600; /* 2025-01-01T00:00:00Z */
 }
 
 static void backfill_config_apply_system_location(backfill_config *cfg)
@@ -352,7 +523,6 @@ static void backfill_config_parse(backfill_config *cfg)
 {
     int value = 0;
     cfg_int_binding int_bindings[] = {
-        {"required_history_days", 1, &cfg->required_history_days},
         {"chunk_days", 1, &cfg->chunk_days},
         {"retry_max_attempts", 1, &cfg->retry_max_attempts},
         {"retry_base_backoff_ms", 100, &cfg->retry_base_backoff_ms},
@@ -387,6 +557,17 @@ static void backfill_config_parse(backfill_config *cfg)
     }
 
     (void)backfill_cfg_try_get_string("endpoint", cfg->endpoint, sizeof(cfg->endpoint));
+    (void)backfill_cfg_try_get_string("usage_daily_path", cfg->usage_daily_path, sizeof(cfg->usage_daily_path));
+    if (backfill_cfg_try_get_string("start_date_utc", cfg->start_date_utc, sizeof(cfg->start_date_utc))) {
+        int64_t parsed_epoch = 0;
+        if (parse_utc_date(cfg->start_date_utc, &parsed_epoch) == 0) {
+            cfg->start_date_epoch_utc = parsed_epoch;
+        } else {
+            copy_string_safe(cfg->start_date_utc, sizeof(cfg->start_date_utc), "2025-01-01");
+            cfg->start_date_epoch_utc = 1735689600;
+            (void)SS_LOG_WARN("backfill.config.invalid_start_date", "invalid start_date_utc, falling back to 2025-01-01");
+        }
+    }
     backfill_config_apply_system_location(cfg);
 }
 
@@ -419,11 +600,11 @@ static void log_cfg(const backfill_config *cfg)
     char msg[384];
     if (snprintf(msg,
                  sizeof(msg),
-                 "enabled=%d location=%s area=%s history_days=%d chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s",
+                 "enabled=%d location=%s area=%s start_date=%s chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s single_runs=%.80s",
                  cfg->enabled,
                  cfg->location_name,
                  cfg->elprisomrade,
-                 cfg->required_history_days,
+                 cfg->start_date_utc,
                  cfg->chunk_days,
                  cfg->retry_max_attempts,
                  cfg->retry_base_backoff_ms,
@@ -434,10 +615,14 @@ static void log_cfg(const backfill_config *cfg)
                  cfg->max_requests_per_day,
                  cfg->latitude,
                  cfg->longitude,
-                 cfg->endpoint) < 0) {
+                 cfg->endpoint,
+                 SINGLE_RUNS_ENDPOINT) < 0) {
         copy_string_safe(msg, sizeof(msg), "config logging failed");
     }
     (void)SS_LOG_INFO("backfill.config", msg);
+    if (snprintf(msg, sizeof(msg), "usage_daily_path=%.120s", cfg->usage_daily_path) >= 0) {
+        (void)SS_LOG_INFO("backfill.usage.path", msg);
+    }
 }
 
 static int floor_div_pos(int64_t num, int denom)
@@ -508,6 +693,7 @@ static void rate_limiter_maybe_wait(rate_limiter *rl, const backfill_config *cfg
             rl->minute_count += 1;
             rl->hour_count += 1;
             rl->day_count += 1;
+            usage_bump_daily_count(cfg->usage_daily_path, 1);
             return;
         }
 
@@ -550,13 +736,15 @@ static int fetch_json_with_retry(const char *url, int max_attempts, int base_bac
     return rc;
 }
 
-static int append_archive_record(
+static int append_backfill_record(
     ss_sdk_record **records,
     size_t *count,
     size_t *cap,
     ss_metric_id metric,
     int64_t ts_utc,
-    double value)
+    double value,
+    ss_sdk_data_kind data_kind,
+    int64_t ingested_utc)
 {
     ss_sdk_record rec;
 
@@ -564,9 +752,10 @@ static int append_archive_record(
         return -1;
     }
 
-    if (ss_sdk_record_make_f64(&rec, metric, value, ts_utc, SS_SDK_DATA_OBSERVATION) != SS_SDK_OK) {
+    if (ss_sdk_record_make_f64(&rec, metric, value, ts_utc, data_kind) != SS_SDK_OK) {
         return -1;
     }
+    rec.ingested_utc = ingested_utc;
 
     if (*count == *cap) {
         size_t next_cap = (*cap == 0U) ? 256U : (*cap * 2U);
@@ -609,7 +798,7 @@ static int parse_archive_payload(const char *json_text, cJSON **out_root, archiv
     return 0;
 }
 
-static int write_archive_payload(const char *json_text, size_t *out_writes)
+static int write_archive_payload(const char *json_text, int64_t chunk_start_utc, int64_t chunk_end_utc, size_t *out_writes)
 {
     cJSON *root = NULL;
     archive_hourly_arrays arrays;
@@ -619,8 +808,9 @@ static int write_archive_payload(const char *json_text, size_t *out_writes)
     size_t written = 0U;
     int len = 0;
     int i;
+    const int64_t edge_padding_sec = 3600;
 
-    if (json_text == NULL) {
+    if (json_text == NULL || chunk_start_utc >= chunk_end_utc) {
         return -1;
     }
 
@@ -642,18 +832,131 @@ static int write_archive_payload(const char *json_text, size_t *out_writes)
         if (parse_utc_hour(jt->valuestring, &ts_utc) != 0) {
             continue;
         }
+        if (ts_utc < (chunk_start_utc - edge_padding_sec) || ts_utc >= (chunk_end_utc + edge_padding_sec)) {
+            continue;
+        }
         jtemp = cJSON_GetArrayItem(arrays.temp, i);
         jcloud = cJSON_GetArrayItem(arrays.cloud, i);
         jrad = cJSON_GetArrayItem(arrays.rad, i);
         if (!cJSON_IsNumber(jtemp) || !cJSON_IsNumber(jcloud) || !cJSON_IsNumber(jrad)) {
             continue;
         }
-        if (append_archive_record(&records, &record_count, &record_cap, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, ts_utc, jtemp->valuedouble) !=
-                0 ||
-            append_archive_record(&records, &record_count, &record_cap, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, ts_utc, jcloud->valuedouble) !=
-                0 ||
-            append_archive_record(&records, &record_count, &record_cap, SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, ts_utc, jrad->valuedouble) !=
-                0) {
+        if (append_backfill_record(
+                &records,
+                &record_count,
+                &record_cap,
+                SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+                ts_utc,
+                jtemp->valuedouble,
+                SS_SDK_DATA_OBSERVATION,
+                0) != 0 ||
+            append_backfill_record(
+                &records,
+                &record_count,
+                &record_cap,
+                SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
+                ts_utc,
+                jcloud->valuedouble,
+                SS_SDK_DATA_OBSERVATION,
+                0) != 0 ||
+            append_backfill_record(
+                &records,
+                &record_count,
+                &record_cap,
+                SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+                ts_utc,
+                jrad->valuedouble,
+                SS_SDK_DATA_OBSERVATION,
+                0) != 0) {
+            free(records);
+            cJSON_Delete(root);
+            return -1;
+        }
+    }
+
+    if (record_count > 0U) {
+        if (ss_sdk_db_write_records(records, record_count, &written) != SS_SDK_OK) {
+            free(records);
+            cJSON_Delete(root);
+            return -1;
+        }
+    }
+
+    free(records);
+    cJSON_Delete(root);
+    if (out_writes != NULL) {
+        *out_writes = written;
+    }
+    return 0;
+}
+
+static int write_single_run_payload(
+    const char *json_text,
+    int64_t run_utc,
+    size_t *out_writes)
+{
+    cJSON *root = NULL;
+    archive_hourly_arrays arrays;
+    ss_sdk_record *records = NULL;
+    size_t record_count = 0U;
+    size_t record_cap = 0U;
+    size_t written = 0U;
+    int i;
+    int len = 0;
+
+    if (json_text == NULL || run_utc < 0) {
+        return -1;
+    }
+
+    if (parse_archive_payload(json_text, &root, &arrays) != 0) {
+        return -1;
+    }
+    len = cJSON_GetArraySize(arrays.times);
+
+    for (i = 0; i < len; ++i) {
+        cJSON *jt = cJSON_GetArrayItem(arrays.times, i);
+        cJSON *jtemp = cJSON_GetArrayItem(arrays.temp, i);
+        cJSON *jcloud = cJSON_GetArrayItem(arrays.cloud, i);
+        cJSON *jrad = cJSON_GetArrayItem(arrays.rad, i);
+        int64_t ts_utc;
+
+        if (!cJSON_IsString(jt) || jt->valuestring == NULL) {
+            continue;
+        }
+        if (parse_utc_hour(jt->valuestring, &ts_utc) != 0) {
+            continue;
+        }
+        if (!cJSON_IsNumber(jtemp) || !cJSON_IsNumber(jcloud) || !cJSON_IsNumber(jrad)) {
+            continue;
+        }
+
+        if (append_backfill_record(
+                &records,
+                &record_count,
+                &record_cap,
+                SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+                ts_utc,
+                jtemp->valuedouble,
+                SS_SDK_DATA_FORECAST,
+                run_utc) != 0 ||
+            append_backfill_record(
+                &records,
+                &record_count,
+                &record_cap,
+                SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
+                ts_utc,
+                jcloud->valuedouble,
+                SS_SDK_DATA_FORECAST,
+                run_utc) != 0 ||
+            append_backfill_record(
+                &records,
+                &record_count,
+                &record_cap,
+                SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+                ts_utc,
+                jrad->valuedouble,
+                SS_SDK_DATA_FORECAST,
+                run_utc) != 0) {
             free(records);
             cJSON_Delete(root);
             return -1;
@@ -706,6 +1009,37 @@ static int build_archive_url(char out_url[MAX_URL_LEN], const backfill_config *c
         cfg->longitude,
         start_date,
         end_date);
+    if (n <= 0 || n >= MAX_URL_LEN) {
+        return -1;
+    }
+    return 0;
+}
+
+static int build_single_run_url(
+    char out_url[MAX_URL_LEN],
+    const backfill_config *cfg,
+    int64_t run_utc)
+{
+    char run_str[17];
+    int n;
+
+    if (out_url == NULL || cfg == NULL || run_utc < 0) {
+        return -1;
+    }
+
+    if (epoch_to_ymdhm_utc(run_utc, run_str) != 0) {
+        return -1;
+    }
+
+    n = snprintf(
+        out_url,
+        MAX_URL_LEN,
+        "%s?latitude=%.6f&longitude=%.6f&hourly=temperature_2m,cloud_cover,shortwave_radiation&run=%s&forecast_days=%d&timezone=UTC",
+        SINGLE_RUNS_ENDPOINT,
+        cfg->latitude,
+        cfg->longitude,
+        run_str,
+        FORECAST_DAYS_PER_RUN);
     if (n <= 0 || n >= MAX_URL_LEN) {
         return -1;
     }
@@ -900,11 +1234,12 @@ static int backfill_process_chunk(
         return -1;
     }
 
-    if (write_archive_payload(buf, &wrote_now) != 0) {
+    if (write_archive_payload(buf, part_start, next_end, &wrote_now) != 0) {
         free(buf);
         return -1;
     }
     free(buf);
+    buf = NULL;
 
     *(ctx->records_written) += wrote_now;
     sleep_ms(ctx->cfg->request_interval_ms);
@@ -974,6 +1309,59 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
     return 0;
 }
 
+static int backfill_forecast_history_window(const backfill_config *cfg, int64_t start_utc, int64_t end_utc, size_t *out_records_written)
+{
+    int64_t run_utc;
+    size_t records_written = 0U;
+    rate_limiter rl;
+
+    if (cfg == NULL || start_utc >= end_utc) {
+        return -1;
+    }
+    if (strncmp(cfg->endpoint, "file://", 7) == 0) {
+        if (out_records_written != NULL) {
+            *out_records_written = 0U;
+        }
+        return 0;
+    }
+
+    memset(&rl, 0, sizeof(rl));
+    rl.minute_epoch = -1;
+    rl.hour_epoch = -1;
+    rl.day_epoch = -1;
+
+    run_utc = start_utc - (start_utc % FORECAST_RUN_STEP_SECONDS);
+    while (run_utc < end_utc) {
+        char run_url[MAX_URL_LEN];
+        char *buf = NULL;
+        size_t wrote_now = 0U;
+
+        if (build_single_run_url(run_url, cfg, run_utc) != 0) {
+            return -1;
+        }
+
+        rate_limiter_maybe_wait(&rl, cfg);
+        if (fetch_json_with_retry(run_url, cfg->retry_max_attempts, cfg->retry_base_backoff_ms, &buf) == 0 && buf != NULL) {
+            if (write_single_run_payload(buf, run_utc, &wrote_now) == 0) {
+                records_written += wrote_now;
+            } else {
+                (void)SS_LOG_WARN("backfill.forecast_parse_failed", "single-run payload parse/write failed");
+            }
+            free(buf);
+        } else {
+            (void)SS_LOG_WARN("backfill.forecast_fetch_failed", "single-run fetch failed");
+        }
+
+        run_utc += FORECAST_RUN_STEP_SECONDS;
+        sleep_ms(cfg->request_interval_ms);
+    }
+
+    if (out_records_written != NULL) {
+        *out_records_written = records_written;
+    }
+    return 0;
+}
+
 static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list *before)
 {
     char msg[256];
@@ -1013,10 +1401,11 @@ static int backfill_verify_window(int64_t start_utc, int64_t end_utc, size_t rec
 static int run_backfill_once(const backfill_config *cfg)
 {
     int64_t end_utc = align_to_slot(now_utc() - ((int64_t)cfg->freshness_lag_minutes * 60));
-    int64_t start_utc = align_to_slot(end_utc - ((int64_t)cfg->required_history_days * 86400));
+    int64_t start_utc = align_to_slot(cfg->start_date_epoch_utc);
     hole_list before = {0};
     hole_list after = {0};
-    size_t records_written = 0U;
+    size_t records_written_obs = 0U;
+    size_t records_written_fc = 0U;
 
     if (start_utc >= end_utc) {
         (void)SS_LOG_WARN("backfill.window_invalid", "computed window invalid");
@@ -1029,7 +1418,7 @@ static int run_backfill_once(const backfill_config *cfg)
     }
 
     if (before.count > 0U) {
-        if (backfill_holes(cfg, &before, &records_written) != 0) {
+        if (backfill_holes(cfg, &before, &records_written_obs) != 0) {
             (void)SS_LOG_ERROR("backfill.fill_failed", "fetch/write loop failed");
             hole_list_free(&before);
             return 1;
@@ -1037,8 +1426,13 @@ static int run_backfill_once(const backfill_config *cfg)
     }
     hole_list_free(&before);
 
+    if (backfill_forecast_history_window(cfg, start_utc, end_utc, &records_written_fc) != 0) {
+        (void)SS_LOG_WARN("backfill.forecast_fill_failed", "fetch/write forecast history loop failed");
+        records_written_fc = 0U;
+    }
+
     {
-        int verify_rc = backfill_verify_window(start_utc, end_utc, records_written, &after);
+        int verify_rc = backfill_verify_window(start_utc, end_utc, records_written_obs + records_written_fc, &after);
         if (verify_rc < 0) {
             hole_list_free(&after);
             return 1;

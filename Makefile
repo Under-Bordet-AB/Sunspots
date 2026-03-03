@@ -53,6 +53,7 @@ WARNINGS_RAW_LOG ?= $(RAW_LOGS_DIR)/warnings_raw.log
 LIZARD_RAW_LOG ?= $(RAW_LOGS_DIR)/lizard_raw.log
 ALL_LOCK_FILE ?= $(RAW_LOGS_DIR)/.make_all.lock
 WARNINGS_LOCK_FILE ?= $(RAW_LOGS_DIR)/.make_warnings.lock
+BACKFILL_USAGE_TRACKER ?= logs/backfill_usage_daily.log
 WARNINGS_SKIP_PREFLIGHT ?= 0
 ALLOW_DURING_ALL ?= 0
 LIZARD_PARAM_THRESHOLD ?= 6
@@ -996,14 +997,38 @@ e2e-valgrind:
 	@exit 2
 
 clean:
-	@for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)"; do \
+	@set -e; \
+	tracker="$(BACKFILL_USAGE_TRACKER)"; \
+	tmp_tracker=""; \
+	if [ -n "$$tracker" ] && [ -f "$$tracker" ]; then \
+		tmp_tracker="$$(mktemp /tmp/sunspots_usage_tracker_XXXXXX)"; \
+		cp "$$tracker" "$$tmp_tracker"; \
+	fi; \
+	for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)"; do \
 		if [ -f "$$d/CMakeCache.txt" ]; then \
 			$(CMAKE) --build "$$d" --target clean --parallel >/dev/null 2>&1 || true; \
 		fi; \
-	done
-	@rm -rf "$(RAW_LOGS_DIR)"
+	done; \
+	rm -rf "$(RAW_LOGS_DIR)"; \
+	if [ -n "$$tmp_tracker" ] && [ -f "$$tmp_tracker" ]; then \
+		mkdir -p "$$(dirname "$$tracker")"; \
+		cp "$$tmp_tracker" "$$tracker"; \
+		rm -f "$$tmp_tracker"; \
+	fi
 	@printf "%b[ok]%b clean complete\n" "$(C_GREEN)" "$(C_RESET)"
 
 deepclean:
-	@rm -rf build "$(LOG_ROOT)" warnings
+	@set -e; \
+	tracker="$(BACKFILL_USAGE_TRACKER)"; \
+	tmp_tracker=""; \
+	if [ -n "$$tracker" ] && [ -f "$$tracker" ]; then \
+		tmp_tracker="$$(mktemp /tmp/sunspots_usage_tracker_XXXXXX)"; \
+		cp "$$tracker" "$$tmp_tracker"; \
+	fi; \
+	rm -rf build "$(LOG_ROOT)" warnings; \
+	if [ -n "$$tmp_tracker" ] && [ -f "$$tmp_tracker" ]; then \
+		mkdir -p "$$(dirname "$$tracker")"; \
+		cp "$$tmp_tracker" "$$tracker"; \
+		rm -f "$$tmp_tracker"; \
+	fi
 	@printf "%b[ok]%b deepclean complete\n" "$(C_GREEN)" "$(C_RESET)"

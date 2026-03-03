@@ -532,7 +532,7 @@ TEST_F(SdkDbFixture, get_canonical_from_1_to_899_aligns_to_unix_epoch_zero)
     ss_sdk_db_free_samples(&out);
 }
 
-TEST_F(SdkDbFixture, keeps_first_insert_on_conflict_identity)
+TEST_F(SdkDbFixture, same_slot_observation_keeps_first_insert_for_canonical_read)
 {
     const int64_t slot = now_slot_utc() - 900;
     const ss_sdk_record first = make_f64_record(
@@ -553,6 +553,35 @@ TEST_F(SdkDbFixture, keeps_first_insert_on_conflict_identity)
     ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_PRESSURE_MSL_HPA, &out), SS_SDK_OK);
     ASSERT_EQ(out.count, (size_t)1);
     EXPECT_DOUBLE_EQ(out.samples[0].value.f64, 1000.0);
+    ss_sdk_db_free_samples(&out);
+}
+
+TEST_F(SdkDbFixture, forecast_history_keeps_multiple_versions_for_same_slot)
+{
+    const int64_t slot = now_slot_utc() + 3600;
+    const ss_sdk_record first = make_f64_record(
+        SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+        1.0,
+        slot,
+        SS_SDK_DATA_FORECAST);
+    const ss_sdk_record second = make_f64_record(
+        SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+        3.0,
+        slot,
+        SS_SDK_DATA_FORECAST);
+    ss_sdk_record first_mut = first;
+    ss_sdk_record second_mut = second;
+    ss_sdk_samples_out out = {NULL, 0};
+
+    first_mut.ingested_utc = 1000;
+    second_mut.ingested_utc = 1001;
+    ASSERT_EQ(ss_sdk_db_write_record(&first_mut), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_write_record(&second_mut), SS_SDK_OK);
+
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_OK);
+    ASSERT_EQ(out.count, (size_t)1);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, 3.0);
+    EXPECT_EQ(out.samples[0].flags, SS_SDK_SAMPLE_FORECAST);
     ss_sdk_db_free_samples(&out);
 }
 
@@ -1025,6 +1054,29 @@ TEST_F(SdkDbFixture, test_helpers_cover_additional_internal_branches)
     EXPECT_FALSE(ss_sdk_internal_db_test_try_interpolate_unknown_policy());
 }
 
+TEST_F(SdkDbFixture, internal_loader_returns_all_forecast_versions_for_slot)
+{
+    const int64_t slot = now_slot_utc() + 3600;
+    size_t out_count = 0U;
+    ss_sdk_record first = make_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 1.0, slot, SS_SDK_DATA_FORECAST);
+    ss_sdk_record second = make_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 2.0, slot, SS_SDK_DATA_FORECAST);
+
+    first.ingested_utc = 1000;
+    second.ingested_utc = 1001;
+    ASSERT_EQ(ss_sdk_db_write_record(&first), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_write_record(&second), SS_SDK_OK);
+
+    ASSERT_EQ(
+        ss_sdk_internal_db_test_load_rows_for_window(
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            SS_SDK_VALUE_F64,
+            slot,
+            slot + 900,
+            &out_count),
+        SS_SDK_OK);
+    EXPECT_EQ(out_count, (size_t)2);
+}
+
 TEST_F(SdkDbFixture, interpolation_policy_table_keeps_expected_metric_categories)
 {
     const int k_policy_none = 0;
@@ -1198,26 +1250,26 @@ TEST_F(SdkDbFixture, internal_row_loader_filters_invalid_rows_for_all_value_type
         SS_SDK_OK);
 
     std::string sql = "PRAGMA ignore_check_constraints = ON;";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",1,NULL,2.0,NULL,-900,0,0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",1,NULL,2.0,NULL," + std::to_string(base + 1) + "," + std::to_string(base + 901) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",1,NULL,2.0,NULL," + std::to_string(base + 900) + "," + std::to_string(base + 1800) + ",9);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",0,7,NULL,NULL," + std::to_string(base + 1800) + "," + std::to_string(base + 2700) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",1,NULL,NULL,NULL," + std::to_string(base + 2700) + "," + std::to_string(base + 3600) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",1,NULL,1e999,NULL," + std::to_string(base + 3600) + "," + std::to_string(base + 4500) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",0,NULL,NULL,NULL," + std::to_string(base + 5400) + "," + std::to_string(base + 6300) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",2,NULL,NULL,NULL," + std::to_string(base + 6300) + "," + std::to_string(base + 7200) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",2,NULL,NULL,2," + std::to_string(base + 7200) + "," + std::to_string(base + 8100) + ",0);";
-    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind) VALUES(" +
-           std::to_string(metric) + ",2,NULL,NULL,1," + std::to_string(base + 8100) + "," + std::to_string(base + 9000) + ",0);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",1,NULL,2.0,NULL,-900,0,0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",1,NULL,2.0,NULL," + std::to_string(base + 1) + "," + std::to_string(base + 901) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",1,NULL,2.0,NULL," + std::to_string(base + 900) + "," + std::to_string(base + 1800) + ",9,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",0,7,NULL,NULL," + std::to_string(base + 1800) + "," + std::to_string(base + 2700) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",1,NULL,NULL,NULL," + std::to_string(base + 2700) + "," + std::to_string(base + 3600) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",1,NULL,NULL,NULL," + std::to_string(base + 3600) + "," + std::to_string(base + 4500) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",0,NULL,NULL,NULL," + std::to_string(base + 5400) + "," + std::to_string(base + 6300) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",2,NULL,NULL,NULL," + std::to_string(base + 6300) + "," + std::to_string(base + 7200) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",2,NULL,NULL,2," + std::to_string(base + 7200) + "," + std::to_string(base + 8100) + ",0,1);";
+    sql += "INSERT INTO records(canonical,value_type,value_i64,value_f64,value_bool,ts_start_utc,ts_end_utc,data_kind,ingested_utc) VALUES(" +
+           std::to_string(metric) + ",2,NULL,NULL,1," + std::to_string(base + 8100) + "," + std::to_string(base + 9000) + ",0,1);";
     ASSERT_EQ(ss_sdk_internal_db_test_exec_sql(sql.c_str()), SS_SDK_OK);
 
     ASSERT_EQ(

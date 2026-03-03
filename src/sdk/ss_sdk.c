@@ -69,6 +69,9 @@ static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *record)
     if (record->ts_end_utc != record->ts_start_utc + SS_SLOT_SECONDS) {
         return SS_SDK_ERR_VALIDATION;
     }
+    if (record->ingested_utc < 0) {
+        return SS_SDK_ERR_VALIDATION;
+    }
 
     if (record->value_type == SS_SDK_VALUE_F64 && !isfinite(record->value.f64)) {
         return SS_SDK_ERR_VALIDATION;
@@ -149,6 +152,7 @@ static ss_sdk_status ss_sdk_record_make_common(
     out->ts_start_utc = start_utc;
     out->ts_end_utc = start_utc + SS_SLOT_SECONDS;
     out->data_kind = data_kind;
+    out->ingested_utc = 0;
     return SS_SDK_OK;
 }
 

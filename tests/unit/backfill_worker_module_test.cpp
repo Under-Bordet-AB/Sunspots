@@ -93,6 +93,21 @@ std::string format_utc_ymdhm(int64_t ts_utc)
     return std::string(out);
 }
 
+std::string format_utc_ymd(int64_t ts_utc)
+{
+    char out[16];
+    time_t tv = (time_t)ts_utc;
+    struct tm tmv;
+    std::memset(&tmv, 0, sizeof(tmv));
+    if (gmtime_r(&tv, &tmv) == NULL) {
+        return "";
+    }
+    if (strftime(out, sizeof(out), "%Y-%m-%d", &tmv) == 0U) {
+        return "";
+    }
+    return std::string(out);
+}
+
 bool write_mock_archive_json(const std::string &path, int64_t from_utc, int64_t to_utc)
 {
     FILE *fp;
@@ -292,17 +307,21 @@ TEST_F(BackfillWorkerFixture, one_week_backfill_populates_required_metrics_and_i
     const int64_t start_utc = align_to_slot(end_utc - (7LL * 86400LL));
     const int64_t fixture_from = start_utc - 3600;
     const int64_t fixture_to = end_utc + 3600;
+    const std::string start_date = format_utc_ymd(start_utc);
     std::string cfg;
     int rc;
 
     ASSERT_TRUE(write_mock_archive_json(fixture_json_path_, fixture_from, fixture_to));
+    ASSERT_FALSE(start_date.empty());
 
     cfg =
         "{"
         "\"name\":\"BackfillOpenMeteo\","
         "\"backfill\":{"
         "\"enabled\":true,"
-        "\"required_history_days\":7,"
+        "\"start_date_utc\":\"" +
+        start_date +
+        "\","
         "\"chunk_days\":7,"
         "\"retry_max_attempts\":2,"
         "\"retry_base_backoff_ms\":50,"
@@ -355,7 +374,7 @@ TEST_F(BackfillWorkerFixture, backfill_fails_when_system_location_is_missing)
         "\"name\":\"BackfillOpenMeteo\","
         "\"backfill\":{"
         "\"enabled\":true,"
-        "\"required_history_days\":1,"
+        "\"start_date_utc\":\"2025-01-01\","
         "\"chunk_days\":1"
         "}"
         "}";
@@ -377,7 +396,7 @@ TEST_F(BackfillWorkerFixture, backfill_fails_when_location_latitude_missing)
         "\"name\":\"BackfillOpenMeteo\","
         "\"backfill\":{"
         "\"enabled\":true,"
-        "\"required_history_days\":1,"
+        "\"start_date_utc\":\"2025-01-01\","
         "\"chunk_days\":1"
         "}"
         "}";
@@ -404,7 +423,7 @@ TEST_F(BackfillWorkerFixture, backfill_fails_when_location_longitude_missing)
         "\"name\":\"BackfillOpenMeteo\","
         "\"backfill\":{"
         "\"enabled\":true,"
-        "\"required_history_days\":1,"
+        "\"start_date_utc\":\"2025-01-01\","
         "\"chunk_days\":1"
         "}"
         "}";
