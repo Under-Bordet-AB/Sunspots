@@ -114,7 +114,7 @@ int save_to_database(forecast_data_t* forecast_data) {
             continue;
         }
 
-        int64_t data_type = i == 0 ? SS_SDK_DATA_OBSERVATION : SS_SDK_DATA_FORECAST;
+        int64_t data_type = (i == 0) ? SS_SDK_DATA_OBSERVATION : SS_SDK_DATA_FORECAST;
         data_type = SS_SDK_DATA_FORECAST;
 
         if (point->has_temperature) {

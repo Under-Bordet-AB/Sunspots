@@ -95,8 +95,8 @@ int wait_for_new_data() {
 
     while (cycles < max_cycles) {
         const int64_t now = (int64_t)time(NULL);
-        const int64_t window_start = now - 90 * 60;
-        const int64_t window_end = now + 90 * 60;
+        const int64_t window_start = now - 65 * 60;
+        const int64_t window_end = now + 65 * 60;
 
         ss_metric_id metrics[3] = {
             SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
@@ -107,7 +107,6 @@ int wait_for_new_data() {
         int observed_metrics_found = 0;
 
         for (int m = 0; m < 3; m++) {
-            printf("Looking for samples...\n");
             int metric_has_observed = 0;
 
             ss_sdk_samples_out samples = {0};
@@ -122,10 +121,8 @@ int wait_for_new_data() {
                 const ss_sdk_sample* s = &samples.samples[i];
                 if (s->value_type != SS_SDK_VALUE_F64) continue;
                 if (s->ts_utc < window_start || s->ts_utc > window_end) continue;
-                printf("Sample found: %d\n", i);
 
                 if ((s->flags & SS_SDK_SAMPLE_OBSERVED) != 0) {
-                    printf("Observed metric found.\n");
                     metric_has_observed = 1;
                     break;
                 }
