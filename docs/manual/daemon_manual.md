@@ -48,7 +48,8 @@ The configuration file `sunspots.json` is located in the `Sunspots/config` folde
             "name": "Task_Relative_Mode",
             "bin_path": "./path/to/binary/from/root",
             "Timer-type": 1,
-            "Rel-time": 30
+            "Rel-time": 30,
+            "start_immediately": true
         },
         {
             "name": "Logger",
@@ -79,6 +80,9 @@ The "Timer-type" field is set to either 0 or 1:
 - Type 1 (Timer Mode): Used for either Absolute or Relative timing. If "Abs-time" is provided, the process runs at a specific time (24h format, HH:mm). If "Rel-time" is provided, the process runs at a repeating interval.
 
 All intervals for heartbeats and relative timers are defined in seconds.
+
+Optional field for timer modules:
+- `start_immediately`: if `true`, daemon spawns the module once during daemon startup (or reload) in addition to the configured timer schedule.
 
 ## Running and stopping
 After building the project the binary can be found in `Sunspots/build/debug/src/core`. Use `./sunspots_daemon` to run the daemon. The PID of the daemon will be written to `Sunspots/logs/sunspots.pid`, to kill the daemon use `kill $(cat sunspots.pid)` (seen from `Sunspots/logs`).

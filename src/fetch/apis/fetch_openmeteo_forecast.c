@@ -18,7 +18,7 @@
 #include "../../transform/weather/forecast_model.h"
 #include "../../transform/weather/forecast_transform.h"
 
-#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=18.06&hourly=shortwave_radiation,temperature_2m,cloud_cover"
+#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=18.06&hourly=shortwave_radiation,temperature_2m,cloud_cover&forecast_hours=24&current_weather=true"
 
 int normalize_data(char* raw_in, forecast_data_t** out);
 int save_to_database(forecast_data_t* price_data);
@@ -114,6 +114,8 @@ int save_to_database(forecast_data_t* forecast_data) {
             continue;
         }
 
+        int64_t data_type = (i == 0) ? SS_SDK_DATA_OBSERVATION : SS_SDK_DATA_FORECAST;
+
         if (point->has_temperature) {
             ss_sdk_record record;
             ss_sdk_status status = ss_sdk_record_make_f64(
@@ -121,7 +123,7 @@ int save_to_database(forecast_data_t* forecast_data) {
                 SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
                 point->temperature_c,
                 (int64_t)point->timestamp_unix,
-                SS_SDK_DATA_FORECAST);
+                data_type);
             if (status != SS_SDK_OK) {
                 syslog(LOG_WARNING, "Fetch API - Openmeteo Forecast - record_make temperature failed at i=%d status=%d", i, (int)status);
                 return -1;
@@ -141,7 +143,7 @@ int save_to_database(forecast_data_t* forecast_data) {
                 SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
                 point->cloud_cover_percent,
                 (int64_t)point->timestamp_unix,
-                SS_SDK_DATA_FORECAST);
+                data_type);
             if (status != SS_SDK_OK) {
                 syslog(LOG_WARNING, "Fetch API - Openmeteo Forecast - record_make cloud_cover failed at i=%d status=%d", i, (int)status);
                 return -1;
@@ -161,7 +163,7 @@ int save_to_database(forecast_data_t* forecast_data) {
                 SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
                 point->solar_radiation_W_per_m2,
                 (int64_t)point->timestamp_unix,
-                SS_SDK_DATA_FORECAST);
+                data_type);
             if (status != SS_SDK_OK) {
                 syslog(LOG_WARNING, "Fetch API - Openmeteo Forecast - record_make shortwave_radiation failed at i=%d status=%d", i, (int)status);
                 return -1;

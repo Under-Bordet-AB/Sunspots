@@ -99,6 +99,22 @@ typedef struct ss_sdk_log_fields {
 ss_sdk_status ss_sdk_db_write_record(const ss_sdk_record *record);
 
 /**
+ * @brief Validate and atomically persist multiple canonical records.
+ *
+ * All records are written in one DB transaction. If any record fails validation
+ * or persistence, no records from the batch are committed.
+ *
+ * @param records Input record array.
+ * @param count Number of records.
+ * @param out_written Number of rows actually inserted (deduplicated rows are excluded).
+ * @return SDK status code.
+ */
+ss_sdk_status ss_sdk_db_write_records(
+    const ss_sdk_record *records,
+    size_t count,
+    size_t *out_written);
+
+/**
  * @brief Factory: build a canonical record for an f64 metric.
  *
  * Behavior:

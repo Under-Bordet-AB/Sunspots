@@ -96,6 +96,38 @@ double avg_c = sum / (double)n;
 - `quarters_to_fetch > 0` reads exactly that many 15-minute slots.
 - `quarters_to_fetch == 0` reads forward horizon (from start to latest available data).
 
+### Interpolation Behavior
+
+Interpolation is applied by SDK read selection (`ss_sdk_db_get_canonical`) when an exact slot value is missing.
+
+Slot selection order:
+
+1. For `ts <= now_slot`: prefer observation, then forecast, then interpolation (if policy allows).
+2. For `ts > now_slot`: prefer forecast first. For step-policy canonicals, observation can also be used as a direct fallback.
+
+Interpolation policies are fixed per canonical metric:
+
+1. `linear`: most continuous weather/FX metrics (for example temperature, humidity, wind, cloud cover, radiation, FX).
+2. `step`: spot price metrics (`energy.price.spot.*`).
+3. `none`: discrete metrics (for example symbol code, boolean day/night).
+
+Interpolation limits:
+
+1. Max interpolation span is 6 hours.
+2. If a required slot would need interpolation beyond that limit, read returns `SS_SDK_ERR_PARTIAL_DATA`.
+3. If some slots are missing after selection/interpolation, read returns `SS_SDK_ERR_PARTIAL_DATA` and may still return partial samples.
+
+Flags in returned samples:
+
+1. `SS_SDK_SAMPLE_OBSERVED`
+2. `SS_SDK_SAMPLE_FORECAST`
+3. `SS_SDK_SAMPLE_INTERPOLATED`
+
+Caller guidance:
+
+1. Treat `SS_SDK_ERR_PARTIAL_DATA` as an explicit completeness signal.
+2. Always call `ss_sdk_db_free_samples(&out)` when `out.samples` is non-NULL, including partial-data cases.
+
 ## Logging Usage
 
 ### Log Macros (One-Liner)
@@ -151,20 +183,47 @@ if (st != SS_SDK_OK) {
 - Optional SDK file mirror is controlled by env vars:
   - `SS_SDK_LOG_MIRROR_ENABLED=1` (accepted truthy tokens: `1`, `true`, `yes`, `on`)
   - `SS_SDK_LOG_MIRROR_PATH=/path/to/sdk.log`
-- DB path is controlled by `SS_SDK_DB_PATH`.
+  - `SS_SDK_LOG_MIRROR_MAX_BYTES=5242880` (truncate mirror when file size reaches/exceeds this cap)
+- DB directory is controlled by `SS_SDK_DB_DIR`.
 - Config convention for daemon/module config blobs:
-  - `common.sdk.db_path`
-  - `common.sdk.log_level`
-  - `common.sdk.log_mirror_enabled`
-  - `common.sdk.log_mirror_path`
+  - `system.sdk.db_dir`
+  - `system.sdk.log_level`
+  - `system.sdk.log_mirror_enabled`
+  - `system.sdk.log_mirror_path`
+  - `system.sdk.log_mirror_max_bytes`
 - Default behavior with no SDK config/env:
-  - DB path defaults to `db/ss_sdk.db`
+  - DB path defaults to `db/<lat_micro>_<lon_micro>.db` (requires `SUNSPOTS_SYSTEM.location`)
   - Log level defaults to `debug`
   - Mirror defaults to on
   - Default mirror path is `logs/sdk.log` (if no path is provided)
+  - Mirror max file size defaults to `5242880` bytes (5 MiB)
 - With SDK mirror enabled, mirror writes are blocking per call: each log call locks the mirror file, writes, then unlocks.
 - Performance guideline: avoid logging inside tight loops; collect state in loop variables and emit one summary log at the end (for example via a final `switch`/result branch).
 - Recommended pattern for larger modules: use enum + lookup table for stable event strings.
+
+### Team Config Handoff (Copy/Paste)
+
+When teammates ask for the "SDK/DB/log strings", use one shared block under `system`:
+
+```json
+"system": {
+  "...": "...",
+  "sdk": {
+    "db_dir": "db",
+    "log_level": "info",
+    "log_mirror_enabled": true,
+    "log_mirror_path": "logs/sdk.log",
+    "log_mirror_max_bytes": "5242880"
+  }
+}
+```
+
+Notes:
+
+1. Keep exactly one shared SDK config under `system.sdk`.
+2. Do not place SDK keys anywhere else in config.
+3. `log_mirror_max_bytes` is a hard cap trigger: when the mirror file reaches/exceeds the cap, SDK truncates it before writing the next line.
+4. No fallback locations are supported; only `system.sdk` is read.
 
 ## See Also
 
