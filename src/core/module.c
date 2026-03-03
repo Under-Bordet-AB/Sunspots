@@ -309,6 +309,7 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig)
         self->module_pid   = p;
         self->module_alive = 1;
         syslog(LOG_INFO, "Execvp on: '%s' [PID %d]", self->module_name, p);
+		daemon_logger_send(self->module_name, "Started.");
     }
     close(pipefd[0]);
 }
