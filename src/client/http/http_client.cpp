@@ -7,12 +7,11 @@ HttpClient::~HttpClient()
     disconnect();
 }
 
-int HttpClient::connect()
+bool HttpClient::connect()
 {
     if (this->fd >= 0)
     {
-        perror("");
-        return -1;
+        return true;
     }
 
     struct addrinfo hints = {};
@@ -23,7 +22,7 @@ int HttpClient::connect()
     hints.ai_protocol = IPPROTO_TCP;
 
     if (getaddrinfo(host.c_str(), port.c_str(), &hints, &res) != 0)
-        return -1;
+        return false;
 
     int fd = -1;
     for (addrinfo* rp = res; rp; rp = rp->ai_next)
@@ -43,24 +42,13 @@ int HttpClient::connect()
     freeaddrinfo(res);
     if (fd < 0)
     {
-        perror("");
-        return -1;
+        return false;
     }
 
     this->fd = fd;
 
     std::cout << "Client FD " << fd << " connected\n";
-    return 0;
-}
-
-int HttpClient::write(const void* buffer, size_t length)
-{
-    return send(fd, buffer, length, MSG_NOSIGNAL);  // Non-blocking
-}
-
-int HttpClient::read(void* buffer, size_t length)
-{
-    return recv(fd, buffer, length, MSG_DONTWAIT);  // Non-blocking
+    return true;
 }
 
 void HttpClient::disconnect()
@@ -73,81 +61,52 @@ void HttpClient::disconnect()
     }
 }
 
-// Takes endpoint as argument, returns HTTP response
-std::string HttpClient::get(const std::string& path)
+HttpResponse HttpClient::get(const std::string& path)
 {
-    std::string request = buildHttpRequest("GET", path, "");
-    ssize_t bytesSent = write(request.c_str(), request.length());
-    if (bytesSent < 0 || bytesSent != (ssize_t) request.length())
+    if (!this->connect())
     {
-        perror("write");
-        std::cerr << "Failed to send HTTP request\n";
+        return HttpResponse::error("Connection failed to " + host + ":" + port);
     }
+    else
+    {
+        HttpRequest request(HttpMethod::GET, host, path);
+        return send(request);
+    }
+}
 
-    char buffer[1024];
+HttpResponse HttpClient::post(const std::string& path, const std::string& body)
+{
+    HttpRequest request(HttpMethod::POST, host, path);
+    request.withBody(body);
+    return send(request);
+}
+
+HttpResponse HttpClient::send(const HttpRequest& request)
+{
+    if (fd < 0 && !connect())
+        return HttpResponse::error("Not connected");
+
+    std::string raw = request.build();
+    if (::send(fd, raw.c_str(), raw.size(), 0) < 0)
+        return HttpResponse::error("Send failed");
+
+    std::string response = receive();
+    disconnect();
+
+    return HttpResponse::parse(response);
+}
+
+std::string HttpClient::receive()
+{
     std::string response;
-    int timeoutAttempts = 0;
+    char buffer[4096];
+    ssize_t bytes;
 
-    while (true)
+    while ((bytes = recv(fd, buffer, sizeof(buffer) - 1, 0)) > 0)
     {
-        ssize_t bytesReceived = read(buffer, sizeof(buffer) - 1);
-
-        if (bytesReceived > 0)
-        {
-            buffer[bytesReceived] = '\0';
-            response += buffer;
-            timeoutAttempts = 0;
-        }
-        else if (bytesReceived == 0)
-        {
-            break;  // Success
-        }
-        else if (errno == EAGAIN || errno == EWOULDBLOCK)
-        {
-            if (++timeoutAttempts > Config::MAX_TIMEOUT_ATTEMPTS)
-            {
-                std::cerr << "Read timeout\n";
-            }
-            // No data, wait and try again
-            usleep(1000);  // 1 ms
-            continue;
-        }
-        else
-        {
-            perror("read error");
-            std::cerr << "Read failed\n";
-            break;
-        }
-    }
-
-    if (response.empty())
-    {
-        std::cerr << "Empty response from server\n";
+        buffer[bytes] = '\0';
+        response += buffer;
     }
 
     return response;
-}
-
-std::string HttpClient::buildHttpRequest(const std::string& method, const std::string& path, const std::string& body)
-{
-    std::string request = method + " " + path + " HTTP/1.1\r\n";
-    request += "Host: " + host + "\r\n";
-    request += "User-Agent: HttpClient/1.0\r\n";
-    request += "Accept: */*\r\n";
-
-    if (!body.empty())
-    {
-        request += "Content-Length: " + std::to_string(body.length()) + "\r\n";
-        request += "Content-Type: application/json\r\n";
-    }
-
-    request += "Connection: close\r\n";
-    request += "\r\n";
-
-    if (!body.empty())
-    {
-        request += body;
-    }
-
-    return request;
 }

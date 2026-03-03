@@ -5,11 +5,14 @@
 #include <signal.h>
 #include <pthread.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "../fetch_utils.h"
 
 #include "../../libs/curly.h"
 #include "../../libs/json/cJSON.h"
+
+#include "../../sdk/ss_sdk.h"
 
 #include "../../transform/transform.h"
 #include "../../transform/price/price_model.h"
@@ -28,44 +31,53 @@ int main() {
 
     syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
 
+    int rc = EXIT_FAILURE;
     char* buffer = NULL;
-
+    price_data_t* price_data = NULL;
     char url[128];
     time_t now = time(NULL);
-    struct tm *t = localtime(&now);
+    struct tm t = {0};
+    struct tm *t_ptr = localtime(&now);
 
-    snprintf(url, sizeof(url), API_URL, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+    if (!t_ptr) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - localtime failed.");
+        goto done;
+    }
+
+    t = *t_ptr;
+    snprintf(url, sizeof(url), API_URL, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
 
     if (fetch_from_url(url, &buffer, 30) < 0) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API.");
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     if (!buffer) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL.");
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
-    price_data_t* price_data = NULL;
     if (normalize_data(buffer, &price_data) < 0) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data.");
-        free(buffer);
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
     if ((save_to_database(price_data) < 0)) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
-        price_data_dispose(price_data);
-        free(buffer);
-        exit(EXIT_FAILURE);
+        goto done;
     }
 
-    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved!");
-    
-    if (price_data != NULL) price_data_dispose(price_data);
+    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved for today!");
+    rc = EXIT_SUCCESS;
+
+done:
+    if (price_data != NULL) {
+        price_data_dispose(price_data);
+        free(price_data);
+    }
     if (buffer != NULL) free(buffer);
 
-    exit(EXIT_SUCCESS);
+    return rc;
 }
 
 int normalize_data(char* raw_in, price_data_t** out) {
@@ -103,8 +115,37 @@ int normalize_data(char* raw_in, price_data_t** out) {
 }
 
 int save_to_database(price_data_t* price_data) {
+    if (price_data == NULL) {
+        return -1;
+    }
+
+    if (price_data->no_data_points <= 0) {
+        return -1;
+    }
+
+    if (price_data->timestamp_arr_unix == NULL || price_data->price_arr_SEK_per_kWh == NULL) {
+        return -1;
+    }
+
     for (int i = 0; i < price_data->no_data_points; i++) {
-        // save each datapoint with its respective timestamp (in its timeslot database wise)
+        ss_sdk_record record;
+        ss_sdk_status status = ss_sdk_record_make_f64(
+            &record,
+            SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH,
+            price_data->price_arr_SEK_per_kWh[i],
+            (int64_t)price_data->timestamp_arr_unix[i],
+            SS_SDK_DATA_FORECAST);
+
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - record_make failed at i=%d status=%d", i, (int)status);
+            return -1;
+        }
+
+        status = ss_sdk_db_write_record(&record);
+        if (status != SS_SDK_OK) {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - db_write failed at i=%d status=%d", i, (int)status);
+            return -1;
+        }
     }
 
     return 0;

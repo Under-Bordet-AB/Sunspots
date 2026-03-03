@@ -1,28 +1,43 @@
 {
-  "system": {
-    "version": "1.0",
-    "name": "Sunspots Daemon",
-    "log_path": "/var/log/sunspots.log"
-  },
-  "modules": [
-    {
-      "name": "Service_Heartbeat_Mode",
-      "bin_path": "./src/core/SHM",
-      "Timer-type": 0,
-      "heartbeat_interval": 5
+    "system": {
+        "version": "1.1",
+        "name": "Sunspots Daemon",
+        "log_path": "./logs/daemon.log",
+        "socket_path": "./logs/sunspots.sock"
     },
+    "modules": [
     {
-      "name": "Task_Absolute_Mode",
-      "bin_path": "./src/core/TAM",
-      "Timer-type": 1,
-      "Abs-time": "16:52"
+        "name": "Logger",
+        "bin_path": "./build/debug/src/core/sunspots_logger",
+        "Timer-type": 0,
+        "heartbeat_interval": 3,
+        "log_path": "./logs/daemon.log",
+        "socket_path": "./logs/sunspots.sock"
     },
+	{
+		"name": "Elprisjustnu",
+		"bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
+		"Timer-type": 1,
+		"Rel-time": 60
+	},
     {
-      "name": "Task_Relative_Mode",
-      "bin_path": "./src/core/TRM",
-      "Timer-type": 1,
-      "Rel-time": 30
-    },
+		"name": "ComputeManager",
+		"bin_path": "./build/debug/src/compute/sunspots_compute_manager",
+		"Timer-type": 1,
+		"Rel-time": 60
+	},		
+	{
+    	"name": "Openmeteo",
+    	"bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo",
+    	"Timer-type": 1,
+    	"Rel-time": 30
+	},
+	{
+    	"name": "Openmeteo_forecast",
+    	"bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo_forecast",
+    	"Timer-type": 1,
+    	"Rel-time": 100
+	},
     {
       "name": "Frontend",
       "bin_path": "./build/debug/src/frontend/sunspots_frontend",
@@ -36,7 +51,7 @@
       "client_queue_size": 32,
 
       "allow_file_search": true,
-      "file_search_dir": "./htdocs",
+      "file_search_dir": "./",
       "aliases": [
         {
           "target_url": "/README",

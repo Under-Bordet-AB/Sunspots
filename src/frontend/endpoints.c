@@ -2,9 +2,12 @@
 
 #include <stdio.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include "http_parser.h"
 #include "file_helpers.h"
@@ -27,24 +30,92 @@ static const char *index_fallbacks[] = {
 
 int resolve_index_file(const char *dir_path, char *out_path, size_t out_size)
 {
+    if (!path)
+        return NULL;
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return NULL;
+
     struct stat st;
-
-    for (int i = 0; i < FALLBACK_COUNT; i++) {
-        char temp[PATH_MAX];
-
-        snprintf(temp, sizeof(temp), "%s/index.%s",
-                 dir_path, index_fallbacks[i]);
-
-        if (stat(temp, &st) == 0 && S_ISREG(st.st_mode)) {
-            if (strlen(temp) >= out_size)
-                return -1;
-
-            strcpy(out_path, temp);
-            return 0;
-        }
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return NULL;
     }
 
-    return -1;
+    // Must be regular file
+    if (!S_ISREG(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
+
+    // Reject symlinks explicitly (extra safety)
+    if (S_ISLNK(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
+
+    // Size validation
+    if (st.st_size < 0 || st.st_size == 9223372036854775807) {
+        close(fd);
+        return NULL;
+    }
+
+    size_t size = (size_t)st.st_size;
+
+    char* buffer = malloc(size + 1);
+    if (!buffer) {
+        close(fd);
+        return NULL;
+    }
+
+    size_t total_read = 0;
+    while (total_read < size) {
+        ssize_t r = read(fd, buffer + total_read, size - total_read);
+        if (r <= 0) {
+            free(buffer);
+            close(fd);
+            return NULL;
+        }
+        total_read += (size_t)r;
+    }
+
+    buffer[size] = '\0';  // safe for binary
+    close(fd);
+
+    if (out_size)
+        *out_size = size;
+
+    return buffer;
+}
+
+int sanitize_path(const char* url_path, char* out_path, size_t out_size)
+{
+    // Must start with /
+    if (url_path[0] != '/')
+        return -1;
+
+    // Reject traversal attempts
+    if (strstr(url_path, ".."))
+        return -1;
+
+    // Resolve document root
+    char doc_root[PATH_MAX];
+    if (!realpath(FILE_SEARCH_DIR, doc_root))
+        return -1;
+
+    // Build the final path
+    char temp[PATH_MAX];
+    snprintf(temp, sizeof(temp), "%s%s", doc_root, url_path);
+
+    // Ensure we didn't overflow
+    if (strlen(temp) >= PATH_MAX)
+        return -1;
+
+    strncpy(out_path, temp, out_size - 1);
+    out_path[out_size - 1] = '\0';
+
+    return 0;
 }
 
 http_response* process_request(http_request* req)

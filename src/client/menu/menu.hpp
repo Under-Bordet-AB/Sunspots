@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "input/input.hpp"
+#include "../utils/input.hpp"
 #include "../plan_service/plan_service.hpp"
 
 class Menu
@@ -15,5 +15,5 @@ class Menu
 
    private:
     void clearScreen();
-    int createAndSelect(std::string title, std::vector<std::string> options);
+    int createAndSelect(std::vector<std::string> options);
 };

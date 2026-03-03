@@ -13,7 +13,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "config.hpp"
+#include "http_request.hpp"
+#include "http_response.hpp"
 
 class HttpClient
 {
@@ -21,17 +22,17 @@ class HttpClient
     HttpClient(const std::string& host, const std::string& port);
     ~HttpClient();
 
-    int connect();
-    std::string get(const std::string& path);
+    bool connect();
+    void disconnect();
+
+    HttpResponse get(const std::string& path);
+    HttpResponse post(const std::string& path, const std::string& body);
 
    private:
     std::string host;
     std::string port;
     int fd;
 
-    int write(const void* buffer, size_t length);
-    int read(void* buffer, size_t length);
-    void disconnect();
-
-    std::string buildHttpRequest(const std::string& method, const std::string& path, const std::string& body = "");
+    HttpResponse send(const HttpRequest& request);
+    std::string receive();
 };

@@ -2,9 +2,9 @@
  * @file daemon.c
  */
 
-#include <linux/limits.h>
 #define _GNU_SOURCE
-
+#include <linux/limits.h>
+#include "daemon_logger.h"
 #include "daemon.h"
 #include "module.h"
 #include <stdio.h>
@@ -41,6 +41,7 @@ struct daemon_var {
     module_t *modules; 
 };
 
+static void daemon_set_system_config(daemon_var_t *self);
 static void daemon_resolve_paths(daemon_var_t *self);
 static void daemon_daemonize(void);
 static void daemon_epoll_setup(daemon_var_t *self);
@@ -50,26 +51,28 @@ static void daemon_handle_heartbeat(daemon_var_t *self, uint32_t sender_pid);
 
 void daemon_init(daemon_var_t **self_ptr)
 {
-    if (!self_ptr) exit(EXIT_FAILURE);
-    
+    if (!self_ptr) exit(EXIT_FAILURE);    
     daemon_var_t *self = (daemon_var_t*)calloc(1, sizeof(struct daemon_var));
     if (!self) exit(EXIT_FAILURE);    
     self->alive = 1;
 	/** We stay away from the first rt signals due to glibc */
 	self->hearbeat_sig = HEARTBEAT_SIG + HEARTBEAT_OFFSET;
     
-    daemon_resolve_paths(self);    
-    daemon_daemonize();
-	daemon_write_pidfile(self->prj_root_folder);
-    
-    openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
-    syslog(LOG_NOTICE, "Sunspots daemon started. Detached and darkened.");
-    
-    daemon_epoll_setup(self);
-    
-    module_init(&self->modules);	
-    self->n_modules_running = module_load(&self->modules, self->n_modules_running, self->prj_config_path, self->prj_root_folder, self->epoll_fd, self->hearbeat_sig);
+    daemon_resolve_paths(self);	
+    daemon_daemonize();    
 
+	openlog("SUNSPOTS_DAEMON", LOG_PID, LOG_DAEMON);
+	daemon_epoll_setup(self);
+    syslog(LOG_NOTICE, "Sunspots daemon started. Detached and darkened.");
+
+    module_init(&self->modules);
+	
+    self->n_modules_running = module_load(&self->modules, self->n_modules_running,
+										  self->prj_config_path, self->prj_root_folder,
+										  self->epoll_fd, self->hearbeat_sig);
+    daemon_write_pidfile(self->prj_root_folder);
+	daemon_set_system_config(self);	
+	
     *self_ptr = self;
 }
 
@@ -78,7 +81,8 @@ void daemon_deinit(daemon_var_t **self_ptr)
     if (!self_ptr || !*self_ptr) return;
     
     daemon_var_t *self = *self_ptr;
-    syslog(LOG_NOTICE, "Shutting down daemon and cleaning up...");        
+    syslog(LOG_NOTICE, "Shutting down daemon and cleaning up...");
+	daemon_logger_send("DAEMON", "Shutting down daemon and cleaning up...");
     
     module_deinit(&self->modules, self->n_modules_running, self->epoll_fd);
     if (self->global_timer_fd > 0)
@@ -98,12 +102,15 @@ void daemon_deinit(daemon_var_t **self_ptr)
     	close(self->signal_fd);
 	}
     free(self);
-    *self_ptr = NULL;        
+    *self_ptr = NULL;
+	
     syslog(LOG_NOTICE, "Daemon vanished. All children reaped.");
+	daemon_logger_send("DAEMON", "Daemon vanished. All children reaped.");
+	
     closelog();
 }
 
-void daemon_run(daemon_var_t *self)
+void daemon_run(daemon_var_t *self)	
 {
     struct epoll_event events[MAX_EVENTS];    
     /** * fdsi is populated by the kernel when reading from signal_fd.
@@ -112,6 +119,7 @@ void daemon_run(daemon_var_t *self)
      */
     struct signalfd_siginfo fdsi;    
     syslog(LOG_NOTICE, "SUNSPOTS daemon setup complete! Waiting for events...");
+	daemon_logger_send("DAEMON", "SUNSPOTS daemon setup complete! Waiting for events...");
     while (self->alive)
     {
         int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, -1);
@@ -121,7 +129,7 @@ void daemon_run(daemon_var_t *self)
             syslog(LOG_ERR, "epoll_wait error: %m");
             break;
         }
-
+        
         for (int i = 0; i < nfds; i++)
         {
             /** Event 1: Synchronous Signals */
@@ -130,7 +138,7 @@ void daemon_run(daemon_var_t *self)
                 while (read(self->signal_fd, &fdsi, sizeof(fdsi)) == sizeof(fdsi))
                 {
                     if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM)
-					{
+					{						
 						self->alive = 0;
 					} 
 					else if (fdsi.ssi_signo == SIGCHLD)
@@ -170,7 +178,11 @@ void daemon_run(daemon_var_t *self)
                             if (now - last_reload >= 1)
                             {
                                 syslog(LOG_NOTICE, "Config change detected. Performing hot-reload.");
-                                self->n_modules_running = module_load(&self->modules, self->n_modules_running, self->prj_config_path, self->prj_root_folder, self->epoll_fd, self->hearbeat_sig);
+								daemon_logger_send("DEAEMON", "Config change detected. Performing hot-reload.");
+                                self->n_modules_running = module_load(&self->modules, self->n_modules_running,
+																	  self->prj_config_path,
+																	  self->prj_root_folder,
+																	  self->epoll_fd, self->hearbeat_sig);
                                 last_reload = now;
                             }
                         }
@@ -184,6 +196,32 @@ void daemon_run(daemon_var_t *self)
             }
         }
     }
+}
+
+static void daemon_set_system_config(daemon_var_t *self)
+{
+	const char *system_config = module_get_system_config(self->modules);
+	if (system_config)
+	{
+		cJSON *sys = cJSON_Parse(system_config);
+		if (sys)
+		{
+			cJSON *sp = cJSON_GetObjectItemCaseSensitive(sys, "socket_path");
+			if (cJSON_IsString(sp))
+			{
+				char abs_sp[PATH_MAX];
+				snprintf(abs_sp, sizeof(abs_sp), "%s/%s", self->prj_root_folder, sp->valuestring);
+				cJSON_SetValuestring(sp, abs_sp);
+			}
+			char *resolved_abs_sp = cJSON_PrintUnformatted(sys);
+			if (resolved_abs_sp)
+			{
+				setenv("SUNSPOTS_SYSTEM", resolved_abs_sp, 1);
+				free(resolved_abs_sp);
+				cJSON_Delete(sys);
+			}
+		}
+	}
 }
 
 static void daemon_reap_zombies(daemon_var_t *self)
@@ -300,7 +338,7 @@ static void daemon_epoll_setup(daemon_var_t *self)
 
 static void daemon_daemonize(void)
 {
-#ifndef DEBUGG
+#ifndef DEBUG
     pid_t init_pid = fork();
     if (init_pid < 0)
 	{
@@ -323,7 +361,6 @@ static void daemon_daemonize(void)
 	{
 	    exit(EXIT_SUCCESS);	
 	}
-	printf("Daemon lives! Use 'kill $(cat <path/to>/Sunspots/logs/sunspots.pid)' to kill it\n");
     umask(0); 
     if (chdir("/") != 0)
 	{
@@ -343,7 +380,10 @@ static void daemon_daemonize(void)
     		close(fd);	
 		}
     }
-#endif
+#else
+	printf("DEBUG MODE\n");
+	printf("Daemon lives! Use 'kill $(cat <path/to>/Sunspots/logs/sunspots.pid)' to kill it\n");
+#endif	
 }
 
 static void daemon_write_pidfile(const char *prj_root_folder)

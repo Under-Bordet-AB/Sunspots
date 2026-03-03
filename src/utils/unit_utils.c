@@ -2,6 +2,7 @@
 #define _XOPEN_SOURCE 700
 #include <time.h>
 #include <stdio.h>
+#include <string.h>
 #include "unit_utils.h"
 
 double fahrenheit_to_celsius(double fahrenheit) {
@@ -11,14 +12,21 @@ double fahrenheit_to_celsius(double fahrenheit) {
 int iso8601_to_unix(const char* iso8601_time) {
     struct tm t = {0};
 
-    if (strptime(iso8601_time, "%Y-%m-%dT%H:%M:%S", &t) == NULL) {
-        return -1;
-    }
+    char *err = strptime(iso8601_time, "%Y-%m-%dT%H:%M:%S", &t);
 
-    const char *tz = iso8601_time + 19;
+    if (err == NULL) {
+        // Try without seconds
+        err = strptime(iso8601_time, "%Y-%m-%dT%H:%M", &t);
+        if (err == NULL) {
+            return -1;
+        }
+    }
+    const char *day_time = iso8601_time+9; //step past date
+    const char *tz = strchr(day_time, '+');
+    if (tz == NULL) { tz = strchr(day_time, '-'); }
     int offset_seconds = 0;
 
-    if (*tz == '+' || *tz == '-'){
+    if (tz != NULL && (*tz == '+' || *tz == '-')){
         char tz_sign = *tz;
         int tz_hour, tz_min;
         if (sscanf(tz+1, "%2d:%2d", &tz_hour, &tz_min) != 2){

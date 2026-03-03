@@ -6,6 +6,7 @@
 
 #include "module.h"
 #include "daemon.h"
+#include "daemon_logger.h"
 #include "../../src/libs/json/cJSON.h"
 
 #include <stdio.h>
@@ -61,7 +62,7 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
     {
         if (table[i].module_pid > 0)
         {
-            syslog(LOG_NOTICE, "Killing process: %s PID %d", table[i].module_name, table[i].module_pid);          
+            syslog(LOG_NOTICE, "Killing process: %s PID %d", table[i].module_name, table[i].module_pid);			
             kill(table[i].module_pid, SIGTERM);
             
             struct rusage usage;
@@ -81,6 +82,7 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
         free(table[i].module_name);
         free(table[i].module_binary_path);
         free(table[i].module_config);
+		free(table[i].system_config);
         free(table[i].module_absolut_time);
     }
     
@@ -235,7 +237,6 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
             module_spawn(&new_table[j], prj_root_path, heartbeat_sig);
         }
     }
-
     cJSON_Delete(root);
     free(json_data);
     return i;
@@ -321,11 +322,13 @@ void module_health_check_all(module_t *array, int count, const char *prj_root_pa
         if (array[i].module_pid <= 0)
 		{
             syslog(LOG_ERR, "Process '%s' terminated. Restarting.", array[i].module_name);
+            daemon_logger_send("DAEMON", "A process terminated, restarting.");
             module_spawn(&array[i], prj_root_path, heartbeat_sig);
         }
         else if (!array[i].module_alive)
 		{
             syslog(LOG_ERR, "Process '%s' hung (no heartbeat). Restarting.", array[i].module_name);
+			daemon_logger_send("DAEMON", "A process hung, restarting");
             kill(array[i].module_pid, SIGKILL);
             waitpid(array[i].module_pid, NULL, 0);
             array[i].module_pid = 0;
@@ -397,6 +400,10 @@ void module_timer_config(module_t *self, int epoll_fd)
         its.it_interval.tv_sec = self->module_relative_time;
     }    
     timerfd_settime(self->module_timer_fd, timerfd_flags, &its, NULL);
+}
+const char *module_get_system_config(module_t *self)
+{
+	return (self && self[0].system_config) ? self[0].system_config : NULL;
 }
 
 pid_t module_get_pid(module_t *self)

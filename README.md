@@ -22,6 +22,7 @@ sudo apt install -y \
   git \
   ca-certificates \
   libcurl4-openssl-dev \
+  libglpk-dev \
   libsqlite3-dev
 ```
 
@@ -56,6 +57,7 @@ sudo apt install -y \
   git \
   ca-certificates \
   libcurl4-openssl-dev \
+  libglpk-dev \
   libsqlite3-dev \
   sqlite3 \
   valgrind \
