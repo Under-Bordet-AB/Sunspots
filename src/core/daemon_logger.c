@@ -17,17 +17,17 @@
 #include <sys/timerfd.h>
 
 /* Ring Buffer Selection */
-#if   defined(RING_BUF_64)
+#if   defined(BUF_64)
     #define LOG_BUF_SIZE 65536
-#elif defined(RING_BUF_32)
+#elif defined(BUF_32)
     #define LOG_BUF_SIZE 32768
-#elif defined(RING_BUF_16)
+#elif defined(BUF_16)
     #define LOG_BUF_SIZE 16384
-#elif defined(RING_BUF_8)
+#elif defined(BUF_8)
     #define LOG_BUF_SIZE 8192
-#elif defined(RING_BUF_4)
+#elif defined(BUF_4)
     #define LOG_BUF_SIZE 4096
-#elif defined(RING_BUF_2)
+#elif defined(BUF_2)
     #define LOG_BUF_SIZE 2048
 #else
     #define LOG_BUF_SIZE 1024
@@ -288,19 +288,27 @@ cleanup:
 static int daemon_logger_set_config(journal_log_t *self)
 {
     char *config_env = getenv("SUNSPOTS_CONFIG");
+	char *system_env = getenv("SUNSPOTS_CONFIG");
+	
     if (!config_env) return -1;
-    cJSON *mod = cJSON_Parse(config_env);
-    if (!mod) return -1;
+    cJSON *conf = cJSON_Parse(config_env);
+    if (!conf) return -1;
 
-    cJSON *path = cJSON_GetObjectItemCaseSensitive(mod, "log_path");
-    cJSON *sock = cJSON_GetObjectItemCaseSensitive(mod, "socket_path");
-    cJSON *hb   = cJSON_GetObjectItemCaseSensitive(mod, "heartbeat_interval");
+	if (!system_env) return -1;
+	cJSON *syst = cJSON_Parse(system_env);
+	if (!syst) return -1;
+	
+
+    cJSON *path = cJSON_GetObjectItemCaseSensitive(conf, "log_path");
+    cJSON *sock = cJSON_GetObjectItemCaseSensitive(syst, "socket_path");
+    cJSON *hb   = cJSON_GetObjectItemCaseSensitive(conf, "heartbeat_interval");
 
     if (cJSON_IsString(path)) self->path_to_log = strdup(path->valuestring);
     if (cJSON_IsString(sock)) self->socket_path = strdup(sock->valuestring);
     if (cJSON_IsNumber(hb))   self->hb_interval = hb->valueint;
 
-    cJSON_Delete(mod);
+    cJSON_Delete(conf);
+	cJSON_Delete(syst);
 
     char *sig_env = getenv("SUNSPOTS_SIGNAL");
     if (sig_env) self->sig_number = atoi(sig_env);

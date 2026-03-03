@@ -1,6 +1,8 @@
 #ifndef HTTP_CONSTANTS_H
 #define HTTP_CONSTANTS_H
 
+#include "linked_list.h"
+
 // Defines are static configs, externs are configurable by sunspots.json
 
 extern int HTTP_PORT;
@@ -19,5 +21,7 @@ extern int QUEUE_SIZE;
 
 extern int ALLOW_SEARCH;
 extern char* FILE_SEARCH_DIR;
+
+extern LinkedList* URL_ALIASES;
 
 #endif

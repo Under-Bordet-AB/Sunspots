@@ -4,6 +4,10 @@
 #include "sdk/ss_sdk.h"
 
 ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record);
+ss_sdk_status ss_sdk_internal_db_write_records(
+    const ss_sdk_record *records,
+    size_t count,
+    size_t *out_written);
 
 ss_sdk_status ss_sdk_internal_db_get_canonical(
     ss_metric_id canonical,

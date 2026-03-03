@@ -23,13 +23,16 @@ void Menu::show(PlanService &service)
             case 0:
             {
                 // Option 1
+                clearScreen();
+                service.getNow();
+                
                 std::atomic<bool> running(true);
                 std::thread updater([&]()
                 {
                     while (running)
                     {
                         clearScreen();
-                        service.showNow();
+                        service.displayNow();
 
                         std::this_thread::sleep_for(std::chrono::seconds(1));
                     }

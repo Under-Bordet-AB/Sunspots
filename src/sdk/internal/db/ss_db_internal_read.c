@@ -95,9 +95,6 @@ bool ss_raw_rows_append(ss_raw_row **rows, size_t *count, size_t *cap, const ss_
 {
     ss_raw_row *grown;
     size_t next_cap;
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    int fail_alloc = 0;
-#endif
 
     if (*count == *cap) {
         next_cap = (*cap == 0U) ? 64U : (*cap * 2U);
@@ -105,12 +102,9 @@ bool ss_raw_rows_append(ss_raw_row **rows, size_t *count, size_t *cap, const ss_
             return false;
         }
 
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-        fail_alloc = ss_test_consume(&g_db_test_hooks.fail_realloc);
-#endif
         grown = (ss_raw_row *)realloc(*rows, next_cap * sizeof(ss_raw_row));
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
-        if (fail_alloc) {
+        if (ss_test_consume(&g_db_test_hooks.fail_realloc)) {
             free(grown);
             grown = NULL;
             errno = ENOMEM;
@@ -130,6 +124,38 @@ bool ss_raw_rows_append(ss_raw_row **rows, size_t *count, size_t *cap, const ss_
 }
 
 // Raw row lookup helpers used by slot selection and interpolation.
+static size_t ss_lower_bound_ts(const ss_raw_row *rows, size_t count, int64_t ts_utc)
+{
+    size_t left = 0U;
+    size_t right = count;
+
+    while (left < right) {
+        size_t mid = left + (right - left) / 2U;
+        if (rows[mid].ts_utc < ts_utc) {
+            left = mid + 1U;
+        } else {
+            right = mid;
+        }
+    }
+    return left;
+}
+
+static size_t ss_upper_bound_ts(const ss_raw_row *rows, size_t count, int64_t ts_utc)
+{
+    size_t left = 0U;
+    size_t right = count;
+
+    while (left < right) {
+        size_t mid = left + (right - left) / 2U;
+        if (rows[mid].ts_utc <= ts_utc) {
+            left = mid + 1U;
+        } else {
+            right = mid;
+        }
+    }
+    return left;
+}
+
 bool ss_find_exact_row(
     const ss_raw_row *rows,
     size_t count,
@@ -138,8 +164,14 @@ bool ss_find_exact_row(
     ss_raw_row *out)
 {
     size_t i;
+    size_t first;
 
-    for (i = 0; i < count; ++i) {
+    if (rows == NULL || out == NULL || count == 0U) {
+        return false;
+    }
+
+    first = ss_lower_bound_ts(rows, count, ts_utc);
+    for (i = first; i < count && rows[i].ts_utc == ts_utc; ++i) {
         if (rows[i].ts_utc == ts_utc && rows[i].data_kind == data_kind) {
             *out = rows[i];
             return true;
@@ -170,19 +202,22 @@ static bool ss_find_prev_row(
     ss_raw_row *out)
 {
     size_t i;
-    bool found = false;
 
-    for (i = 0; i < count; ++i) {
+    if (rows == NULL || out == NULL || count == 0U) {
+        return false;
+    }
+
+    i = ss_upper_bound_ts(rows, count, ts_utc);
+    while (i > 0U) {
+        i -= 1U;
         if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
             continue;
         }
-        if (rows[i].ts_utc <= ts_utc && (!found || rows[i].ts_utc > out->ts_utc)) {
-            *out = rows[i];
-            found = true;
-        }
+        *out = rows[i];
+        return true;
     }
 
-    return found;
+    return false;
 }
 
 // Find nearest rows strictly before and strictly after ts_utc.
@@ -196,27 +231,117 @@ static bool ss_find_prev_next_rows(
     ss_raw_row *out_next)
 {
     size_t i;
+    size_t first_gt;
     bool have_prev = false;
     bool have_next = false;
 
-    for (i = 0; i < count; ++i) {
+    if (rows == NULL || out_prev == NULL || out_next == NULL || count == 0U) {
+        return false;
+    }
+
+    first_gt = ss_upper_bound_ts(rows, count, ts_utc);
+
+    i = first_gt;
+    while (i > 0U) {
+        i -= 1U;
         if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
             continue;
         }
         if (rows[i].ts_utc < ts_utc) {
-            if (!have_prev || rows[i].ts_utc > out_prev->ts_utc) {
-                *out_prev = rows[i];
-                have_prev = true;
-            }
-        } else if (rows[i].ts_utc > ts_utc) {
-            if (!have_next || rows[i].ts_utc < out_next->ts_utc) {
-                *out_next = rows[i];
-                have_next = true;
-            }
+            *out_prev = rows[i];
+            have_prev = true;
+            break;
+        }
+    }
+
+    for (i = first_gt; i < count; ++i) {
+        if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
+            continue;
+        }
+        if (rows[i].ts_utc > ts_utc) {
+            *out_next = rows[i];
+            have_next = true;
+            break;
         }
     }
 
     return have_prev && have_next;
+}
+
+static void ss_mark_interp_too_long(bool *out_interpolation_length_exceeded)
+{
+    if (out_interpolation_length_exceeded != NULL) {
+        *out_interpolation_length_exceeded = true;
+    }
+}
+
+static bool ss_try_interpolate_step(
+    const ss_raw_row *rows,
+    size_t count,
+    int64_t ts_utc,
+    bool allow_observation,
+    bool allow_forecast,
+    bool *out_interpolation_length_exceeded,
+    ss_sdk_value *out_value)
+{
+    ss_raw_row prev = {0};
+    int64_t age_sec;
+
+    if (!ss_find_prev_row(rows, count, ts_utc, allow_observation, allow_forecast, &prev)) {
+        return false;
+    }
+
+    age_sec = ts_utc - prev.ts_utc;
+    if (age_sec < 0 || age_sec > SS_DB_INTERP_MAX_LENGTH_SECONDS) {
+        ss_mark_interp_too_long(out_interpolation_length_exceeded);
+        return false;
+    }
+
+    *out_value = prev.value;
+    return true;
+}
+
+static bool ss_try_interpolate_linear(
+    ss_sdk_value_type value_type,
+    const ss_raw_row *rows,
+    size_t count,
+    int64_t ts_utc,
+    bool allow_observation,
+    bool allow_forecast,
+    bool *out_interpolation_length_exceeded,
+    ss_sdk_value *out_value)
+{
+    ss_raw_row prev = {0};
+    ss_raw_row next = {0};
+    int64_t span_sec;
+    int64_t delta_sec;
+    double ratio;
+
+    if (value_type != SS_SDK_VALUE_F64) {
+        return false;
+    }
+    if (!ss_find_prev_next_rows(rows, count, ts_utc, allow_observation, allow_forecast, &prev, &next)) {
+        return false;
+    }
+
+    span_sec = next.ts_utc - prev.ts_utc;
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (ss_test_consume(&g_db_test_hooks.force_linear_zero_span)) {
+        span_sec = 0;
+    }
+#endif
+    if (span_sec <= 0) {
+        return false;
+    }
+    if (span_sec > SS_DB_INTERP_MAX_LENGTH_SECONDS) {
+        ss_mark_interp_too_long(out_interpolation_length_exceeded);
+        return false;
+    }
+
+    delta_sec = ts_utc - prev.ts_utc;
+    ratio = (double)delta_sec / (double)span_sec;
+    out_value->f64 = prev.value.f64 + ratio * (next.value.f64 - prev.value.f64);
+    return isfinite(out_value->f64);
 }
 
 bool ss_try_interpolate(
@@ -247,67 +372,26 @@ bool ss_try_interpolate(
     }
 
     if (policy == SS_INTERP_POLICY_STEP) {
-        ss_raw_row prev = {0};
-        int64_t age_sec;
-
-        if (!ss_find_prev_row(rows, count, ts_utc, allow_observation, allow_forecast, &prev)) {
-            return false;
-        }
-
-        age_sec = ts_utc - prev.ts_utc;
-        if (age_sec < 0 || age_sec > SS_DB_INTERP_MAX_LENGTH_SECONDS) {
-            if (out_interpolation_length_exceeded != NULL) {
-                *out_interpolation_length_exceeded = true;
-            }
-            return false;
-        }
-
-        *out_value = prev.value;
-        return true;
+        return ss_try_interpolate_step(
+            rows,
+            count,
+            ts_utc,
+            allow_observation,
+            allow_forecast,
+            out_interpolation_length_exceeded,
+            out_value);
     }
 
     if (policy == SS_INTERP_POLICY_LINEAR) {
-        ss_raw_row prev = {0};
-        ss_raw_row next = {0};
-        int64_t span_sec;
-        int64_t delta_sec;
-        double ratio;
-
-        if (value_type != SS_SDK_VALUE_F64) {
-            return false;
-        }
-
-        if (!ss_find_prev_next_rows(
-                rows,
-                count,
-                ts_utc,
-                allow_observation,
-                allow_forecast,
-                &prev,
-                &next)) {
-            return false;
-        }
-
-        span_sec = next.ts_utc - prev.ts_utc;
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-        if (ss_test_consume(&g_db_test_hooks.force_linear_zero_span)) {
-            span_sec = 0;
-        }
-#endif
-        if (span_sec <= 0) {
-            return false;
-        }
-        if (span_sec > SS_DB_INTERP_MAX_LENGTH_SECONDS) {
-            if (out_interpolation_length_exceeded != NULL) {
-                *out_interpolation_length_exceeded = true;
-            }
-            return false;
-        }
-
-        delta_sec = ts_utc - prev.ts_utc;
-        ratio = (double)delta_sec / (double)span_sec;
-        out_value->f64 = prev.value.f64 + ratio * (next.value.f64 - prev.value.f64);
-        return isfinite(out_value->f64);
+        return ss_try_interpolate_linear(
+            value_type,
+            rows,
+            count,
+            ts_utc,
+            allow_observation,
+            allow_forecast,
+            out_interpolation_length_exceeded,
+            out_value);
     }
 
     return false;
@@ -393,6 +477,7 @@ ss_sdk_status ss_load_rows_for_window(
     size_t *out_count)
 {
     sqlite3_stmt *query_statement = NULL;
+    ss_sdk_status status = SS_SDK_ERR_INTERNAL;
     int sqlite_result;
     int64_t query_start;
     int64_t query_end;
@@ -413,10 +498,7 @@ ss_sdk_status ss_load_rows_for_window(
     }
 #endif
     if (sqlite_result != SQLITE_OK) {
-        if (query_statement != NULL) {
-            sqlite3_finalize(query_statement);
-        }
-        return SS_SDK_ERR_INTERNAL;
+        goto cleanup;
     }
 
     sqlite3_bind_int(query_statement, 1, (int)canonical);               // ?1 canonical metric id
@@ -436,12 +518,11 @@ ss_sdk_status ss_load_rows_for_window(
         sqlite_result = sqlite3_step(query_statement);
 #endif
         if (sqlite_result == SQLITE_DONE) {
+            status = SS_SDK_OK;
             break;
         }
         if (sqlite_result != SQLITE_ROW) {
-            free(rows);
-            sqlite3_finalize(query_statement);
-            return SS_SDK_ERR_INTERNAL;
+            goto cleanup;
         }
 
         if (!ss_decode_row_if_valid(query_statement, expected_type, &row)) {
@@ -449,14 +530,20 @@ ss_sdk_status ss_load_rows_for_window(
         }
 
         if (!ss_raw_rows_append(&rows, &count, &cap, &row)) {
-            free(rows);
-            sqlite3_finalize(query_statement);
-            return SS_SDK_ERR_INTERNAL;
+            goto cleanup;
         }
     }
 
-    sqlite3_finalize(query_statement);
+cleanup:
+    if (query_statement != NULL) {
+        sqlite3_finalize(query_statement);
+    }
+    if (status != SS_SDK_OK) {
+        free(rows);
+        return status;
+    }
+
     *out_rows = rows;
     *out_count = count;
-    return SS_SDK_OK;
+    return status;
 }

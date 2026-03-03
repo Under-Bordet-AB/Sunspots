@@ -35,9 +35,14 @@ out/
 
 # Logs
 *.log
+logs/
 logs/make/
 .logs/
 warnings/
+
+# Runtime data directories
+endpoints/
+db/
 
 # Editor/IDE specific
 .vscode/

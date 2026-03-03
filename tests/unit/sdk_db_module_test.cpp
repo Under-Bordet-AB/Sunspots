@@ -70,7 +70,9 @@ std::string read_text_file(const std::string &path)
     while ((nr = std::fread(buf, 1, sizeof(buf), fp)) > 0) {
         out.append(buf, nr);
     }
-    std::fclose(fp);
+    if (std::fclose(fp) != 0) {
+        return "";
+    }
     return out;
 }
 
@@ -164,7 +166,8 @@ ss_sdk_status write_i64_record(ss_metric_id metric, int64_t value, int64_t ts_st
 class SdkDbFixture : public ::testing::Test {
 protected:
     SdkDbFixture()
-        : db_path_guard_("SS_SDK_DB_PATH"),
+        : db_dir_guard_("SS_SDK_DB_DIR"),
+          system_guard_("SUNSPOTS_SYSTEM"),
           sdk_log_level_guard_("SS_SDK_LOG_LEVEL"),
           sdk_log_mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           sdk_log_mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
@@ -174,23 +177,36 @@ protected:
     {
         dir_ = make_temp_dir();
         ASSERT_FALSE(dir_.empty());
-        db_path_ = dir_ + "/sdk.db";
-        ASSERT_EQ(setenv("SS_SDK_DB_PATH", db_path_.c_str(), 1), 0);
+        db_dir_ = dir_ + "/db";
+        ASSERT_EQ(mkdir(db_dir_.c_str(), 0775), 0);
+        db_path_ = db_dir_ + "/59329300_18068600.db";
+        ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
+        ASSERT_EQ(
+            setenv(
+                "SUNSPOTS_SYSTEM",
+                "{\"location\":{\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
+                1),
+            0);
     }
 
     void TearDown() override
     {
         ss_sdk_shutdown();
         remove_file_if_exists(db_path_);
+        remove_dir_if_exists(db_dir_);
         remove_dir_if_exists(dir_);
     }
 
-    ScopedEnvVar db_path_guard_;
+    // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+    ScopedEnvVar db_dir_guard_;
+    ScopedEnvVar system_guard_;
     ScopedEnvVar sdk_log_level_guard_;
     ScopedEnvVar sdk_log_mirror_enabled_guard_;
     ScopedEnvVar sdk_log_mirror_path_guard_;
     std::string dir_;
+    std::string db_dir_;
     std::string db_path_;
+    // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
 }  // namespace
@@ -198,6 +214,46 @@ protected:
 TEST_F(SdkDbFixture, write_record_rejects_null)
 {
     EXPECT_EQ(ss_sdk_db_write_record(NULL), SS_SDK_ERR_INVALID_ARG);
+}
+
+TEST_F(SdkDbFixture, batch_write_is_atomic_on_validation_failure)
+{
+    const int64_t slot = now_slot_utc() - 1800;
+    ss_sdk_record records[2];
+    ss_sdk_samples_out out = {NULL, 0};
+    size_t written = 0U;
+
+    records[0] = make_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 12.0, slot, SS_SDK_DATA_OBSERVATION);
+    records[1] = make_f64_record(SS_METRIC_WEATHER_IS_DAY, 1.0, slot, SS_SDK_DATA_OBSERVATION);
+
+    EXPECT_EQ(ss_sdk_db_write_records(records, 2U, &written), SS_SDK_ERR_VALIDATION);
+    EXPECT_EQ(written, (size_t)0);
+
+    EXPECT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_ERR_PARTIAL_DATA);
+    EXPECT_EQ(out.samples, (ss_sdk_sample *)NULL);
+    EXPECT_EQ(out.count, (size_t)0);
+}
+
+TEST_F(SdkDbFixture, batch_write_commits_all_rows_in_one_call)
+{
+    const int64_t slot = now_slot_utc() - 1800;
+    ss_sdk_record records[2];
+    ss_sdk_samples_out out_temp = {NULL, 0};
+    ss_sdk_samples_out out_cloud = {NULL, 0};
+    size_t written = 0U;
+
+    records[0] = make_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 8.5, slot, SS_SDK_DATA_OBSERVATION);
+    records[1] = make_f64_record(SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, 77.0, slot, SS_SDK_DATA_OBSERVATION);
+
+    ASSERT_EQ(ss_sdk_db_write_records(records, 2U, &written), SS_SDK_OK);
+    EXPECT_EQ(written, (size_t)2);
+
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out_temp), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, &out_cloud), SS_SDK_OK);
+    ASSERT_EQ(out_temp.count, (size_t)1);
+    ASSERT_EQ(out_cloud.count, (size_t)1);
+    ss_sdk_db_free_samples(&out_temp);
+    ss_sdk_db_free_samples(&out_cloud);
 }
 
 TEST_F(SdkDbFixture, write_record_rejects_unknown_metric)
@@ -762,7 +818,7 @@ TEST_F(SdkDbFixture, get_canonical_resets_out_on_error_paths)
     EXPECT_EQ(out.count, (size_t)0);
 }
 
-TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
+TEST_F(SdkDbFixture, switch_db_dir_uses_new_database)
 {
     const int64_t slot = now_slot_utc() - 900;
     ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_WIND_SPEED_10M_MS, 4.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
@@ -772,8 +828,9 @@ TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
     ASSERT_EQ(out_first.count, (size_t)1);
     ss_sdk_db_free_samples(&out_first);
 
-    const std::string path_two = dir_ + "/sdk_two.db";
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", path_two.c_str(), 1), 0);
+    const std::string dir_two = dir_ + "/db_two";
+    ASSERT_EQ(mkdir(dir_two.c_str(), 0775), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", dir_two.c_str(), 1), 0);
 
     ss_sdk_samples_out out_second = {NULL, 0};
     ASSERT_EQ(
@@ -782,7 +839,8 @@ TEST_F(SdkDbFixture, switch_db_path_uses_new_database)
     EXPECT_EQ(out_second.samples, (ss_sdk_sample *)NULL);
     EXPECT_EQ(out_second.count, (size_t)0);
 
-    remove_file_if_exists(path_two);
+    remove_file_if_exists(dir_two + "/59329300_18068600.db");
+    remove_dir_if_exists(dir_two);
 }
 
 TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_write)
@@ -821,7 +879,7 @@ TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_read)
 }
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
-TEST_F(SdkDbFixture, test_helpers_cover_default_path_and_argument_guards)
+TEST_F(SdkDbFixture, test_helpers_cover_path_argument_guards)
 {
     ASSERT_EQ(ss_sdk_internal_db_test_ensure_parent_dirs(NULL), -1);
     EXPECT_EQ(errno, EINVAL);
@@ -830,10 +888,7 @@ TEST_F(SdkDbFixture, test_helpers_cover_default_path_and_argument_guards)
 
     ASSERT_EQ(ss_sdk_internal_db_test_strdup_local(NULL), (char *)NULL);
 
-    ScopedCwd cwd(dir_);
-    ASSERT_TRUE(cwd.ok());
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", "", 1), 0);
-    EXPECT_STREQ(ss_sdk_internal_db_test_db_path(), "db/ss_sdk.db");
+    EXPECT_STREQ(ss_sdk_internal_db_test_db_path(), db_path_.c_str());
 }
 
 TEST_F(SdkDbFixture, test_hooks_force_internal_error_paths)
@@ -970,6 +1025,64 @@ TEST_F(SdkDbFixture, test_helpers_cover_additional_internal_branches)
     EXPECT_FALSE(ss_sdk_internal_db_test_try_interpolate_unknown_policy());
 }
 
+TEST_F(SdkDbFixture, interpolation_policy_table_keeps_expected_metric_categories)
+{
+    const int k_policy_none = 0;
+    const int k_policy_linear = 1;
+    const int k_policy_step = 2;
+    const ss_metric_id linear_metrics[] = {
+        SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+        SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+        SS_METRIC_ENERGY_FX_SEK_PER_EUR};
+    const ss_metric_id step_metrics[] = {
+        SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH,
+        SS_METRIC_ENERGY_PRICE_SPOT_EUR_KWH};
+    const ss_metric_id none_metrics[] = {
+        SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE,
+        SS_METRIC_WEATHER_IS_DAY};
+    size_t i;
+
+    for (i = 0; i < sizeof(linear_metrics) / sizeof(linear_metrics[0]); ++i) {
+        EXPECT_EQ(ss_sdk_internal_db_test_interpolation_policy(linear_metrics[i]), k_policy_linear);
+    }
+    for (i = 0; i < sizeof(step_metrics) / sizeof(step_metrics[0]); ++i) {
+        EXPECT_EQ(ss_sdk_internal_db_test_interpolation_policy(step_metrics[i]), k_policy_step);
+    }
+    for (i = 0; i < sizeof(none_metrics) / sizeof(none_metrics[0]); ++i) {
+        EXPECT_EQ(ss_sdk_internal_db_test_interpolation_policy(none_metrics[i]), k_policy_none);
+    }
+}
+
+TEST_F(SdkDbFixture, load_rows_prepare_or_step_failure_is_recoverable)
+{
+    const int64_t slot = now_slot_utc() - 1800;
+    size_t out_count = 0;
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 4.25, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+
+    ss_sdk_internal_db_test_reset_hooks();
+    ss_sdk_internal_db_test_set_hook(SS_SDK_DB_HOOK_FAIL_SQLITE_STEP, 1);
+    EXPECT_EQ(
+        ss_sdk_internal_db_test_load_rows_for_window(
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            SS_SDK_VALUE_F64,
+            slot,
+            slot + 900,
+            &out_count),
+        SS_SDK_ERR_INTERNAL);
+
+    ss_sdk_internal_db_test_reset_hooks();
+    EXPECT_EQ(
+        ss_sdk_internal_db_test_load_rows_for_window(
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            SS_SDK_VALUE_F64,
+            slot,
+            slot + 900,
+            &out_count),
+        SS_SDK_OK);
+    EXPECT_EQ(out_count, (size_t)1);
+}
+
 TEST_F(SdkDbFixture, db_open_error_variants_cover_pragmas_schema_strdup_and_open_failure)
 {
     const int64_t slot = now_slot_utc() - 4500;
@@ -991,11 +1104,11 @@ TEST_F(SdkDbFixture, db_open_error_variants_cover_pragmas_schema_strdup_and_open
         SS_SDK_ERR_INTERNAL);
 
     ss_sdk_shutdown();
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", "/", 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", "/", 1), 0);
     EXPECT_EQ(
         write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 3.0, slot + 9000, SS_SDK_DATA_OBSERVATION),
         SS_SDK_ERR_INTERNAL);
-    ASSERT_EQ(setenv("SS_SDK_DB_PATH", db_path_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
 }
 
 TEST_F(SdkDbFixture, internal_exec_and_parent_dir_failures_are_exercised)
@@ -1003,7 +1116,7 @@ TEST_F(SdkDbFixture, internal_exec_and_parent_dir_failures_are_exercised)
     const std::string bad_parent = dir_ + "/parent_is_file";
     FILE *fp = std::fopen(bad_parent.c_str(), "w");
     ASSERT_NE(fp, nullptr);
-    std::fclose(fp);
+    ASSERT_EQ(std::fclose(fp), 0);
 
     const std::string nested = bad_parent + "/child/sdk.db";
     EXPECT_EQ(ss_sdk_internal_db_test_ensure_parent_dirs(nested.c_str()), -1);

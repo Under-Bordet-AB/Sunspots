@@ -6,6 +6,7 @@
 
 #include "module.h"
 #include "daemon.h"
+#include "daemon_logger.h"
 #include "../../src/libs/json/cJSON.h"
 
 #include <stdio.h>
@@ -42,6 +43,7 @@ struct module {
     long module_relative_time;     
     int module_timer_fd;           
     int module_heartbeat;
+    int module_start_immediately;
 };
 
 static char *module_read_conf_file(const char *filepath);
@@ -61,7 +63,7 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
     {
         if (table[i].module_pid > 0)
         {
-            syslog(LOG_NOTICE, "Killing process: %s PID %d", table[i].module_name, table[i].module_pid);          
+            syslog(LOG_NOTICE, "Killing process: %s PID %d", table[i].module_name, table[i].module_pid);			
             kill(table[i].module_pid, SIGTERM);
             
             struct rusage usage;
@@ -143,6 +145,8 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
         new_table[i].module_timer_fd = -1;
 
         cJSON *t_flag = cJSON_GetObjectItemCaseSensitive(mod, "Timer-type");
+        cJSON *start_now = cJSON_GetObjectItemCaseSensitive(mod, "start_immediately");
+        new_table[i].module_start_immediately = cJSON_IsBool(start_now) && cJSON_IsTrue(start_now);
         if (cJSON_IsNumber(t_flag) && t_flag->valueint == 1)
 		{
             cJSON *t_abs = cJSON_GetObjectItemCaseSensitive(mod, "Abs-time");
@@ -230,6 +234,10 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
         if (new_table[j].module_timertype != MODE_HEARTBEAT && new_table[j].module_timer_fd == -1)
         {
             module_timer_config(&new_table[j], epoll_fd);
+            if (new_table[j].module_start_immediately && new_table[j].module_pid == 0)
+            {
+                module_spawn(&new_table[j], prj_root_path, heartbeat_sig);
+            }
         }
         if (new_table[j].module_timertype == MODE_HEARTBEAT && new_table[j].module_pid == 0)
         {
@@ -321,11 +329,13 @@ void module_health_check_all(module_t *array, int count, const char *prj_root_pa
         if (array[i].module_pid <= 0)
 		{
             syslog(LOG_ERR, "Process '%s' terminated. Restarting.", array[i].module_name);
+            daemon_logger_send("DAEMON", "A process terminated, restarting.");
             module_spawn(&array[i], prj_root_path, heartbeat_sig);
         }
         else if (!array[i].module_alive)
 		{
             syslog(LOG_ERR, "Process '%s' hung (no heartbeat). Restarting.", array[i].module_name);
+			daemon_logger_send("DAEMON", "A process hung, restarting");
             kill(array[i].module_pid, SIGKILL);
             waitpid(array[i].module_pid, NULL, 0);
             array[i].module_pid = 0;

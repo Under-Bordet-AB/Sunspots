@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sunspots Energy Plan</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* SQUISH IT DOWN: Adjust width here to make the graph smaller */
+        .chart-wrapper 
+        {
+            width: 600px; 
+            margin: 20px auto;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<div class="chart-wrapper">
+    <h3 style="text-align: center;">Sunspots Energy Plan</h3>
+    <canvas id="energyChart"></canvas>
+    <div style="text-align: center; margin-top: 10px;">
+        <button onclick="updateEnergyDashboard()">Refresh Data</button>
+    </div>
+</div>
+
+<script>
+    let energyChart;
+
+    async function updateEnergyDashboard()
+    {
+        try 
+        {
+            const response = await fetch('result.json');
+            const data = await response.json();
+            const res = data.result;
+
+            const firstNull = res.timestamp.indexOf(null);
+            const limit = (firstNull === -1) ? res.timestamp.length : firstNull;
+
+            const labels = res.timestamp.slice(0, limit).map(ts => 
+            {
+                const date = new Date(ts * 1000);
+                return date.getHours().toString().padStart(2, '0') + ':' + 
+                       date.getMinutes().toString().padStart(2, '0');
+            });
+
+            const chartData = 
+            {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Buy Electricity',
+                        data: res.buy_electricity.slice(0, limit),
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Direct Use',
+                        data: res.direct_use.slice(0, limit),
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Charge Battery',
+                        data: res.charge_battery.slice(0, limit),
+                        borderColor: 'rgb(54, 162, 235)',
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Sell Excess',
+                        data: res.sell_excess.slice(0, limit),
+                        borderColor: 'rgb(255, 205, 86)',
+                        tension: 0.3
+                    }
+                ]
+            };
+
+            if (energyChart)
+            {
+                energyChart.data = chartData;
+                energyChart.update();
+            }
+            else
+            {
+                const ctx = document.getElementById('energyChart').getContext('2d');
+                energyChart = new Chart(ctx, 
+                {
+                    type: 'line',
+                    data: chartData,
+                    options: 
+                    {
+                        responsive: true,
+                        maintainAspectRatio: true, // Keeps the smaller size stable
+                        scales: 
+                        {
+                            y: 
+                            {
+                                // LOCKING THE SCALE
+                                min: -1,
+                                max: 1,
+                                ticks: 
+                                {
+                                    stepSize: 0.5
+                                },
+                                title: 
+                                { 
+                                    display: true, 
+                                    text: 'Flow Ratio (-1 to 1)' 
+                                },
+                                grid: 
+                                {
+                                    /* Highlight the zero line so the flip is obvious */
+                                    color: (context) => context.tick.value === 0 ? '#000' : '#e5e5e5',
+                                    lineWidth: (context) => context.tick.value === 0 ? 2 : 1
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        catch (error)
+        {
+            console.error("Fetch Error:", error);
+        }
+    }
+
+    updateEnergyDashboard();
+</script>
+
+</body>
+</html>

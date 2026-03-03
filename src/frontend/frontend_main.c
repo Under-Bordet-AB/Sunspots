@@ -11,6 +11,7 @@
 
 #include "client_queue.h"
 #include "http_constants.h"
+#include "http_parser.h"
 #include "http_main.h"
 #include "cJSON.h"
 
@@ -75,6 +76,30 @@ int main() {
     } else {
         syslog(LOG_WARNING, "<frontend/frontend_main.c> SUNSPOTS_CONFIG does not contain file_search_dir, using default value.");
         FILE_SEARCH_DIR = "./htdocs";
+    }
+
+    cJSON *aliases_json = cJSON_GetObjectItem(cfg, "aliases");
+    if (aliases_json && cJSON_IsArray(aliases_json)) {
+
+        URL_ALIASES = LinkedList_create();
+
+        cJSON *alias_json;
+        cJSON_ArrayForEach(alias_json, aliases_json) {
+
+            cJSON *url = cJSON_GetObjectItem(alias_json, "target_url");
+            cJSON *file = cJSON_GetObjectItem(alias_json, "target_file");
+
+            if (!cJSON_IsString(url) || !cJSON_IsString(file))
+                continue;
+
+            url_alias *alias = malloc(sizeof(url_alias));
+            alias->target_url = strdup(url->valuestring);
+            alias->target_file = strdup(file->valuestring);
+
+            str_to_lower(alias->target_url);
+
+            LinkedList_append(URL_ALIASES, alias);
+        }
     }
 
     if (kill(daemon_pid, sig_number) == -1) {
