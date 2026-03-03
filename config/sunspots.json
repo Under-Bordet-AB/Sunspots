@@ -12,7 +12,7 @@
     }
   },
   "sdk": {
-    "db_dir": "db/ss_sdk.db",
+    "db_dir": "db",
     "log_level": "info",
     "log_mirror_enabled": true,
     "log_mirror_path": "logs/sdk.log",

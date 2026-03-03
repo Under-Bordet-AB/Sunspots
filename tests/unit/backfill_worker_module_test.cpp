@@ -304,10 +304,11 @@ TEST_F(BackfillWorkerFixture, one_week_backfill_populates_required_metrics_and_i
 {
     const int lag_minutes = 120;
     const int64_t end_utc = align_to_slot((int64_t)time(NULL) - (int64_t)lag_minutes * 60);
-    const int64_t start_utc = align_to_slot(end_utc - (7LL * 86400LL));
-    const int64_t fixture_from = start_utc - 3600;
+    const int64_t requested_start_utc = align_to_slot(end_utc - (7LL * 86400LL));
+    const int64_t start_date_midnight_utc = requested_start_utc - (requested_start_utc % 86400);
+    const int64_t fixture_from = start_date_midnight_utc - 3600;
     const int64_t fixture_to = end_utc + 3600;
-    const std::string start_date = format_utc_ymd(start_utc);
+    const std::string start_date = format_utc_ymd(requested_start_utc);
     std::string cfg;
     int rc;
 
