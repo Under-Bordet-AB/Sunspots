@@ -18,7 +18,7 @@
 #include "../../transform/weather/weather_model.h"
 #include "../../transform/weather/weather_transform.h"
 
-#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current=temperature_2m,cloud_cover&hourly=shortwave_radiation"
+#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=18.06&current=temperature_2m,cloud_cover&hourly=shortwave_radiation"
 
 int normalize_data(char* raw_in, weather_data_t** out);
 int save_to_database(weather_data_t* price_data);
