@@ -192,7 +192,7 @@ if (st != SS_SDK_OK) {
   - `system.sdk.log_mirror_path`
   - `system.sdk.log_mirror_max_bytes`
 - Default behavior with no SDK config/env:
-  - DB path defaults to `db/ss_sdk_loc_<lat_micro>_<lon_micro>.db` (requires `SUNSPOTS_SYSTEM.location`)
+  - DB path defaults to `db/<lat_micro>_<lon_micro>.db` (requires `SUNSPOTS_SYSTEM.location`)
   - Log level defaults to `debug`
   - Mirror defaults to on
   - Default mirror path is `logs/sdk.log` (if no path is provided)

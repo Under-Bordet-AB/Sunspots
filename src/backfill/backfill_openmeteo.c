@@ -28,7 +28,6 @@ typedef struct {
     int retry_max_attempts;
     int retry_base_backoff_ms;
     int progress_log_interval_sec;
-    int daily_hole_check_interval_sec;
     int freshness_lag_minutes;
     int request_interval_ms;
     int max_requests_per_minute;
@@ -39,7 +38,6 @@ typedef struct {
     int has_system_location;
     char location_name[64];
     char elprisomrade[16];
-    char mode[16];
     char endpoint[MAX_URL_LEN];
 } backfill_config;
 
@@ -71,14 +69,6 @@ typedef struct {
 } archive_hourly_arrays;
 
 typedef struct {
-    cJSON *array;
-    int index;
-    ss_metric_id metric;
-    int64_t ts_utc;
-    size_t *writes;
-} metric_write_ctx;
-
-typedef struct {
     int64_t win_start;
     int64_t win_end;
     uint16_t quarters;
@@ -91,8 +81,6 @@ typedef struct {
     int min_v;
     int *field;
 } cfg_int_binding;
-
-static int write_f64_metric(ss_metric_id metric, int64_t ts_utc, double v);
 
 static int64_t now_utc(void)
 {
@@ -240,7 +228,6 @@ static void backfill_config_defaults(backfill_config *cfg)
     cfg->retry_max_attempts = 5;
     cfg->retry_base_backoff_ms = 1000;
     cfg->progress_log_interval_sec = 10;
-    cfg->daily_hole_check_interval_sec = 86400;
     cfg->freshness_lag_minutes = 120;
     cfg->request_interval_ms = 250;
     cfg->max_requests_per_minute = 240;
@@ -251,7 +238,6 @@ static void backfill_config_defaults(backfill_config *cfg)
     cfg->has_system_location = 0;
     cfg->location_name[0] = '\0';
     cfg->elprisomrade[0] = '\0';
-    copy_string_safe(cfg->mode, sizeof(cfg->mode), "oneshot");
     copy_string_safe(cfg->endpoint, sizeof(cfg->endpoint), "https://archive-api.open-meteo.com/v1/archive");
 }
 
@@ -371,7 +357,6 @@ static void backfill_config_parse(backfill_config *cfg)
         {"retry_max_attempts", 1, &cfg->retry_max_attempts},
         {"retry_base_backoff_ms", 100, &cfg->retry_base_backoff_ms},
         {"progress_log_interval_sec", 1, &cfg->progress_log_interval_sec},
-        {"daily_hole_check_interval_sec", 60, &cfg->daily_hole_check_interval_sec},
         {"freshness_lag_minutes", 0, &cfg->freshness_lag_minutes},
         {"request_interval_ms", 50, &cfg->request_interval_ms},
         {"max_requests_per_minute", 1, &cfg->max_requests_per_minute},
@@ -401,7 +386,6 @@ static void backfill_config_parse(backfill_config *cfg)
         cfg->max_requests_per_day = OPENMETEO_LIMIT_PER_DAY;
     }
 
-    (void)backfill_cfg_try_get_string("mode", cfg->mode, sizeof(cfg->mode));
     (void)backfill_cfg_try_get_string("endpoint", cfg->endpoint, sizeof(cfg->endpoint));
     backfill_config_apply_system_location(cfg);
 }
@@ -430,26 +414,13 @@ static int archive_extract_arrays(cJSON *root, archive_hourly_arrays *arrays)
     return 0;
 }
 
-static void write_metric_from_array(const metric_write_ctx *ctx)
-{
-    cJSON *v = NULL;
-    if (ctx == NULL || ctx->array == NULL || ctx->writes == NULL || !cJSON_IsArray(ctx->array)) {
-        return;
-    }
-    v = cJSON_GetArrayItem(ctx->array, ctx->index);
-    if (cJSON_IsNumber(v) && write_f64_metric(ctx->metric, ctx->ts_utc, v->valuedouble) == 0) {
-        *ctx->writes += 1U;
-    }
-}
-
 static void log_cfg(const backfill_config *cfg)
 {
     char msg[384];
     if (snprintf(msg,
                  sizeof(msg),
-                 "enabled=%d mode=%s location=%s area=%s history_days=%d chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s",
+                 "enabled=%d location=%s area=%s history_days=%d chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s",
                  cfg->enabled,
-                 cfg->mode,
                  cfg->location_name,
                  cfg->elprisomrade,
                  cfg->required_history_days,
@@ -579,42 +550,90 @@ static int fetch_json_with_retry(const char *url, int max_attempts, int base_bac
     return rc;
 }
 
-static int write_f64_metric(ss_metric_id metric, int64_t ts_utc, double v)
+static int append_archive_record(
+    ss_sdk_record **records,
+    size_t *count,
+    size_t *cap,
+    ss_metric_id metric,
+    int64_t ts_utc,
+    double value)
 {
     ss_sdk_record rec;
-    ss_sdk_status st = ss_sdk_record_make_f64(&rec, metric, v, ts_utc, SS_SDK_DATA_OBSERVATION);
-    if (st != SS_SDK_OK) {
+
+    if (records == NULL || count == NULL || cap == NULL) {
         return -1;
     }
-    st = ss_sdk_db_write_record(&rec);
-    return st == SS_SDK_OK ? 0 : -1;
+
+    if (ss_sdk_record_make_f64(&rec, metric, value, ts_utc, SS_SDK_DATA_OBSERVATION) != SS_SDK_OK) {
+        return -1;
+    }
+
+    if (*count == *cap) {
+        size_t next_cap = (*cap == 0U) ? 256U : (*cap * 2U);
+        ss_sdk_record *grown;
+
+        if (next_cap < *cap || next_cap > SIZE_MAX / sizeof(**records)) {
+            return -1;
+        }
+        grown = (ss_sdk_record *)realloc(*records, next_cap * sizeof(*grown));
+        if (grown == NULL) {
+            return -1;
+        }
+        *records = grown;
+        *cap = next_cap;
+    }
+
+    (*records)[*count] = rec;
+    *count += 1U;
+    return 0;
+}
+
+static int parse_archive_payload(const char *json_text, cJSON **out_root, archive_hourly_arrays *out_arrays)
+{
+    cJSON *root;
+    if (json_text == NULL || out_root == NULL || out_arrays == NULL) {
+        return -1;
+    }
+    *out_root = NULL;
+
+    root = cJSON_Parse(json_text);
+    if (root == NULL) {
+        return -1;
+    }
+    if (archive_extract_arrays(root, out_arrays) != 0) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    *out_root = root;
+    return 0;
 }
 
 static int write_archive_payload(const char *json_text, size_t *out_writes)
 {
     cJSON *root = NULL;
     archive_hourly_arrays arrays;
+    ss_sdk_record *records = NULL;
+    size_t record_count = 0U;
+    size_t record_cap = 0U;
+    size_t written = 0U;
     int len = 0;
     int i;
-    size_t writes = 0U;
 
     if (json_text == NULL) {
         return -1;
     }
 
-    root = cJSON_Parse(json_text);
-    if (root == NULL) {
-        return -1;
-    }
-
-    if (archive_extract_arrays(root, &arrays) != 0) {
-        cJSON_Delete(root);
+    if (parse_archive_payload(json_text, &root, &arrays) != 0) {
         return -1;
     }
 
     len = cJSON_GetArraySize(arrays.times);
     for (i = 0; i < len; ++i) {
         cJSON *jt = cJSON_GetArrayItem(arrays.times, i);
+        cJSON *jtemp;
+        cJSON *jcloud;
+        cJSON *jrad;
         int64_t ts_utc;
 
         if (!cJSON_IsString(jt) || jt->valuestring == NULL) {
@@ -623,19 +642,36 @@ static int write_archive_payload(const char *json_text, size_t *out_writes)
         if (parse_utc_hour(jt->valuestring, &ts_utc) != 0) {
             continue;
         }
-
-        metric_write_ctx write_temp = {arrays.temp, i, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, ts_utc, &writes};
-        metric_write_ctx write_cloud = {arrays.cloud, i, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, ts_utc, &writes};
-        metric_write_ctx write_rad = {arrays.rad, i, SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, ts_utc, &writes};
-
-        write_metric_from_array(&write_temp);
-        write_metric_from_array(&write_cloud);
-        write_metric_from_array(&write_rad);
+        jtemp = cJSON_GetArrayItem(arrays.temp, i);
+        jcloud = cJSON_GetArrayItem(arrays.cloud, i);
+        jrad = cJSON_GetArrayItem(arrays.rad, i);
+        if (!cJSON_IsNumber(jtemp) || !cJSON_IsNumber(jcloud) || !cJSON_IsNumber(jrad)) {
+            continue;
+        }
+        if (append_archive_record(&records, &record_count, &record_cap, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, ts_utc, jtemp->valuedouble) !=
+                0 ||
+            append_archive_record(&records, &record_count, &record_cap, SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT, ts_utc, jcloud->valuedouble) !=
+                0 ||
+            append_archive_record(&records, &record_count, &record_cap, SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2, ts_utc, jrad->valuedouble) !=
+                0) {
+            free(records);
+            cJSON_Delete(root);
+            return -1;
+        }
     }
 
+    if (record_count > 0U) {
+        if (ss_sdk_db_write_records(records, record_count, &written) != SS_SDK_OK) {
+            free(records);
+            cJSON_Delete(root);
+            return -1;
+        }
+    }
+
+    free(records);
     cJSON_Delete(root);
     if (out_writes != NULL) {
-        *out_writes = writes;
+        *out_writes = written;
     }
     return 0;
 }
@@ -813,60 +849,122 @@ static int detect_all_holes(int64_t start_utc, int64_t end_utc, hole_list *holes
     return 0;
 }
 
+typedef struct {
+    const backfill_config *cfg;
+    rate_limiter *rl;
+    size_t hole_index;
+    size_t hole_count;
+    size_t *records_written;
+    time_t *last_progress;
+} backfill_hole_ctx;
+
+static void backfill_log_progress_if_due(
+    const backfill_hole_ctx *ctx,
+    size_t records_written)
+{
+    char msg[256];
+    time_t now_ts = time(NULL);
+
+    if (ctx == NULL || ctx->cfg == NULL || ctx->last_progress == NULL) {
+        return;
+    }
+    if ((int)(now_ts - *(ctx->last_progress)) < ctx->cfg->progress_log_interval_sec) {
+        return;
+    }
+
+    if (snprintf(msg, sizeof(msg), "progress hole=%zu/%zu records_written=%zu", ctx->hole_index, ctx->hole_count, records_written) < 0) {
+        copy_string_safe(msg, sizeof(msg), "backfill progress");
+    }
+    (void)SS_LOG_INFO("backfill.progress", msg);
+    *(ctx->last_progress) = now_ts;
+}
+
+static int backfill_process_chunk(
+    backfill_hole_ctx *ctx,
+    int64_t part_start,
+    int64_t next_end)
+{
+    char url[MAX_URL_LEN];
+    char *buf = NULL;
+    size_t wrote_now = 0U;
+
+    if (ctx == NULL || ctx->cfg == NULL || ctx->rl == NULL || ctx->records_written == NULL) {
+        return -1;
+    }
+    if (build_archive_url(url, ctx->cfg, part_start, next_end) != 0) {
+        return -1;
+    }
+
+    rate_limiter_maybe_wait(ctx->rl, ctx->cfg);
+    if (fetch_json_with_retry(url, ctx->cfg->retry_max_attempts, ctx->cfg->retry_base_backoff_ms, &buf) != 0) {
+        return -1;
+    }
+
+    if (write_archive_payload(buf, &wrote_now) != 0) {
+        free(buf);
+        return -1;
+    }
+    free(buf);
+
+    *(ctx->records_written) += wrote_now;
+    sleep_ms(ctx->cfg->request_interval_ms);
+    return 0;
+}
+
+static int backfill_process_hole(backfill_hole_ctx *ctx, const hole_range *hole)
+{
+    int64_t chunk_seconds;
+    int64_t part_start;
+    int64_t part_end;
+
+    if (ctx == NULL || ctx->cfg == NULL || hole == NULL) {
+        return -1;
+    }
+
+    chunk_seconds = (int64_t)ctx->cfg->chunk_days * 86400;
+    part_start = hole->from_utc;
+    part_end = hole->to_utc;
+
+    while (part_start < part_end) {
+        int64_t next_end = part_start + chunk_seconds;
+        if (next_end > part_end) {
+            next_end = part_end;
+        }
+
+        if (backfill_process_chunk(ctx, part_start, next_end) != 0) {
+            return -1;
+        }
+
+        part_start = next_end;
+        backfill_log_progress_if_due(ctx, *(ctx->records_written));
+    }
+
+    return 0;
+}
+
 static int backfill_holes(const backfill_config *cfg, const hole_list *holes, size_t *out_records_written)
 {
     size_t i;
     size_t records_written = 0U;
     time_t last_progress = 0;
-    char msg[256];
-    int64_t chunk_seconds = (int64_t)cfg->chunk_days * 86400;
     rate_limiter rl;
+    backfill_hole_ctx ctx;
 
     memset(&rl, 0, sizeof(rl));
     rl.minute_epoch = -1;
     rl.hour_epoch = -1;
     rl.day_epoch = -1;
 
+    ctx.cfg = cfg;
+    ctx.rl = &rl;
+    ctx.hole_count = holes->count;
+    ctx.records_written = &records_written;
+    ctx.last_progress = &last_progress;
+
     for (i = 0U; i < holes->count; ++i) {
-        int64_t part_start = holes->items[i].from_utc;
-        int64_t part_end = holes->items[i].to_utc;
-
-        while (part_start < part_end) {
-            int64_t next_end = part_start + chunk_seconds;
-            char url[MAX_URL_LEN];
-            char *buf = NULL;
-            size_t wrote_now = 0U;
-
-            if (next_end > part_end) {
-                next_end = part_end;
-            }
-
-            if (build_archive_url(url, cfg, part_start, next_end) != 0) {
-                return -1;
-            }
-
-            rate_limiter_maybe_wait(&rl, cfg);
-            if (fetch_json_with_retry(url, cfg->retry_max_attempts, cfg->retry_base_backoff_ms, &buf) != 0) {
-                return -1;
-            }
-
-            if (write_archive_payload(buf, &wrote_now) != 0) {
-                free(buf);
-                return -1;
-            }
-            free(buf);
-            records_written += wrote_now;
-            part_start = next_end;
-
-            if ((int)(time(NULL) - last_progress) >= cfg->progress_log_interval_sec) {
-                if (snprintf(msg, sizeof(msg), "progress hole=%zu/%zu records_written=%zu", i + 1U, holes->count, records_written) < 0) {
-                    copy_string_safe(msg, sizeof(msg), "backfill progress");
-                }
-                (void)SS_LOG_INFO("backfill.progress", msg);
-                last_progress = time(NULL);
-            }
-
-            sleep_ms(cfg->request_interval_ms);
+        ctx.hole_index = i + 1U;
+        if (backfill_process_hole(&ctx, &holes->items[i]) != 0) {
+            return -1;
         }
     }
 
@@ -876,13 +974,48 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
     return 0;
 }
 
+static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list *before)
+{
+    char msg[256];
+
+    if (detect_all_holes(start_utc, end_utc, before) != 0) {
+        (void)SS_LOG_ERROR("backfill.detect_failed", "failed to analyze current DB holes");
+        return -1;
+    }
+    if (snprintf(msg, sizeof(msg), "window_start=%" PRId64 " window_end=%" PRId64 " holes_before=%zu", start_utc, end_utc, before->count) <
+        0) {
+        copy_string_safe(msg, sizeof(msg), "backfill analyze");
+    }
+    (void)SS_LOG_INFO("backfill.analyze", msg);
+    return 0;
+}
+
+static int backfill_verify_window(int64_t start_utc, int64_t end_utc, size_t records_written, hole_list *after)
+{
+    char msg[256];
+
+    if (detect_all_holes(start_utc, end_utc, after) != 0) {
+        (void)SS_LOG_ERROR("backfill.verify_failed", "failed to verify DB completeness");
+        return -1;
+    }
+
+    if (snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu", records_written, after->count) < 0) {
+        copy_string_safe(msg, sizeof(msg), "backfill verify");
+    }
+    if (after->count == 0U) {
+        (void)SS_LOG_INFO("backfill.complete", msg);
+        return 0;
+    }
+    (void)SS_LOG_WARN("backfill.partial", msg);
+    return 1;
+}
+
 static int run_backfill_once(const backfill_config *cfg)
 {
     int64_t end_utc = align_to_slot(now_utc() - ((int64_t)cfg->freshness_lag_minutes * 60));
     int64_t start_utc = align_to_slot(end_utc - ((int64_t)cfg->required_history_days * 86400));
     hole_list before = {0};
     hole_list after = {0};
-    char msg[256];
     size_t records_written = 0U;
 
     if (start_utc >= end_utc) {
@@ -890,16 +1023,10 @@ static int run_backfill_once(const backfill_config *cfg)
         return 1;
     }
 
-    if (detect_all_holes(start_utc, end_utc, &before) != 0) {
-        (void)SS_LOG_ERROR("backfill.detect_failed", "failed to analyze current DB holes");
+    if (backfill_analyze_window(start_utc, end_utc, &before) != 0) {
         hole_list_free(&before);
         return 1;
     }
-
-    if (snprintf(msg, sizeof(msg), "window_start=%" PRId64 " window_end=%" PRId64 " holes_before=%zu", start_utc, end_utc, before.count) < 0) {
-        copy_string_safe(msg, sizeof(msg), "backfill analyze");
-    }
-    (void)SS_LOG_INFO("backfill.analyze", msg);
 
     if (before.count > 0U) {
         if (backfill_holes(cfg, &before, &records_written) != 0) {
@@ -910,21 +1037,17 @@ static int run_backfill_once(const backfill_config *cfg)
     }
     hole_list_free(&before);
 
-    if (detect_all_holes(start_utc, end_utc, &after) != 0) {
-        (void)SS_LOG_ERROR("backfill.verify_failed", "failed to verify DB completeness");
-        hole_list_free(&after);
-        return 1;
+    {
+        int verify_rc = backfill_verify_window(start_utc, end_utc, records_written, &after);
+        if (verify_rc < 0) {
+            hole_list_free(&after);
+            return 1;
+        }
+        if (verify_rc == 0) {
+            hole_list_free(&after);
+            return 0;
+        }
     }
-
-    if (snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu", records_written, after.count) < 0) {
-        copy_string_safe(msg, sizeof(msg), "backfill verify");
-    }
-    if (after.count == 0U) {
-        (void)SS_LOG_INFO("backfill.complete", msg);
-        hole_list_free(&after);
-        return 0;
-    }
-    (void)SS_LOG_WARN("backfill.partial", msg);
     hole_list_free(&after);
     return 1;
 }
@@ -946,13 +1069,6 @@ int main(void)
         (void)SS_LOG_ERROR("backfill.config.invalid_location", "missing system.location latitude/longitude");
         ss_sdk_shutdown();
         return EXIT_FAILURE;
-    }
-
-    if (strcmp(cfg.mode, "maintenance") == 0) {
-        for (;;) {
-            (void)run_backfill_once(&cfg);
-            sleep_ms(cfg.daily_hole_check_interval_sec * 1000);
-        }
     }
 
     if (run_backfill_once(&cfg) != 0) {

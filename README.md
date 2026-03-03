@@ -115,13 +115,14 @@ Notes:
 - `make all` runs a serialized full pipeline (build lanes + test lanes + tidy + reports).
 - Most workflow targets accept optional `M=<module-or-target>` for module-scoped actions (examples: `M=daemon`, `M=fetch`, `M=sunspots_fetch_openmeteo`).
 - `make list-modules` and `make list-modules-valgrind` dynamically discover runnable module targets from configured build trees.
-- `make run` and `make run-valgrind` run the daemon from existing builds and do not rebuild.
-- `make run M=<module>` and `make run-valgrind M=<module>` run that module binary directly (useful when daemon backgrounding makes daemon-level Valgrind unreliable).
+- `make run` runs the normal daemon from existing debug builds and does not rebuild.
+- `make run-valgrind` targets the daemon from existing valgrind builds and does not rebuild.
+- `make run M=<module>` and `make run-valgrind M=<module>` run that module binary directly.
 - `scripts/test_make_cli_matrix.sh` runs an automated CLI matrix across make targets, per-module `M=...`, and combined `M=...` cases.
 - For a faster smoke run: `INCLUDE_RUN_TARGETS=0 INCLUDE_HEAVY=0 scripts/test_make_cli_matrix.sh`
 - `make run` and `make run-tests` export `ASAN_OPTIONS`/`UBSAN_OPTIONS` with file logging to `logs/make/<branch>/raw_logs/asan/`.
-- `make run-valgrind` writes per-process Valgrind logs with child tracing.
-- Current limitation: daemon-level Valgrind is not reliable right now because the daemon runs in background mode.
+- `make run-valgrind` (daemon default) prints an expected unreliability note and exits without starting Valgrind, because daemon background mode is currently incompatible with reliable capture.
+- `make run-valgrind M=<module>` performs real Valgrind execution and writes per-process logs with child tracing.
 - `make build-tests` and `make build-tests-valgrind` compile test binaries only.
 - `make run-tests` and `make run-tests-valgrind` run tests only and do not rebuild.
 - `make warnings` runs build lanes (`build`, `build-valgrind`, `tidy`) and regenerates warning/analysis reports.
@@ -156,6 +157,7 @@ Notes:
 ## Executables
 
 - `sunspots_daemon`
+- `sunspots_daemon_dummy`
 - `sunspots_frontend`
 - `sunspots_fetch_manager`
 - `sunspots_fetch_openmeteo`
@@ -165,9 +167,9 @@ Notes:
 
 ## SDK Runtime Config
 
-Sample runtime config keys live in `config/sunspots.json` under `common.sdk`:
+Sample runtime config keys live in `config/sunspots.json` under `system.sdk`:
 
-- `db_path`: SDK sqlite DB path (default `db/ss_sdk.db`)
+- `db_dir`: SDK sqlite DB directory (default `db`; filename is derived from location)
 - `log_level`: `debug`, `info`, `warn`/`warning`, `error`, `off`/`none` (default `debug`)
 - `log_mirror_enabled`: mirror toggle (default `true`)
 - `log_mirror_path`: mirror output path (default `logs/sdk.log`)

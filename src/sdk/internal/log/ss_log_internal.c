@@ -722,7 +722,7 @@ static int ss_log_escape_optional_fields(ss_log_escaped_fields *escaped, const s
     return 0;
 }
 
-static int ss_log_format_line(
+static int ss_log_format_line_alloc(
     char **out_line,
     const char *ts,
     const char *level_text,
@@ -793,35 +793,96 @@ static int ss_log_format_line(
     if (*out_line == NULL) {
         return -1;
     }
+    return format_length;
+}
 
+static void ss_log_format_line_write_base(
+    char *out_line,
+    size_t out_len,
+    const char *ts,
+    const char *level_text,
+    const char *event_text,
+    const ss_log_escaped_fields *escaped,
+    int line)
+{
+    (void)snprintf(
+        out_line,
+        out_len,
+        "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",
+        ts,
+        level_text,
+        event_text,
+        escaped->file,
+        line,
+        escaped->func,
+        escaped->message);
+}
+
+static void ss_log_format_line_write_with_fields(
+    char *out_line,
+    size_t out_len,
+    const char *ts,
+    const char *level_text,
+    const char *event_text,
+    const ss_sdk_log_fields *fields,
+    const ss_log_escaped_fields *escaped,
+    int line)
+{
+    (void)snprintf(
+        out_line,
+        out_len,
+        "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
+        ts,
+        level_text,
+        event_text,
+        escaped->file,
+        line,
+        escaped->func,
+        escaped->module,
+        escaped->source_api,
+        fields->metric,
+        (long long)fields->ts_utc,
+        escaped->message);
+}
+
+static int ss_log_format_line(
+    char **out_line,
+    const char *ts,
+    const char *level_text,
+    int line,
+    const ss_sdk_log_fields *fields,
+    const ss_log_escaped_fields *escaped)
+{
+    int format_length;
+    const char *event_text = "-";
+
+    format_length = ss_log_format_line_alloc(out_line, ts, level_text, line, fields, escaped);
+    if (format_length < 0) {
+        return -1;
+    }
+
+    if (escaped->event != NULL && escaped->event[0] != '\0') {
+        event_text = escaped->event;
+    }
     if (fields != NULL) {
-        (void)snprintf(
+        ss_log_format_line_write_with_fields(
             *out_line,
             (size_t)format_length + 1U,
-            "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
             ts,
             level_text,
             event_text,
-            escaped->file,
-            line,
-            escaped->func,
-            escaped->module,
-            escaped->source_api,
-            fields->metric,
-            (long long)fields->ts_utc,
-            escaped->message);
+            fields,
+            escaped,
+            line);
     } else {
-        (void)snprintf(
+        ss_log_format_line_write_base(
             *out_line,
             (size_t)format_length + 1U,
-            "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",
             ts,
             level_text,
             event_text,
-            escaped->file,
-            line,
-            escaped->func,
-            escaped->message);
+            escaped,
+            line);
     }
 
     return 0;

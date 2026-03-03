@@ -48,7 +48,4 @@ void ss_sdk_config_bootstrap_env_from_blob(void)
     ss_sdk_config_try_set_bool_path("system.sdk.log_mirror_enabled", SS_SDK_ENV_LOG_MIRROR_ENABLED);
     ss_sdk_config_try_set_string_path("system.sdk.log_mirror_path", SS_SDK_ENV_LOG_MIRROR_PATH);
     ss_sdk_config_try_set_string_path("system.sdk.log_mirror_max_bytes", SS_SDK_ENV_LOG_MIRROR_MAX_BYTES);
-
-    ss_sdk_config_try_set_bool_path("backfill.run_one", SS_BACKFILL_ENV_RUN_ONCE);
-    ss_sdk_config_try_set_bool_path("backfill.run_once", SS_BACKFILL_ENV_RUN_ONCE);
 }

@@ -45,7 +45,6 @@ protected:
           mirror_enabled_guard_(SS_SDK_ENV_LOG_MIRROR_ENABLED),
           mirror_path_guard_(SS_SDK_ENV_LOG_MIRROR_PATH),
           mirror_max_bytes_guard_(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES),
-          backfill_run_once_guard_(SS_BACKFILL_ENV_RUN_ONCE),
           system_guard_("SUNSPOTS_SYSTEM")
     {}
 
@@ -56,7 +55,6 @@ protected:
         ASSERT_EQ(unsetenv(SS_SDK_ENV_LOG_MIRROR_ENABLED), 0);
         ASSERT_EQ(unsetenv(SS_SDK_ENV_LOG_MIRROR_PATH), 0);
         ASSERT_EQ(unsetenv(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES), 0);
-        ASSERT_EQ(unsetenv(SS_BACKFILL_ENV_RUN_ONCE), 0);
     }
 
     ScopedEnvVar cfg_guard_;
@@ -65,7 +63,6 @@ protected:
     ScopedEnvVar mirror_enabled_guard_;
     ScopedEnvVar mirror_path_guard_;
     ScopedEnvVar mirror_max_bytes_guard_;
-    ScopedEnvVar backfill_run_once_guard_;
     ScopedEnvVar system_guard_;
 };
 
@@ -188,63 +185,6 @@ TEST_F(SdkConfigFixture, root_sdk_block_is_ignored)
     EXPECT_EQ(std::getenv(SS_SDK_ENV_LOG_MIRROR_ENABLED), nullptr);
     EXPECT_EQ(std::getenv(SS_SDK_ENV_LOG_MIRROR_PATH), nullptr);
     EXPECT_EQ(std::getenv(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES), nullptr);
-}
-
-TEST_F(SdkConfigFixture, bootstrap_sets_backfill_run_one_env_var)
-{
-    const char *cfg =
-        "{"
-        "\"name\":\"ConfigBootstrapTest\","
-        "\"backfill\":{"
-        "\"run_one\":true"
-        "}"
-        "}";
-
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
-    ASSERT_EQ(unsetenv(SS_BACKFILL_ENV_RUN_ONCE), 0);
-
-    ss_sdk_config_bootstrap_env_from_blob();
-
-    ASSERT_NE(std::getenv(SS_BACKFILL_ENV_RUN_ONCE), nullptr);
-    EXPECT_STREQ(std::getenv(SS_BACKFILL_ENV_RUN_ONCE), "1");
-}
-
-TEST_F(SdkConfigFixture, bootstrap_does_not_override_existing_backfill_run_one_env_var)
-{
-    const char *cfg =
-        "{"
-        "\"name\":\"ConfigBootstrapTest\","
-        "\"backfill\":{"
-        "\"run_one\":false"
-        "}"
-        "}";
-
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
-    ASSERT_EQ(setenv(SS_BACKFILL_ENV_RUN_ONCE, "1", 1), 0);
-
-    ss_sdk_config_bootstrap_env_from_blob();
-
-    ASSERT_NE(std::getenv(SS_BACKFILL_ENV_RUN_ONCE), nullptr);
-    EXPECT_STREQ(std::getenv(SS_BACKFILL_ENV_RUN_ONCE), "1");
-}
-
-TEST_F(SdkConfigFixture, bootstrap_sets_backfill_run_once_alias_env_var)
-{
-    const char *cfg =
-        "{"
-        "\"name\":\"ConfigBootstrapTest\","
-        "\"backfill\":{"
-        "\"run_once\":true"
-        "}"
-        "}";
-
-    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
-    ASSERT_EQ(unsetenv(SS_BACKFILL_ENV_RUN_ONCE), 0);
-
-    ss_sdk_config_bootstrap_env_from_blob();
-
-    ASSERT_NE(std::getenv(SS_BACKFILL_ENV_RUN_ONCE), nullptr);
-    EXPECT_STREQ(std::getenv(SS_BACKFILL_ENV_RUN_ONCE), "1");
 }
 
 TEST_F(SdkConfigFixture, bootstrap_ignores_malformed_json_blob)

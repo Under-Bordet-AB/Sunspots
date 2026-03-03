@@ -71,6 +71,11 @@ make build-tests-valgrind
 make run-tests-valgrind
 ```
 
+Note:
+
+1. `make run-valgrind` without `M=...` is currently a no-op with an informational note because daemon background mode is not reliable for Valgrind capture.
+2. Use `make run-valgrind M=<module>` for real runtime Valgrind execution.
+
 Module-specific:
 
 ```bash
@@ -106,13 +111,13 @@ tail -f logs/daemon.log logs/sdk.log
 Check DB file:
 
 ```bash
-ls -lh db/ss_sdk_*.db
+ls -lh db/*_*.db
 ```
 
 SQLite quick checks:
 
 ```bash
-DB=$(ls db/ss_sdk_*.db | head -n1)
+DB=$(ls db/*_*.db | head -n1)
 sqlite3 "$DB" ".tables"
 sqlite3 "$DB" "select count(*) from records;"
 sqlite3 "$DB" "select min(ts_start_utc), max(ts_start_utc) from records;"
