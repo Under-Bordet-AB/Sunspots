@@ -34,9 +34,13 @@ public:
     ~ScopedEnvVar()
     {
         if (had_old_) {
-            setenv(name_, old_value_.c_str(), 1);
+            if (setenv(name_, old_value_.c_str(), 1) != 0) {
+                /* best-effort restore in test teardown */
+            }
         } else {
-            unsetenv(name_);
+            if (unsetenv(name_) != 0) {
+                /* best-effort restore in test teardown */
+            }
         }
     }
 
@@ -100,54 +104,93 @@ bool write_mock_archive_json(const std::string &path, int64_t from_utc, int64_t 
         return false;
     }
 
-    std::fputs("{\"hourly\":{\"time\":[", fp);
+    if (std::fputs("{\"hourly\":{\"time\":[", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
     for (ts = from_utc; ts <= to_utc; ts += 3600) {
         const std::string t = format_utc_ymdhm(ts);
         if (t.empty()) {
-            std::fclose(fp);
+            (void)std::fclose(fp);
             return false;
         }
         if (!first) {
-            std::fputs(",", fp);
+            if (std::fputs(",", fp) == EOF) {
+                (void)std::fclose(fp);
+                return false;
+            }
         }
-        std::fprintf(fp, "\"%s\"", t.c_str());
+        if (std::fprintf(fp, "\"%s\"", t.c_str()) < 0) {
+            (void)std::fclose(fp);
+            return false;
+        }
         first = false;
     }
 
     first = true;
-    std::fputs("],\"temperature_2m\":[", fp);
+    if (std::fputs("],\"temperature_2m\":[", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
     for (ts = from_utc; ts <= to_utc; ts += 3600) {
         const double v = 2.0 + (double)((ts / 3600) % 24);
         if (!first) {
-            std::fputs(",", fp);
+            if (std::fputs(",", fp) == EOF) {
+                (void)std::fclose(fp);
+                return false;
+            }
         }
-        std::fprintf(fp, "%.2f", v);
+        if (std::fprintf(fp, "%.2f", v) < 0) {
+            (void)std::fclose(fp);
+            return false;
+        }
         first = false;
     }
 
     first = true;
-    std::fputs("],\"cloud_cover\":[", fp);
+    if (std::fputs("],\"cloud_cover\":[", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
     for (ts = from_utc; ts <= to_utc; ts += 3600) {
         const double v = (double)((ts / 3600) % 100);
         if (!first) {
-            std::fputs(",", fp);
+            if (std::fputs(",", fp) == EOF) {
+                (void)std::fclose(fp);
+                return false;
+            }
         }
-        std::fprintf(fp, "%.2f", v);
+        if (std::fprintf(fp, "%.2f", v) < 0) {
+            (void)std::fclose(fp);
+            return false;
+        }
         first = false;
     }
 
     first = true;
-    std::fputs("],\"shortwave_radiation\":[", fp);
+    if (std::fputs("],\"shortwave_radiation\":[", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
     for (ts = from_utc; ts <= to_utc; ts += 3600) {
         const int hour = (int)((ts / 3600) % 24);
         const double v = (hour >= 6 && hour <= 18) ? (200.0 + (double)(hour * 10)) : 0.0;
         if (!first) {
-            std::fputs(",", fp);
+            if (std::fputs(",", fp) == EOF) {
+                (void)std::fclose(fp);
+                return false;
+            }
         }
-        std::fprintf(fp, "%.2f", v);
+        if (std::fprintf(fp, "%.2f", v) < 0) {
+            (void)std::fclose(fp);
+            return false;
+        }
         first = false;
     }
-    std::fputs("]}}", fp);
+    if (std::fputs("]}}", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
 
     if (std::fclose(fp) != 0) {
         return false;
@@ -176,9 +219,25 @@ size_t count_dir_files(const std::string &dir_path)
 
 int run_backfill_binary_once()
 {
-    std::string cmd = std::string(BACKFILL_BIN_PATH);
-    int rc = std::system(cmd.c_str());
-    if (rc == -1 || !WIFEXITED(rc)) {
+    pid_t child = fork();
+    int rc;
+
+    if (child < 0) {
+        return -1;
+    }
+    if (child == 0) {
+        (void)execl(BACKFILL_BIN_PATH, BACKFILL_BIN_PATH, (char *)NULL);
+        _exit(127);
+    }
+
+    rc = 0;
+    while (waitpid(child, &rc, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+    if (!WIFEXITED(rc)) {
         return -1;
     }
     return WEXITSTATUS(rc);

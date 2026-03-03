@@ -501,7 +501,7 @@ TEST_F(SdkLogFixture, internal_helpers_cover_remaining_low_level_branches)
     const std::string parent_file = dir_ + "/parent_is_file";
     FILE *fp = std::fopen(parent_file.c_str(), "w");
     ASSERT_NE(fp, nullptr);
-    std::fclose(fp);
+    ASSERT_EQ(std::fclose(fp), 0);
     EXPECT_EQ(ss_sdk_internal_log_test_ensure_parent_dirs((parent_file + "/child/log.txt").c_str()), -1);
     remove_file_if_exists(parent_file);
 

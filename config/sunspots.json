@@ -18,6 +18,7 @@
             "log_mirror_max_bytes": "5242880"
         }
     },
+    "modules": [
     {
       "name": "Openmeteo",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo",
