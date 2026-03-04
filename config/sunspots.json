@@ -9,14 +9,14 @@
       "latitude": 59.3293,
       "longitude": 18.0686,
       "elprisomrade": "SE3"
+    },
+    "sdk": {
+      "db_dir": "db",
+      "log_level": "info",
+      "log_mirror_enabled": true,
+      "log_mirror_path": "logs/sdk.log",
+      "log_mirror_max_bytes": "5242880"
     }
-  },
-  "sdk": {
-    "db_dir": "db",
-    "log_level": "info",
-    "log_mirror_enabled": true,
-    "log_mirror_path": "logs/sdk.log",
-    "log_mirror_max_bytes": "5242880"
   },
   "modules": [
     {
@@ -30,7 +30,7 @@
       "name": "Elprisjustnu",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
       "Timer-type": 1,
-      "Rek-time": 50
+      "Rel-time": 50
     },
     {
       "name": "ComputeManager",

@@ -12,7 +12,7 @@
   },
   "backfill": {
     "enabled": true,
-    "start_date_utc": "2025-01-01",
+    "start_date_utc": "2026-01-01",
     "chunk_days": 7,
     "retry_max_attempts": 5,
     "retry_base_backoff_ms": 1000,
