@@ -20,15 +20,15 @@
 // Lookup table for all SQL queries
 static const char *const g_ss_db_sql[SS_DB_SQL_COUNT] = {
     [SS_DB_SQL_SELECT_ROWS_WINDOW] =
-        "SELECT ts_start_utc, data_kind, value_type, value_i64, value_f64, value_bool "
+        "SELECT ts_start_utc, data_kind, value_type, value_i64, value_f64, value_bool, ingested_utc "
         "FROM records "
         "WHERE canonical = ?1 AND ts_start_utc >= ?2 AND ts_start_utc < ?3 "
-        "ORDER BY ts_start_utc ASC, data_kind ASC",
+        "ORDER BY ts_start_utc ASC, data_kind ASC, ingested_utc DESC, rowid DESC",
     [SS_DB_SQL_INSERT_RECORD] =
         "INSERT INTO records("
-        "canonical, value_type, value_i64, value_f64, value_bool, ts_start_utc, ts_end_utc, data_kind"
-        ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
-        "ON CONFLICT(canonical, data_kind, ts_start_utc) DO NOTHING",
+        "canonical, value_type, value_i64, value_f64, value_bool, ts_start_utc, ts_end_utc, data_kind, ingested_utc"
+        ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) "
+        "ON CONFLICT(canonical, data_kind, ts_start_utc, ingested_utc) DO NOTHING",
     [SS_DB_SQL_SELECT_MAX_TS_FROM_START] =
         "SELECT MAX(ts_start_utc) "
         "FROM records "
@@ -566,22 +566,25 @@ static ss_sdk_status ss_db_create_canonical_data_schema(sqlite3 *db)
         "ts_start_utc INTEGER NOT NULL,"
         "ts_end_utc INTEGER NOT NULL,"
         "data_kind INTEGER NOT NULL,"
+        "ingested_utc INTEGER NOT NULL,"
         "CHECK(canonical >= 0),"
         "CHECK(value_type IN (0,1,2)),"
         "CHECK(data_kind IN (0,1)),"
+        "CHECK(ingested_utc >= 0),"
         "CHECK(ts_start_utc >= 0),"
         "CHECK(ts_start_utc % 900 = 0),"
         "CHECK(ts_end_utc = ts_start_utc + 900),"
         "CHECK((value_type = 0 AND value_i64 IS NOT NULL AND typeof(value_i64) = 'integer' AND value_f64 IS NULL AND value_bool IS NULL)"
         "   OR (value_type = 1 AND value_f64 IS NOT NULL AND (typeof(value_f64) = 'real' OR typeof(value_f64) = 'integer') AND value_i64 IS NULL AND value_bool IS NULL)"
         "   OR (value_type = 2 AND value_bool IN (0,1) AND typeof(value_bool) = 'integer' AND value_i64 IS NULL AND value_f64 IS NULL)),"
-        "UNIQUE(canonical, data_kind, ts_start_utc)"
+        "UNIQUE(canonical, data_kind, ts_start_utc, ingested_utc)"
         ") STRICT;"
         "CREATE INDEX IF NOT EXISTS idx_records_canonical_data_kind_ts "
         "ON records(canonical, data_kind, ts_start_utc);"
+        "CREATE INDEX IF NOT EXISTS idx_records_canonical_ts_kind_ingested "
+        "ON records(canonical, ts_start_utc, data_kind, ingested_utc DESC);"
         "CREATE INDEX IF NOT EXISTS idx_records_canonical_ts "
         "ON records(canonical, ts_start_utc);";
-
     return ss_exec(db, k_canonical_data_schema_sql);
 }
 
@@ -812,6 +815,12 @@ static ss_db_write_result ss_db_bind_insert_record(sqlite3_stmt *stmt, const ss_
     bind_error_count += (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)record->ts_start_utc) != SQLITE_OK);
     bind_error_count += (sqlite3_bind_int64(stmt, 7, (sqlite3_int64)record->ts_end_utc) != SQLITE_OK);
     bind_error_count += (sqlite3_bind_int(stmt, 8, (int)record->data_kind) != SQLITE_OK);
+    bind_error_count +=
+        (sqlite3_bind_int64(
+             stmt,
+             9,
+             (sqlite3_int64)(record->ingested_utc > 0 ? record->ingested_utc :
+                             (record->data_kind == SS_SDK_DATA_OBSERVATION ? 0 : time(NULL)))) != SQLITE_OK);
 
     if (bind_error_count != 0) {
         result.log_event = "sdk.db.bind_failed";
@@ -842,7 +851,7 @@ static ss_db_write_result ss_db_execute_insert_step(sqlite3_stmt *stmt)
     if (sqlite_result == SQLITE_DONE) {
         if (sqlite3_changes(g_db) == 0) {
             result.log_event = "sdk.db.dedupe_drop";
-            result.log_message = "duplicate canonical slot ignored";
+            result.log_message = "duplicate canonical slot/release ignored";
         }
         result.status = SS_SDK_OK;
         return result;

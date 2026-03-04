@@ -203,7 +203,7 @@ if (st != SS_SDK_OK) {
 
 ### Team Config Handoff (Copy/Paste)
 
-When teammates ask for the "SDK/DB/log strings", use one shared block under `system`:
+When teammates ask for the "SDK/DB/log strings", use one shared `system.sdk` block:
 
 ```json
 "system": {
