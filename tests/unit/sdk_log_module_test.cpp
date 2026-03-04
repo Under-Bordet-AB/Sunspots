@@ -178,31 +178,25 @@ protected:
 
 TEST_F(SdkLogFixture, invalid_level_returns_invalid_arg)
 {
-    use_log_path("invalid_level.log");
-    ss_sdk_log_write_auto((ss_sdk_log_level)99, "sdk.log.bad.level", "message", __FILE__, __LINE__, __func__);
-    EXPECT_EQ(access(log_path_.c_str(), F_OK), -1);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto((ss_sdk_log_level)99, "sdk.log.bad.level", "message", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INVALID_ARG);
 }
 
 TEST_F(SdkLogFixture, invalid_base_arguments_return_invalid_arg)
 {
-    use_log_path("invalid_args.log");
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "m", __FILE__, __LINE__, __func__);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "m", __FILE__, __LINE__, __func__);
-    const std::string before = read_text_file(log_path_);
-    EXPECT_NE(before.find("msg=\"m\""), std::string::npos);
-
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", NULL, __FILE__, __LINE__, __func__);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", "m", NULL, __LINE__, __func__);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", "m", __FILE__, __LINE__, NULL);
-    const std::string after = read_text_file(log_path_);
-    EXPECT_EQ(after, before);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "m", __FILE__, __LINE__, __func__), SS_SDK_OK);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "m", __FILE__, __LINE__, __func__), SS_SDK_OK);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", NULL, __FILE__, __LINE__, __func__), SS_SDK_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", "m", NULL, __LINE__, __func__), SS_SDK_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "e", "m", __FILE__, __LINE__, NULL), SS_SDK_ERR_INVALID_ARG);
 }
 
 TEST_F(SdkLogFixture, null_or_empty_event_uses_placeholder_and_writes_log)
 {
     use_log_path("optional_event.log");
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "from_null_event", __FILE__, __LINE__, __func__);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "from_empty_event", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, NULL, "from_null_event", __FILE__, __LINE__, __func__), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "", "from_empty_event", __FILE__, __LINE__, __func__), SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find(" INFO - "), std::string::npos);
@@ -222,18 +216,19 @@ TEST_F(SdkLogFixture, mirror_enabled_without_path_uses_default_path)
 
 TEST_F(SdkLogFixture, missing_log_path_is_intentional_noop)
 {
-    const std::string noop_path = dir_ + "/noop.log";
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
-    ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", noop_path.c_str(), 1), 0);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.noop", "message", __FILE__, __LINE__, __func__);
-    EXPECT_EQ(access(noop_path.c_str(), F_OK), -1);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.noop", "message", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 }
 
 TEST_F(SdkLogFixture, mirror_path_env_is_used)
 {
     use_log_path("sdk log.txt");
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.good_path", "hello", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.good_path", "hello", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find("sdk.log.good_path"), std::string::npos);
@@ -245,7 +240,9 @@ TEST_F(SdkLogFixture, mirror_file_is_truncated_when_size_cap_is_reached)
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_MAX_BYTES", "256", 1), 0);
 
     for (int i = 0; i < 40; ++i) {
-        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.cap", "this line should force truncation eventually", __FILE__, __LINE__, __func__);
+        ASSERT_EQ(
+            ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.cap", "this line should force truncation eventually", __FILE__, __LINE__, __func__),
+            SS_SDK_OK);
     }
 
     const off_t size = file_size_bytes(log_path_);
@@ -262,8 +259,9 @@ TEST_F(SdkLogFixture, overlong_log_path_returns_internal_error)
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", long_path.c_str(), 1), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.long_path", "message", __FILE__, __LINE__, __func__);
-    SUCCEED();
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.long_path", "message", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 }
 
 TEST_F(SdkLogFixture, mirror_disabled_ignores_path_and_returns_ok)
@@ -273,7 +271,9 @@ TEST_F(SdkLogFixture, mirror_disabled_ignores_path_and_returns_ok)
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "0", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", ignored_path.c_str(), 1), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.mirror_disabled", "message", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.mirror_disabled", "message", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     EXPECT_EQ(access(ignored_path.c_str(), F_OK), -1);
 }
@@ -289,14 +289,16 @@ TEST_F(SdkLogFixture, write_fields_includes_structured_fields)
     fields.metric = SS_METRIC_WEATHER_WIND_SPEED_10M_MS;
     fields.ts_utc = 1735689600;
 
-    ss_sdk_log_write_fields(
-        SS_SDK_LOG_WARN,
-        "sdk.log.fields",
-        "structured",
-        &fields,
-        __FILE__,
-        __LINE__,
-        __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_fields(
+            SS_SDK_LOG_WARN,
+            "sdk.log.fields",
+            "structured",
+            &fields,
+            __FILE__,
+            __LINE__,
+            __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find("sdk.log.fields"), std::string::npos);
@@ -315,14 +317,16 @@ TEST_F(SdkLogFixture, write_fields_escapes_quotes_backslashes_and_control_chars)
     fields.module = "module\tname";
     fields.source_api = "provider\"x\\y";
 
-    ss_sdk_log_write_fields(
-        SS_SDK_LOG_ERROR,
-        "sdk.log.\"quoted\"",
-        "line1\nline2\tend",
-        &fields,
-        __FILE__,
-        __LINE__,
-        __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_fields(
+            SS_SDK_LOG_ERROR,
+            "sdk.log.\"quoted\"",
+            "line1\nline2\tend",
+            &fields,
+            __FILE__,
+            __LINE__,
+            __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find("sdk.log.\\\"quoted\\\""), std::string::npos);
@@ -335,7 +339,7 @@ TEST_F(SdkLogFixture, macro_logging_writes_info_level_event)
 {
     use_log_path("macro.log");
 
-    SS_LOG_INFO("sdk.log.macro", "from_macro");
+    ASSERT_EQ(SS_LOG_INFO("sdk.log.macro", "from_macro"), SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find(" INFO sdk.log.macro "), std::string::npos);
@@ -387,34 +391,39 @@ TEST_F(SdkLogFixture, write_auto_hooked_failures_return_internal)
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_GMTIME, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.gmtime", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.gmtime", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_STRFTIME, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.strftime", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.strftime", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_ESCAPE_BASE, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.escape_base", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.escape_base", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_FORMAT_LINE, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.format_line", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.format_line", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_FSYNC, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.fsync", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.fsync", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_ESCAPE_OPTIONAL, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.escape_optional_auto", "m", __FILE__, __LINE__, __func__);
-
-    const std::string text = read_text_file(log_path_);
-    EXPECT_EQ(text.find("sdk.log.hook.gmtime"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.strftime"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.escape_base"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.format_line"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.escape_optional_auto"), std::string::npos);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.escape_optional_auto", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 }
 
 TEST_F(SdkLogFixture, write_fields_hooked_optional_escape_failure_returns_internal)
@@ -430,17 +439,16 @@ TEST_F(SdkLogFixture, write_fields_hooked_optional_escape_failure_returns_intern
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_ESCAPE_OPTIONAL, 1);
-    ss_sdk_log_write_fields(
-        SS_SDK_LOG_INFO,
-        "sdk.log.hook.escape_optional",
-        "m",
-        &fields,
-        __FILE__,
-        __LINE__,
-        __func__);
-
-    const std::string text = read_text_file(log_path_);
-    EXPECT_EQ(text.find("sdk.log.hook.escape_optional"), std::string::npos);
+    EXPECT_EQ(
+        ss_sdk_log_write_fields(
+            SS_SDK_LOG_INFO,
+            "sdk.log.hook.escape_optional",
+            "m",
+            &fields,
+            __FILE__,
+            __LINE__,
+            __func__),
+        SS_SDK_ERR_INTERNAL);
 }
 
 TEST_F(SdkLogFixture, get_log_path_helper_handles_missing_env)
@@ -460,7 +468,9 @@ TEST_F(SdkLogFixture, missing_env_defaults_write_to_logs_sdk_log)
     ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_ENABLED"), 0);
     ASSERT_EQ(unsetenv("SS_SDK_LOG_MIRROR_PATH"), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.default.path", "default-path-write", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.default.path", "default-path-write", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(default_log_path);
     EXPECT_NE(text.find("sdk.log.default.path"), std::string::npos);
@@ -474,7 +484,9 @@ TEST_F(SdkLogFixture, invalid_mirror_enabled_token_disables_mirror)
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "maybe", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", ignored_path.c_str(), 1), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.invalid.toggle", "message", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.invalid.toggle", "message", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
     EXPECT_EQ(access(ignored_path.c_str(), F_OK), -1);
 }
 
@@ -536,30 +548,34 @@ TEST_F(SdkLogFixture, write_auto_covers_path_open_flock_write_and_fsync_call_err
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_MKDIR, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.mkdir", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.mkdir", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_ENABLED", "1", 1), 0);
     ASSERT_EQ(setenv("SS_SDK_LOG_MIRROR_PATH", "/", 1), 0);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.root.open_fail", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.root.open_fail", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     use_log_path("error_paths.log");
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_FLOCK, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.flock", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.flock", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FORCE_WRITE_ZERO, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.write_zero", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.write_zero", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_FSYNC_CALL, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.fsync_call", "m", __FILE__, __LINE__, __func__);
-
-    const std::string text = read_text_file(log_path_);
-    EXPECT_EQ(text.find("sdk.log.hook.mkdir"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.root.open_fail"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.flock"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.write_zero"), std::string::npos);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.fsync_call", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 }
 
 TEST_F(SdkLogFixture, format_and_escape_alloc_failures_cover_common_error_paths)
@@ -575,39 +591,43 @@ TEST_F(SdkLogFixture, format_and_escape_alloc_failures_cover_common_error_paths)
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_ESCAPE_ALLOC, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.escape_alloc_base", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.escape_alloc_base", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FAIL_ESCAPE_ALLOC, 5);
-    ss_sdk_log_write_fields(
-        SS_SDK_LOG_INFO,
-        "sdk.log.hook.escape_alloc_optional",
-        "m",
-        &fields,
-        __FILE__,
-        __LINE__,
-        __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_fields(
+            SS_SDK_LOG_INFO,
+            "sdk.log.hook.escape_alloc_optional",
+            "m",
+            &fields,
+            __FILE__,
+            __LINE__,
+            __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FORCE_FORMAT_NEEDED_NEG, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.needed_neg", "m", __FILE__, __LINE__, __func__);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.needed_neg", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 
     ss_sdk_internal_log_test_reset_hooks();
     ss_sdk_internal_log_test_set_hook(SS_SDK_LOG_HOOK_FORCE_FORMAT_ALLOC_NULL, 1);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.alloc_null", "m", __FILE__, __LINE__, __func__);
-
-    const std::string text = read_text_file(log_path_);
-    EXPECT_EQ(text.find("sdk.log.hook.escape_alloc_base"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.escape_alloc_optional"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.needed_neg"), std::string::npos);
-    EXPECT_EQ(text.find("sdk.log.hook.alloc_null"), std::string::npos);
+    EXPECT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.hook.alloc_null", "m", __FILE__, __LINE__, __func__),
+        SS_SDK_ERR_INTERNAL);
 }
 
 TEST_F(SdkLogFixture, debug_level_is_written)
 {
     use_log_path("debug.log");
     ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "debug", 1), 0);
-    ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug", "hello", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug", "hello", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find(" DEBUG sdk.log.debug "), std::string::npos);
@@ -618,8 +638,12 @@ TEST_F(SdkLogFixture, info_threshold_filters_out_debug_lines)
     use_log_path("filter.log");
     ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "info", 1), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug.filtered", "drop-me", __FILE__, __LINE__, __func__);
-    ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.info.allowed", "keep-me", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug.filtered", "drop-me", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_INFO, "sdk.log.info.allowed", "keep-me", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_EQ(text.find("sdk.log.debug.filtered"), std::string::npos);
@@ -631,7 +655,9 @@ TEST_F(SdkLogFixture, invalid_log_level_token_falls_back_to_debug)
     use_log_path("invalid_level.log");
     ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "loud", 1), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug.fallback", "hello", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.debug.fallback", "hello", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_NE(text.find("sdk.log.debug.fallback"), std::string::npos);
@@ -642,8 +668,12 @@ TEST_F(SdkLogFixture, off_threshold_drops_all_lines)
     use_log_path("off.log");
     ASSERT_EQ(setenv("SS_SDK_LOG_LEVEL", "off", 1), 0);
 
-    ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.off.debug", "drop", __FILE__, __LINE__, __func__);
-    ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, "sdk.log.off.error", "drop", __FILE__, __LINE__, __func__);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, "sdk.log.off.debug", "drop", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
+    ASSERT_EQ(
+        ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, "sdk.log.off.error", "drop", __FILE__, __LINE__, __func__),
+        SS_SDK_OK);
 
     const std::string text = read_text_file(log_path_);
     EXPECT_TRUE(text.empty());

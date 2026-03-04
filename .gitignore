@@ -25,7 +25,6 @@
 *.exe
 *.out
 *.app
-/backfill
 
 # Build directories
 build/

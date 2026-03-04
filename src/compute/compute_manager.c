@@ -94,6 +94,8 @@ int wait_for_new_data() {
     int cycles = 0;
 
     while (cycles < max_cycles) {
+        syslog(LOG_INFO, "Compute Manager - Looking for fresh data...");
+
         const int64_t now = (int64_t)time(NULL);
         const int64_t window_start = now - 90 * 60;
         const int64_t window_end = now + 90 * 60;
@@ -107,7 +109,6 @@ int wait_for_new_data() {
         int observed_metrics_found = 0;
 
         for (int m = 0; m < 3; m++) {
-            printf("Looking for samples...\n");
             int metric_has_observed = 0;
 
             ss_sdk_samples_out samples = {0};
@@ -122,10 +123,8 @@ int wait_for_new_data() {
                 const ss_sdk_sample* s = &samples.samples[i];
                 if (s->value_type != SS_SDK_VALUE_F64) continue;
                 if (s->ts_utc < window_start || s->ts_utc > window_end) continue;
-                printf("Sample found: %d\n", i);
 
                 if ((s->flags & SS_SDK_SAMPLE_OBSERVED) != 0) {
-                    printf("Observed metric found.\n");
                     metric_has_observed = 1;
                     break;
                 }
@@ -139,7 +138,8 @@ int wait_for_new_data() {
         }
 
         if (observed_metrics_found == 3) {
-            return 0; // all required weather metrics observed
+            syslog(LOG_INFO, "Compute Manager - Fresh data found!");
+            return 0;
         }
 
         cycles++;

@@ -57,12 +57,12 @@ list_targets_from_target_help() {
 
 list_executable_targets() {
   build_dir="$1"
-  from_target_help=$(list_targets_from_target_help "$build_dir" || true)
-  if [ -n "$from_target_help" ]; then
-    printf '%s\n' "$from_target_help"
+  from_link_files=$(list_targets_from_link_files "$build_dir" || true)
+  if [ -n "$from_link_files" ]; then
+    printf '%s\n' "$from_link_files"
     return 0
   fi
-  list_targets_from_link_files "$build_dir"
+  list_targets_from_target_help "$build_dir"
 }
 
 print_aliases() {

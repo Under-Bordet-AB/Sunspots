@@ -202,9 +202,6 @@ static bool ss_find_prev_row(
     ss_raw_row *out)
 {
     size_t i;
-    int64_t candidate_ts = -1;
-    bool have_candidate = false;
-    ss_raw_row candidate = {0};
 
     if (rows == NULL || out == NULL || count == 0U) {
         return false;
@@ -216,23 +213,7 @@ static bool ss_find_prev_row(
         if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
             continue;
         }
-        if (!have_candidate) {
-            candidate = rows[i];
-            candidate_ts = rows[i].ts_utc;
-            have_candidate = true;
-            continue;
-        }
-        if (rows[i].ts_utc == candidate_ts) {
-            // Rows are sorted newest-first inside each slot, so keep walking
-            // to end up on the newest entry when scanning backwards.
-            candidate = rows[i];
-            continue;
-        }
-        break;
-    }
-
-    if (have_candidate) {
-        *out = candidate;
+        *out = rows[i];
         return true;
     }
 
@@ -262,35 +243,12 @@ static bool ss_find_prev_next_rows(
 
     i = first_gt;
     while (i > 0U) {
-        int64_t candidate_ts = -1;
-        bool have_candidate = false;
-        ss_raw_row candidate = {0};
         i -= 1U;
-        while (true) {
-            if (ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast) &&
-                rows[i].ts_utc < ts_utc) {
-                if (!have_candidate) {
-                    candidate = rows[i];
-                    candidate_ts = rows[i].ts_utc;
-                    have_candidate = true;
-                } else if (rows[i].ts_utc == candidate_ts) {
-                    candidate = rows[i];
-                } else {
-                    break;
-                }
-            }
-
-            if (i == 0U) {
-                break;
-            }
-            if (rows[i - 1U].ts_utc != rows[i].ts_utc) {
-                break;
-            }
-            i -= 1U;
+        if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
+            continue;
         }
-
-        if (have_candidate) {
-            *out_prev = candidate;
+        if (rows[i].ts_utc < ts_utc) {
+            *out_prev = rows[i];
             have_prev = true;
             break;
         }

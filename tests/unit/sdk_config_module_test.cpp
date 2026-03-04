@@ -68,11 +68,12 @@ protected:
 
 }  // namespace
 
-TEST_F(SdkConfigFixture, sdk_env_vars_bootstrap_from_system_env_sdk_block)
+TEST_F(SdkConfigFixture, sdk_env_vars_bootstrap_from_system_sdk_block)
 {
     const char *cfg =
         "{"
         "\"name\":\"ConfigBootstrapTest\","
+        "\"system\":{"
         "\"sdk\":{"
         "\"db_dir\":\"db/system_bootstrap\","
         "\"log_level\":\"info\","
@@ -80,9 +81,10 @@ TEST_F(SdkConfigFixture, sdk_env_vars_bootstrap_from_system_env_sdk_block)
         "\"log_mirror_path\":\"logs/system_bootstrap.log\","
         "\"log_mirror_max_bytes\":\"2048\""
         "}"
+        "}"
         "}";
 
-    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", cfg, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
     clear_sdk_env();
 
     ss_sdk_config_bootstrap_env_from_blob();
@@ -104,6 +106,7 @@ TEST_F(SdkConfigFixture, bootstrap_does_not_override_daemon_exported_env_vars)
     const char *cfg =
         "{"
         "\"name\":\"ConfigBootstrapTest\","
+        "\"system\":{"
         "\"sdk\":{"
         "\"db_dir\":\"db/from_config\","
         "\"log_level\":\"debug\","
@@ -111,9 +114,10 @@ TEST_F(SdkConfigFixture, bootstrap_does_not_override_daemon_exported_env_vars)
         "\"log_mirror_path\":\"logs/from_config.log\","
         "\"log_mirror_max_bytes\":\"8192\""
         "}"
+        "}"
         "}";
 
-    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", cfg, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
     ASSERT_EQ(setenv(SS_SDK_ENV_DB_DIR, "db/from_daemon", 1), 0);
     ASSERT_EQ(setenv(SS_SDK_ENV_LOG_LEVEL, "error", 1), 0);
     ASSERT_EQ(setenv(SS_SDK_ENV_LOG_MIRROR_ENABLED, "0", 1), 0);
@@ -129,12 +133,12 @@ TEST_F(SdkConfigFixture, bootstrap_does_not_override_daemon_exported_env_vars)
     EXPECT_STREQ(std::getenv(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES), "1024");
 }
 
-TEST_F(SdkConfigFixture, system_sdk_block_is_ignored)
+TEST_F(SdkConfigFixture, common_sdk_block_is_ignored)
 {
     const char *cfg =
         "{"
         "\"name\":\"ConfigBootstrapTest\","
-        "\"system\":{"
+        "\"common\":{"
         "\"sdk\":{"
         "\"db_dir\":\"db/common_bootstrap\","
         "\"log_level\":\"warn\","
@@ -145,7 +149,7 @@ TEST_F(SdkConfigFixture, system_sdk_block_is_ignored)
         "}"
         "}";
 
-    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", cfg, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
     clear_sdk_env();
 
     ss_sdk_config_bootstrap_env_from_blob();
@@ -157,12 +161,11 @@ TEST_F(SdkConfigFixture, system_sdk_block_is_ignored)
     EXPECT_EQ(std::getenv(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES), nullptr);
 }
 
-TEST_F(SdkConfigFixture, common_sdk_block_is_ignored)
+TEST_F(SdkConfigFixture, root_sdk_block_is_ignored)
 {
     const char *cfg =
         "{"
         "\"name\":\"ConfigBootstrapTest\","
-        "\"common\":{"
         "\"sdk\":{"
         "\"db_dir\":\"db/root_bootstrap\","
         "\"log_level\":\"warn\","
@@ -170,10 +173,9 @@ TEST_F(SdkConfigFixture, common_sdk_block_is_ignored)
         "\"log_mirror_path\":\"logs/root_bootstrap.log\","
         "\"log_mirror_max_bytes\":\"4096\""
         "}"
-        "}"
         "}";
 
-    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", cfg, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg, 1), 0);
     clear_sdk_env();
 
     ss_sdk_config_bootstrap_env_from_blob();
@@ -187,7 +189,7 @@ TEST_F(SdkConfigFixture, common_sdk_block_is_ignored)
 
 TEST_F(SdkConfigFixture, bootstrap_ignores_malformed_json_blob)
 {
-    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", "{bad-json", 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", "{bad-json", 1), 0);
     clear_sdk_env();
 
     ss_sdk_config_bootstrap_env_from_blob();

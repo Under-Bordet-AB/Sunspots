@@ -7,8 +7,6 @@
 #include "unit_utils.h"
 #include <string.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <time.h>
 
 transform_status_t transform_openmeteo_weather(const cJSON *input, weather_data_t *out){
     JSON_REQUIRE(cJSON_IsObject(input), TRANSFORM_INVALID_INPUT);
@@ -119,13 +117,8 @@ transform_status_t transform_openmeteo_solar(const cJSON *input, weather_data_t 
     }
 
     bool is_unix_time = (strcmp(time_unit, "unixtime") == 0);
-    const int64_t now_utc = (int64_t)time(NULL);
-    double selected_radiation = -1.0;
-    int selected_time = 0;
-    int have_selected = 0;
-    int fallback_time = 0;
-    double fallback_radiation = -1.0;
-    int have_fallback = 0;
+    double recent_radiation = -1.0;
+    int recent_time = 0;
 
     for (int i = 0; i < num_entries; i++){
         int unix_time;
@@ -145,36 +138,18 @@ transform_status_t transform_openmeteo_solar(const cJSON *input, weather_data_t 
         }
         double radiation_value = radiation_obj->valuedouble;
 
-        if (unix_time <= now_utc) {
-            if (!have_selected || unix_time > selected_time) {
-                selected_time = unix_time;
-                selected_radiation = radiation_value;
-                have_selected = 1;
-            }
-        } else if (!have_selected) {
-            if (!have_fallback || unix_time < fallback_time) {
-                fallback_time = unix_time;
-                fallback_radiation = radiation_value;
-                have_fallback = 1;
-            }
+        if (unix_time > recent_time){
+            recent_time = unix_time;
+            recent_radiation = radiation_value;
         }
     }
 
-    if (!have_selected && have_fallback) {
-        selected_time = fallback_time;
-        selected_radiation = fallback_radiation;
-        have_selected = 1;
-    }
-
-    if (!have_selected || selected_radiation < 0.0){
+    if (recent_radiation < 0.0){
         return TRANSFORM_MISSING_FIELD;
     }
 
-    /* Keep current-weather timestamp when already set, otherwise use selected solar slot. */
-    if (out->timestamp_unix <= 0) {
-        out->timestamp_unix = selected_time;
-    }
-    out->solar_radiation_W_per_m2 = selected_radiation;
+    out->timestamp_unix = (recent_time > out->timestamp_unix) ? recent_time : out->timestamp_unix;
+    out->solar_radiation_W_per_m2 = recent_radiation;
     out->has_solar_radiation = true;
 
     return TRANSFORM_OK;

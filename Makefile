@@ -53,7 +53,6 @@ WARNINGS_RAW_LOG ?= $(RAW_LOGS_DIR)/warnings_raw.log
 LIZARD_RAW_LOG ?= $(RAW_LOGS_DIR)/lizard_raw.log
 ALL_LOCK_FILE ?= $(RAW_LOGS_DIR)/.make_all.lock
 WARNINGS_LOCK_FILE ?= $(RAW_LOGS_DIR)/.make_warnings.lock
-BACKFILL_USAGE_TRACKER ?= logs/backfill_usage_daily.log
 WARNINGS_SKIP_PREFLIGHT ?= 0
 ALLOW_DURING_ALL ?= 0
 LIZARD_PARAM_THRESHOLD ?= 6
@@ -101,7 +100,7 @@ C_YELLOW := \033[33m
 C_RED := \033[31m
 endif
 
-.PHONY: help all build build-valgrind build-tests build-tests-valgrind run run-valgrind run-tests run-tests-valgrind list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-sunspots e2e e2e-valgrind clean deepclean
+.PHONY: help all build build-valgrind build-tests build-tests-valgrind run run-valgrind run-tests run-tests-valgrind list-modules list-modules-valgrind tidy cppcheck lizard warnings e2e e2e-valgrind clean deepclean
 
 help:
 	@printf "\nSunspots Make Targets\n\n"
@@ -123,7 +122,6 @@ help:
 	@printf "  %-26s %s\n" "make cppcheck" "Run cppcheck on src/ and tests/"
 	@printf "  %-26s %s\n" "make lizard" "Run lizard complexity checks on src/ and tests/"
 	@printf "  %-26s %s\n" "make warnings" "Build all lanes + refresh warning/analysis reports"
-	@printf "  %-26s %s\n" "make kill" "Kill all running Sunspots processes"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make e2e" "Placeholder: not implemented yet"
 	@printf "  %-26s %s\n" "make e2e-valgrind" "Placeholder: not implemented yet"
@@ -255,14 +253,7 @@ run:
 	if [ -n "$$UBSAN_OPTIONS" ]; then ubsan_opts="$$UBSAN_OPTIONS:$$ubsan_opts"; fi; \
 	printf "%b[run]%b %s %s\n" "$(C_CYAN)" "$(C_RESET)" "$$daemon_path" "$(RUN_ARGS)"; \
 	printf "      sanitizer logs: %s\n" "$(ASAN_LOG_DIR)"; \
-	env ASAN_OPTIONS="$$asan_opts" UBSAN_OPTIONS="$$ubsan_opts" "$$daemon_path" $(RUN_ARGS); \
-	rc=$$?; \
-	if [ $$rc -ne 0 ]; then \
-		printf "%b[fail]%b run failed (exit=%s)\n" "$(C_RED)" "$(C_RESET)" "$$rc"; \
-		exit $$rc; \
-	fi; \
-	printf "%b[ok]%b run started\n" "$(C_GREEN)" "$(C_RESET)"; \
-	printf "      use 'make kill' to exit\n"
+	env ASAN_OPTIONS="$$asan_opts" UBSAN_OPTIONS="$$ubsan_opts" "$$daemon_path" $(RUN_ARGS)
 
 run-valgrind:
 	@if ! command -v valgrind >/dev/null 2>&1; then \
@@ -469,11 +460,7 @@ tidy:
 	@printf "%b[2/2]%b build tidy targets\n" "$(C_CYAN)" "$(C_RESET)"
 	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(TIDY_BUILD_DIR)" --parallel > "$(TIDY_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tidy build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(TIDY_BUILD_LOG)"; \
-		if [ -f "$(TIDY_BUILD_LOG)" ]; then \
-			tail -n 60 "$(TIDY_BUILD_LOG)"; \
-		else \
-			printf "      note: tidy build log was not created\n"; \
-		fi; \
+		tail -n 60 "$(TIDY_BUILD_LOG)"; \
 		exit 1; \
 	}
 	@grep -E '^[^:]+:[0-9]+(:[0-9]+)?:[[:space:]]warning:' "$(TIDY_BUILD_LOG)" | sed 's|$(CURDIR)/||g' || true
@@ -1003,78 +990,20 @@ e2e:
 	@printf "      planned: full system scenario runner\n"
 	@exit 2
 
-kill:
-	@printf "%b[run]%b kill Sunspots processes\n" "$(C_CYAN)" "$(C_RESET)"
-	@daemon_rows="$$(ps -eo pid=,stat=,comm= | awk '$$3 ~ /^sunspots_daemon/ && $$2 !~ /Z/ {printf "%s\t%s\t%s\n", $$1, $$2, $$3}')"; \
-	daemon_pids="$$(printf "%s\n" "$$daemon_rows" | awk -F'\t' 'NF>=1 {print $$1}' | tr '\n' ' ')"; \
-	if [ -n "$$daemon_pids" ]; then \
-		kill $$daemon_pids >/dev/null 2>&1 || true; \
-		printf "      sent SIGTERM to daemon:\n"; \
-		printf "%s\n" "$$daemon_rows" | awk -F'\t' 'NF>=3 {printf "        pid=%s stat=%s name=%s\n", $$1, $$2, $$3}'; \
-		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do \
-			remaining_daemons="$$(ps -eo pid=,stat=,comm= | awk '$$3 ~ /^sunspots_daemon/ && $$2 !~ /Z/ {print $$1}' | tr '\n' ' ')"; \
-			if [ -z "$$remaining_daemons" ]; then \
-				break; \
-			fi; \
-			sleep 0.1; \
-		done; \
-	fi; \
-	running_rows="$$(ps -eo pid=,stat=,comm= | awk '($$3 ~ /^sunspots_/ || $$3 == "backfill") && $$2 !~ /Z/ {printf "%s\t%s\t%s\n", $$1, $$2, $$3}')"; \
-	zombie_rows="$$(ps -eo pid=,stat=,comm= | awk '($$3 ~ /^sunspots_/ || $$3 == "backfill") && $$2 ~ /Z/ {printf "%s\t%s\t%s\n", $$1, $$2, $$3}')"; \
-	running_pids="$$(printf "%s\n" "$$running_rows" | awk -F'\t' 'NF>=1 {print $$1}' | tr '\n' ' ')"; \
-	zombie_count="$$(printf "%s\n" "$$zombie_rows" | awk -F'\t' 'NF>=3 {c++} END {print c+0}')"; \
-	if [ -n "$$running_pids" ]; then \
-		kill -9 $$running_pids >/dev/null 2>&1 || true; \
-		printf "      force-killed remaining running processes:\n"; \
-		printf "%s\n" "$$running_rows" | awk -F'\t' 'NF>=3 {printf "        pid=%s stat=%s name=%s\n", $$1, $$2, $$3}'; \
-	else \
-		printf "      graceful shutdown complete; no running sunspots processes found\n"; \
-	fi; \
-	if [ "$$zombie_count" -gt 0 ]; then \
-		printf "      %s zombies found\n" "$$zombie_count"; \
-	fi
-	@printf "%b[ok]%b kill complete\n" "$(C_GREEN)" "$(C_RESET)"
-
-kill-sunspots: kill
-
 e2e-valgrind:
 	@printf "%b[note]%b e2e-valgrind target is not yet implemented\n" "$(C_YELLOW)" "$(C_RESET)"
 	@printf "      planned: full system valgrind run with child tracing\n"
 	@exit 2
 
 clean:
-	@set -e; \
-	tracker="$(BACKFILL_USAGE_TRACKER)"; \
-	tmp_tracker=""; \
-	if [ -n "$$tracker" ] && [ -f "$$tracker" ]; then \
-		tmp_tracker="$$(mktemp /tmp/sunspots_usage_tracker_XXXXXX)"; \
-		cp "$$tracker" "$$tmp_tracker"; \
-	fi; \
-	for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)"; do \
+	@for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)"; do \
 		if [ -f "$$d/CMakeCache.txt" ]; then \
 			$(CMAKE) --build "$$d" --target clean --parallel >/dev/null 2>&1 || true; \
 		fi; \
-	done; \
-	rm -rf "$(RAW_LOGS_DIR)"; \
-	if [ -n "$$tmp_tracker" ] && [ -f "$$tmp_tracker" ]; then \
-		mkdir -p "$$(dirname "$$tracker")"; \
-		cp "$$tmp_tracker" "$$tracker"; \
-		rm -f "$$tmp_tracker"; \
-	fi
+	done
+	@rm -rf "$(RAW_LOGS_DIR)"
 	@printf "%b[ok]%b clean complete\n" "$(C_GREEN)" "$(C_RESET)"
 
 deepclean:
-	@set -e; \
-	tracker="$(BACKFILL_USAGE_TRACKER)"; \
-	tmp_tracker=""; \
-	if [ -n "$$tracker" ] && [ -f "$$tracker" ]; then \
-		tmp_tracker="$$(mktemp /tmp/sunspots_usage_tracker_XXXXXX)"; \
-		cp "$$tracker" "$$tmp_tracker"; \
-	fi; \
-	rm -rf build "$(LOG_ROOT)" warnings; \
-	if [ -n "$$tmp_tracker" ] && [ -f "$$tmp_tracker" ]; then \
-		mkdir -p "$$(dirname "$$tracker")"; \
-		cp "$$tmp_tracker" "$$tracker"; \
-		rm -f "$$tmp_tracker"; \
-	fi
+	@rm -rf build "$(LOG_ROOT)" warnings
 	@printf "%b[ok]%b deepclean complete\n" "$(C_GREEN)" "$(C_RESET)"
