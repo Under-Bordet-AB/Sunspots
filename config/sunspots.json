@@ -30,7 +30,7 @@
       "name": "Elprisjustnu",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
       "Timer-type": 1,
-      "Rek-time": 50
+      "Rel-time": 50
     },
     {
       "name": "ComputeManager",

@@ -18,8 +18,11 @@
 #include "../../transform/price/price_model.h"
 #include "../../transform/price/price_transform.h"
 
-#define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_SE3.json"
+#define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_%s.json"
 
+static char g_spotprice_area[8];
+
+int fetch_env_vars();
 int normalize_data(char* raw_in, price_data_t** out);
 int save_to_database(price_data_t* price_data);
 void cleanup(void);
@@ -32,8 +35,14 @@ int main() {
     openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID, LOG_DAEMON);
 
     syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
-
+    
     int rc = EXIT_FAILURE;
+
+    if (fetch_env_vars() < 0) {
+        syslog(LOG_ERR, "Fetch API - Elprisjustnu - Failed to set environment variables.");
+        goto done;
+    }
+
     time_t now = time(NULL);
     struct tm base_tm = {0};
     struct tm* base_ptr = localtime(&now);
@@ -77,7 +86,8 @@ static int fetch_and_store_for_day(const struct tm* day, int day_offset) {
         API_URL,
         day->tm_year + 1900,
         day->tm_mon + 1,
-        day->tm_mday
+        day->tm_mday,
+        g_spotprice_area
     );
 
     if (fetch_from_url(url, &buffer, 30) < 0) {
@@ -113,6 +123,44 @@ done:
     }
 
     return rc;
+}
+
+int fetch_env_vars() {
+    const char* blob_system = getenv("SUNSPOTS_SYSTEM");
+    if (blob_system == NULL || blob_system[0] == '\0') {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - SUNSPOTS_SYSTEM missing.");
+        return -1;
+    }
+
+    cJSON* root = cJSON_Parse(blob_system);
+    if (!root) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Invalid SUNSPOTS_SYSTEM JSON.");
+        return -1;
+    }
+
+    cJSON* system_obj = cJSON_GetObjectItemCaseSensitive(root, "system");
+    if (!cJSON_IsObject(system_obj)) {
+        system_obj = root;
+    }
+
+    cJSON* location_obj = cJSON_GetObjectItemCaseSensitive(system_obj, "location");
+    cJSON* area_obj = cJSON_IsObject(location_obj) ? cJSON_GetObjectItemCaseSensitive(location_obj, "elprisomrade") : NULL;
+
+    if (cJSON_IsString(area_obj) && area_obj->valuestring != NULL) {
+        size_t n = strlen(area_obj->valuestring);
+        if (n > 0 && n < sizeof(g_spotprice_area)) {
+            strncpy(g_spotprice_area, area_obj->valuestring, sizeof(g_spotprice_area) - 1);
+            g_spotprice_area[sizeof(g_spotprice_area) - 1] = '\0';
+            syslog(LOG_INFO, "Fetch API - Elprisjustnu - Using area=%s from SUNSPOTS_SYSTEM.", g_spotprice_area);
+        } else {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Invalid elprisomrade length.");
+        }
+    } else {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - elprisomrade missing.");
+    }
+
+    cJSON_Delete(root);
+    return 0;
 }
 
 int normalize_data(char* raw_in, price_data_t** out) {
