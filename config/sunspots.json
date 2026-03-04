@@ -51,21 +51,6 @@
       "Rel-time": 100
     },
     {
-      "name": "BackfillOpenMeteo",
-      "bin_path": "./build/debug/src/backfill/sunspots_backfill_openmeteo",
-      "Timer-type": 1,
-      "Rel-time": 86400,
-      "start_immediately": true,
-      "backfill": {
-        "enabled": true,
-        "start_date_utc": "2025-01-01",
-        "freshness_lag_minutes": 120,
-        "request_interval_ms": 250,
-        "max_requests_per_day": 8000,
-        "usage_daily_path": "logs/backfill_usage_daily.log"
-      }
-    },
-    {
       "name": "Frontend",
       "bin_path": "./build/debug/src/frontend/sunspots_frontend",
       "Timer-type": 0,

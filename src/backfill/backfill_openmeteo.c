@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "../fetch/fetch_utils.h"
 #include "../libs/json/cJSON.h"
@@ -98,6 +99,159 @@ typedef struct {
 static int64_t now_utc(void)
 {
     return (int64_t)time(NULL);
+}
+
+static char *read_text_file(const char *path)
+{
+    FILE *fp;
+    long len;
+    size_t read_n;
+    char *buf;
+
+    if (path == NULL || path[0] == '\0') {
+        return NULL;
+    }
+
+    fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return NULL;
+    }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        (void)fclose(fp);
+        return NULL;
+    }
+    len = ftell(fp);
+    if (len < 0) {
+        (void)fclose(fp);
+        return NULL;
+    }
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        (void)fclose(fp);
+        return NULL;
+    }
+
+    buf = (char *)malloc((size_t)len + 1U);
+    if (buf == NULL) {
+        (void)fclose(fp);
+        return NULL;
+    }
+
+    read_n = fread(buf, 1U, (size_t)len, fp);
+    buf[read_n] = '\0';
+    (void)fclose(fp);
+    return buf;
+}
+
+static int backfill_bootstrap_env_from_file(const char *config_path)
+{
+    cJSON *root = NULL;
+    cJSON *system = NULL;
+    cJSON *system_sdk = NULL;
+    cJSON *top_sdk = NULL;
+    char *raw = NULL;
+    char *cfg_blob = NULL;
+    char *system_blob = NULL;
+    int rc = -1;
+
+    raw = read_text_file(config_path);
+    if (raw == NULL) {
+        return -1;
+    }
+
+    root = cJSON_Parse(raw);
+    if (root == NULL) {
+        goto cleanup;
+    }
+
+    system = cJSON_GetObjectItemCaseSensitive(root, "system");
+    if (!cJSON_IsObject(system)) {
+        goto cleanup;
+    }
+
+    system_sdk = cJSON_GetObjectItemCaseSensitive(system, "sdk");
+    top_sdk = cJSON_GetObjectItemCaseSensitive(root, "sdk");
+    if (!cJSON_IsObject(system_sdk) && cJSON_IsObject(top_sdk)) {
+        cJSON *dup = cJSON_Duplicate(top_sdk, 1);
+        if (dup == NULL) {
+            goto cleanup;
+        }
+        cJSON_AddItemToObject(system, "sdk", dup);
+    }
+
+    cfg_blob = cJSON_PrintUnformatted(root);
+    if (cfg_blob == NULL) {
+        goto cleanup;
+    }
+
+    system_blob = cJSON_PrintUnformatted(system);
+    if (system_blob == NULL) {
+        goto cleanup;
+    }
+
+    if (setenv("SUNSPOTS_CONFIG", cfg_blob, 1) != 0) {
+        goto cleanup;
+    }
+    if (setenv("SUNSPOTS_SYSTEM", system_blob, 1) != 0) {
+        goto cleanup;
+    }
+
+    rc = 0;
+
+cleanup:
+    free(system_blob);
+    free(cfg_blob);
+    cJSON_Delete(root);
+    free(raw);
+    return rc;
+}
+
+static int backfill_set_system_env_from_file(const char *system_config_path)
+{
+    cJSON *root = NULL;
+    cJSON *system = NULL;
+    char *raw = NULL;
+    char *system_blob = NULL;
+    int rc = -1;
+
+    raw = read_text_file(system_config_path);
+    if (raw == NULL) {
+        return -1;
+    }
+    root = cJSON_Parse(raw);
+    if (root == NULL) {
+        goto cleanup;
+    }
+    system = cJSON_GetObjectItemCaseSensitive(root, "system");
+    if (!cJSON_IsObject(system)) {
+        goto cleanup;
+    }
+    system_blob = cJSON_PrintUnformatted(system);
+    if (system_blob == NULL) {
+        goto cleanup;
+    }
+    if (setenv("SUNSPOTS_SYSTEM", system_blob, 1) != 0) {
+        goto cleanup;
+    }
+    rc = 0;
+
+cleanup:
+    free(system_blob);
+    cJSON_Delete(root);
+    free(raw);
+    return rc;
+}
+
+static int backfill_has_env_config(void)
+{
+    const char *cfg = getenv("SUNSPOTS_CONFIG");
+    const char *sys = getenv("SUNSPOTS_SYSTEM");
+    if (cfg == NULL || cfg[0] == '\0') {
+        return 0;
+    }
+    if (sys == NULL || sys[0] == '\0') {
+        return 0;
+    }
+    return 1;
 }
 
 static int64_t align_to_slot(int64_t ts_utc)
@@ -1190,7 +1344,149 @@ typedef struct {
     size_t hole_count;
     size_t *records_written;
     time_t *last_progress;
+    struct backfill_dashboard *dashboard;
 } backfill_hole_ctx;
+
+typedef struct backfill_dashboard {
+    time_t started_at;
+    time_t last_render;
+    int is_tty;
+    char phase[64];
+    size_t holes_found;
+    size_t hole_index;
+    size_t hole_count;
+    size_t chunks_done;
+    size_t chunks_total;
+    size_t records_written;
+    size_t forecast_runs_done;
+    size_t forecast_runs_total;
+} backfill_dashboard;
+
+static size_t backfill_count_total_chunks(const hole_list *holes, int chunk_days)
+{
+    size_t total = 0U;
+    size_t i;
+    int64_t chunk_seconds;
+
+    if (holes == NULL || chunk_days <= 0) {
+        return 0U;
+    }
+    chunk_seconds = (int64_t)chunk_days * 86400;
+    if (chunk_seconds <= 0) {
+        return 0U;
+    }
+
+    for (i = 0U; i < holes->count; ++i) {
+        int64_t span = holes->items[i].to_utc - holes->items[i].from_utc;
+        if (span > 0) {
+            total += (size_t)((span + chunk_seconds - 1) / chunk_seconds);
+        }
+    }
+    return total;
+}
+
+static size_t backfill_count_forecast_runs(int64_t start_utc, int64_t end_utc)
+{
+    int64_t run_utc;
+    size_t count = 0U;
+
+    if (start_utc >= end_utc) {
+        return 0U;
+    }
+    run_utc = start_utc - (start_utc % FORECAST_RUN_STEP_SECONDS);
+    while (run_utc < end_utc) {
+        count += 1U;
+        run_utc += FORECAST_RUN_STEP_SECONDS;
+    }
+    return count;
+}
+
+static void backfill_dashboard_render(backfill_dashboard *dash, int force)
+{
+    char line[512];
+    time_t now_ts;
+    int elapsed_sec;
+    int n;
+
+    if (dash == NULL) {
+        return;
+    }
+
+    now_ts = time(NULL);
+    if (!force && (int)(now_ts - dash->last_render) < 1) {
+        return;
+    }
+
+    elapsed_sec = (int)(now_ts - dash->started_at);
+    n = snprintf(
+        line,
+        sizeof(line),
+        "Backfill | phase=%s | holes=%zu | hole=%zu/%zu | chunks=%zu/%zu | forecast=%zu/%zu | records=%zu | elapsed=%dm%02ds",
+        dash->phase,
+        dash->holes_found,
+        dash->hole_index,
+        dash->hole_count,
+        dash->chunks_done,
+        dash->chunks_total,
+        dash->forecast_runs_done,
+        dash->forecast_runs_total,
+        dash->records_written,
+        elapsed_sec / 60,
+        elapsed_sec % 60);
+    if (n < 0) {
+        return;
+    }
+
+    if (dash->is_tty) {
+        (void)fprintf(stdout, "\r%-150s", line);
+        (void)fflush(stdout);
+    } else {
+        (void)fprintf(stdout, "%s\n", line);
+        (void)fflush(stdout);
+    }
+
+    dash->last_render = now_ts;
+}
+
+static void backfill_dashboard_set_phase(backfill_dashboard *dash, const char *phase)
+{
+    if (dash == NULL) {
+        return;
+    }
+    copy_string_safe(dash->phase, sizeof(dash->phase), phase);
+    backfill_dashboard_render(dash, 1);
+}
+
+static void backfill_dashboard_init(backfill_dashboard *dash)
+{
+    if (dash == NULL) {
+        return;
+    }
+    memset(dash, 0, sizeof(*dash));
+    dash->started_at = time(NULL);
+    dash->last_render = 0;
+    dash->is_tty = isatty(STDOUT_FILENO) ? 1 : 0;
+    copy_string_safe(dash->phase, sizeof(dash->phase), "starting");
+    if (dash->is_tty) {
+        (void)fprintf(stdout, "Backfill dashboard started\n");
+    }
+    backfill_dashboard_render(dash, 1);
+}
+
+static void backfill_dashboard_finish(backfill_dashboard *dash, int ok)
+{
+    if (dash == NULL) {
+        return;
+    }
+    if (ok) {
+        backfill_dashboard_set_phase(dash, "complete");
+    } else {
+        backfill_dashboard_set_phase(dash, "failed");
+    }
+    if (dash->is_tty) {
+        (void)fprintf(stdout, "\n");
+    }
+}
 
 static void backfill_log_progress_if_due(
     const backfill_hole_ctx *ctx,
@@ -1242,6 +1538,11 @@ static int backfill_process_chunk(
     buf = NULL;
 
     *(ctx->records_written) += wrote_now;
+    if (ctx->dashboard != NULL) {
+        ctx->dashboard->chunks_done += 1U;
+        ctx->dashboard->records_written = *(ctx->records_written);
+        backfill_dashboard_render(ctx->dashboard, 0);
+    }
     sleep_ms(ctx->cfg->request_interval_ms);
     return 0;
 }
@@ -1277,14 +1578,13 @@ static int backfill_process_hole(backfill_hole_ctx *ctx, const hole_range *hole)
     return 0;
 }
 
-static int backfill_holes(const backfill_config *cfg, const hole_list *holes, size_t *out_records_written)
+static int backfill_holes(const backfill_config *cfg, const hole_list *holes, size_t *out_records_written, backfill_dashboard *dashboard)
 {
     size_t i;
     size_t records_written = 0U;
     time_t last_progress = 0;
     rate_limiter rl;
     backfill_hole_ctx ctx;
-
     memset(&rl, 0, sizeof(rl));
     rl.minute_epoch = -1;
     rl.hour_epoch = -1;
@@ -1295,9 +1595,22 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
     ctx.hole_count = holes->count;
     ctx.records_written = &records_written;
     ctx.last_progress = &last_progress;
+    ctx.dashboard = dashboard;
+
+    if (dashboard != NULL) {
+        dashboard->hole_count = holes->count;
+        dashboard->chunks_total = backfill_count_total_chunks(holes, cfg->chunk_days);
+        dashboard->chunks_done = 0U;
+        backfill_dashboard_set_phase(dashboard, "filling holes");
+    }
 
     for (i = 0U; i < holes->count; ++i) {
         ctx.hole_index = i + 1U;
+        if (ctx.dashboard != NULL) {
+            ctx.dashboard->hole_index = ctx.hole_index;
+            ctx.dashboard->hole_count = ctx.hole_count;
+            backfill_dashboard_render(ctx.dashboard, 0);
+        }
         if (backfill_process_hole(&ctx, &holes->items[i]) != 0) {
             return -1;
         }
@@ -1309,7 +1622,12 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
     return 0;
 }
 
-static int backfill_forecast_history_window(const backfill_config *cfg, int64_t start_utc, int64_t end_utc, size_t *out_records_written)
+static int backfill_forecast_history_window(
+    const backfill_config *cfg,
+    int64_t start_utc,
+    int64_t end_utc,
+    size_t *out_records_written,
+    backfill_dashboard *dashboard)
 {
     int64_t run_utc;
     size_t records_written = 0U;
@@ -1322,6 +1640,10 @@ static int backfill_forecast_history_window(const backfill_config *cfg, int64_t 
         if (out_records_written != NULL) {
             *out_records_written = 0U;
         }
+        if (dashboard != NULL) {
+            dashboard->forecast_runs_total = 0U;
+            dashboard->forecast_runs_done = 0U;
+        }
         return 0;
     }
 
@@ -1329,6 +1651,12 @@ static int backfill_forecast_history_window(const backfill_config *cfg, int64_t 
     rl.minute_epoch = -1;
     rl.hour_epoch = -1;
     rl.day_epoch = -1;
+
+    if (dashboard != NULL) {
+        dashboard->forecast_runs_total = backfill_count_forecast_runs(start_utc, end_utc);
+        dashboard->forecast_runs_done = 0U;
+        backfill_dashboard_set_phase(dashboard, "filling forecast history");
+    }
 
     run_utc = start_utc - (start_utc % FORECAST_RUN_STEP_SECONDS);
     while (run_utc < end_utc) {
@@ -1344,6 +1672,9 @@ static int backfill_forecast_history_window(const backfill_config *cfg, int64_t 
         if (fetch_json_with_retry(run_url, cfg->retry_max_attempts, cfg->retry_base_backoff_ms, &buf) == 0 && buf != NULL) {
             if (write_single_run_payload(buf, run_utc, &wrote_now) == 0) {
                 records_written += wrote_now;
+                if (dashboard != NULL) {
+                    dashboard->records_written += wrote_now;
+                }
             } else {
                 (void)SS_LOG_WARN("backfill.forecast_parse_failed", "single-run payload parse/write failed");
             }
@@ -1353,6 +1684,10 @@ static int backfill_forecast_history_window(const backfill_config *cfg, int64_t 
         }
 
         run_utc += FORECAST_RUN_STEP_SECONDS;
+        if (dashboard != NULL) {
+            dashboard->forecast_runs_done += 1U;
+            backfill_dashboard_render(dashboard, 0);
+        }
         sleep_ms(cfg->request_interval_ms);
     }
 
@@ -1362,7 +1697,7 @@ static int backfill_forecast_history_window(const backfill_config *cfg, int64_t 
     return 0;
 }
 
-static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list *before)
+static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list *before, backfill_dashboard *dashboard)
 {
     char msg[256];
 
@@ -1375,10 +1710,15 @@ static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list
         copy_string_safe(msg, sizeof(msg), "backfill analyze");
     }
     (void)SS_LOG_INFO("backfill.analyze", msg);
+    if (dashboard != NULL) {
+        dashboard->holes_found = before->count;
+        dashboard->hole_count = before->count;
+        backfill_dashboard_render(dashboard, 1);
+    }
     return 0;
 }
 
-static int backfill_verify_window(int64_t start_utc, int64_t end_utc, size_t records_written, hole_list *after)
+static int backfill_verify_window(int64_t start_utc, int64_t end_utc, size_t records_written, hole_list *after, backfill_dashboard *dashboard)
 {
     char msg[256];
 
@@ -1389,6 +1729,11 @@ static int backfill_verify_window(int64_t start_utc, int64_t end_utc, size_t rec
 
     if (snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu", records_written, after->count) < 0) {
         copy_string_safe(msg, sizeof(msg), "backfill verify");
+    }
+    if (dashboard != NULL) {
+        dashboard->records_written = records_written;
+        backfill_dashboard_set_phase(dashboard, "verifying");
+        backfill_dashboard_render(dashboard, 1);
     }
     if (after->count == 0U) {
         (void)SS_LOG_INFO("backfill.complete", msg);
@@ -1406,49 +1751,85 @@ static int run_backfill_once(const backfill_config *cfg)
     hole_list after = {0};
     size_t records_written_obs = 0U;
     size_t records_written_fc = 0U;
+    backfill_dashboard dashboard;
+
+    backfill_dashboard_init(&dashboard);
+    backfill_dashboard_set_phase(&dashboard, "analyzing holes");
 
     if (start_utc >= end_utc) {
         (void)SS_LOG_WARN("backfill.window_invalid", "computed window invalid");
+        backfill_dashboard_finish(&dashboard, 0);
         return 1;
     }
 
-    if (backfill_analyze_window(start_utc, end_utc, &before) != 0) {
+    if (backfill_analyze_window(start_utc, end_utc, &before, &dashboard) != 0) {
         hole_list_free(&before);
+        backfill_dashboard_finish(&dashboard, 0);
         return 1;
     }
 
     if (before.count > 0U) {
-        if (backfill_holes(cfg, &before, &records_written_obs) != 0) {
+        if (backfill_holes(cfg, &before, &records_written_obs, &dashboard) != 0) {
             (void)SS_LOG_ERROR("backfill.fill_failed", "fetch/write loop failed");
             hole_list_free(&before);
+            backfill_dashboard_finish(&dashboard, 0);
             return 1;
         }
     }
+    dashboard.records_written = records_written_obs;
+    backfill_dashboard_render(&dashboard, 1);
     hole_list_free(&before);
 
-    if (backfill_forecast_history_window(cfg, start_utc, end_utc, &records_written_fc) != 0) {
+    if (backfill_forecast_history_window(cfg, start_utc, end_utc, &records_written_fc, &dashboard) != 0) {
         (void)SS_LOG_WARN("backfill.forecast_fill_failed", "fetch/write forecast history loop failed");
         records_written_fc = 0U;
     }
+    dashboard.records_written = records_written_obs + records_written_fc;
+    backfill_dashboard_render(&dashboard, 1);
 
     {
-        int verify_rc = backfill_verify_window(start_utc, end_utc, records_written_obs + records_written_fc, &after);
+        int verify_rc = backfill_verify_window(start_utc, end_utc, records_written_obs + records_written_fc, &after, &dashboard);
         if (verify_rc < 0) {
             hole_list_free(&after);
+            backfill_dashboard_finish(&dashboard, 0);
             return 1;
         }
         if (verify_rc == 0) {
             hole_list_free(&after);
+            backfill_dashboard_finish(&dashboard, 1);
             return 0;
         }
     }
     hole_list_free(&after);
+    backfill_dashboard_finish(&dashboard, 0);
     return 1;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     backfill_config cfg;
+    const char *config_path = "config/backfill.json";
+    const char *system_config_path = "config/sunspots.json";
+    int loaded_config_file = 0;
+
+    if (argc > 1 && argv != NULL && argv[1] != NULL && argv[1][0] != '\0') {
+        config_path = argv[1];
+    }
+    if (argc > 2 && argv != NULL && argv[2] != NULL && argv[2][0] != '\0') {
+        system_config_path = argv[2];
+    }
+
+    if (backfill_bootstrap_env_from_file(config_path) == 0) {
+        loaded_config_file = 1;
+    } else if (!backfill_has_env_config()) {
+        (void)fprintf(stderr, "backfill: failed to load config from %s and no env fallback present\n", config_path);
+        return EXIT_FAILURE;
+    }
+
+    if (loaded_config_file && backfill_set_system_env_from_file(system_config_path) != 0) {
+        (void)fprintf(stderr, "backfill: failed to load system.location from %s\n", system_config_path);
+        return EXIT_FAILURE;
+    }
 
     backfill_config_parse(&cfg);
     log_cfg(&cfg);

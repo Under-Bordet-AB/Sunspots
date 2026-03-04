@@ -17,7 +17,6 @@ pkill -f sunspots_fetch_ || true
 pkill -f sunspots_compute_ || true
 pkill -f sunspots_logger || true
 pkill -f sunspots_frontend || true
-
 ```
 
 ## 2) Build (Debug)
@@ -60,7 +59,6 @@ Direct binary run:
 build/debug/tests/sdk_config_module_test
 build/debug/tests/sdk_db_module_test
 build/debug/tests/sdk_log_module_test
-build/debug/tests/backfill_worker_module_test
 ```
 
 ## 4) Valgrind Lane

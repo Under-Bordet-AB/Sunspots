@@ -461,7 +461,11 @@ tidy:
 	@printf "%b[2/2]%b build tidy targets\n" "$(C_CYAN)" "$(C_RESET)"
 	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(TIDY_BUILD_DIR)" --parallel > "$(TIDY_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tidy build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(TIDY_BUILD_LOG)"; \
-		tail -n 60 "$(TIDY_BUILD_LOG)"; \
+		if [ -f "$(TIDY_BUILD_LOG)" ]; then \
+			tail -n 60 "$(TIDY_BUILD_LOG)"; \
+		else \
+			printf "      note: tidy build log was not created\n"; \
+		fi; \
 		exit 1; \
 	}
 	@grep -E '^[^:]+:[0-9]+(:[0-9]+)?:[[:space:]]warning:' "$(TIDY_BUILD_LOG)" | sed 's|$(CURDIR)/||g' || true
