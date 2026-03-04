@@ -24,6 +24,8 @@ int normalize_data(char* raw_in, price_data_t** out);
 int save_to_database(price_data_t* price_data);
 void cleanup(void);
 
+static int fetch_and_store_for_day(const struct tm* day, int day_offset);
+
 int main() {
     atexit(cleanup);
 
@@ -32,50 +34,83 @@ int main() {
     syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
 
     int rc = EXIT_FAILURE;
-    char* buffer = NULL;
-    price_data_t* price_data = NULL;
-    char url[128];
     time_t now = time(NULL);
-    struct tm t = {0};
-    struct tm *t_ptr = localtime(&now);
+    struct tm base_tm = {0};
+    struct tm* base_ptr = localtime(&now);
 
-    if (!t_ptr) {
+    if (!base_ptr) {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - localtime failed.");
         goto done;
     }
 
-    t = *t_ptr;
-    snprintf(url, sizeof(url), API_URL, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+    base_tm = *base_ptr;
+
+    for (int day_offset = 0; day_offset <= 1; day_offset++) {
+        struct tm day_tm = base_tm;
+        day_tm.tm_mday += day_offset;
+
+        if (mktime(&day_tm) == (time_t)-1) {
+            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - mktime failed for day_offset=%d.", day_offset);
+            goto done;
+        }
+
+        if (fetch_and_store_for_day(&day_tm, day_offset) < 0) {
+            goto done;
+        }
+    }
+
+    rc = EXIT_SUCCESS;
+
+done:
+    return rc;
+}
+
+static int fetch_and_store_for_day(const struct tm* day, int day_offset) {
+    char* buffer = NULL;
+    price_data_t* price_data = NULL;
+    char url[128];
+    int rc = -1;
+
+    snprintf(
+        url,
+        sizeof(url),
+        API_URL,
+        day->tm_year + 1900,
+        day->tm_mon + 1,
+        day->tm_mday
+    );
 
     if (fetch_from_url(url, &buffer, 30) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API.");
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API for day_offset=%d.", day_offset);
         goto done;
     }
 
     if (!buffer) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL.");
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL for day_offset=%d.", day_offset);
         goto done;
     }
 
     if (normalize_data(buffer, &price_data) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data.");
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data for day_offset=%d.", day_offset);
         goto done;
     }
 
-    if ((save_to_database(price_data) < 0)) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database.");
+    if (save_to_database(price_data) < 0) {
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database for day_offset=%d.", day_offset);
         goto done;
     }
 
-    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved for today!");
-    rc = EXIT_SUCCESS;
+    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved for day_offset=%d.", day_offset);
+    rc = 0;
 
 done:
     if (price_data != NULL) {
         price_data_dispose(price_data);
         free(price_data);
     }
-    if (buffer != NULL) free(buffer);
+    if (buffer != NULL) {
+        free(buffer);
+    }
 
     return rc;
 }
@@ -146,6 +181,8 @@ int save_to_database(price_data_t* price_data) {
             syslog(LOG_WARNING, "Fetch API - Elprisjustnu - db_write failed at i=%d status=%d", i, (int)status);
             return -1;
         }
+
+        printf("Price nr. %d: %.6f\n", i, price_data->price_arr_SEK_per_kWh[i]);
     }
 
     return 0;
