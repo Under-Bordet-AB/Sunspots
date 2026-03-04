@@ -106,14 +106,14 @@ int save_to_database(forecast_data_t* forecast_data) {
     if (forecast_data == NULL || forecast_data->no_data_points <= 0 || forecast_data->weather_arr == NULL) {
         return -1;
     }
-    const ss_sdk_data_kind data_type = SS_SDK_DATA_FORECAST;
-
     for (int i = 0; i < forecast_data->no_data_points; i++) {
         weather_data_t *point = &forecast_data->weather_arr[i];
 
         if (point->timestamp_unix <= 0) {
             continue;
         }
+
+        int64_t data_type = (i == 0) ? SS_SDK_DATA_OBSERVATION : SS_SDK_DATA_FORECAST;
 
         if (point->has_temperature) {
             ss_sdk_record record;
