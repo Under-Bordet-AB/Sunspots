@@ -103,8 +103,13 @@ int fetch_env_vars() {
         system_obj = root;
     }
 
-    cJSON* latitude_obj = cJSON_GetObjectItemCaseSensitive(system_obj, "latitude");
-    cJSON* longitude_obj = cJSON_GetObjectItemCaseSensitive(system_obj, "longitude");
+    cJSON* location_obj = cJSON_GetObjectItemCaseSensitive(system_obj, "location");
+    if (!cJSON_IsObject(location_obj)) {
+        location_obj = root;
+    }
+
+    cJSON* latitude_obj = cJSON_GetObjectItemCaseSensitive(location_obj, "latitude");
+    cJSON* longitude_obj = cJSON_GetObjectItemCaseSensitive(location_obj, "longitude");
 
     if (!cJSON_IsNumber(latitude_obj)) {
         syslog(LOG_WARNING, "Fetch API - Openmeteo - Missing/invalid latitude.");
