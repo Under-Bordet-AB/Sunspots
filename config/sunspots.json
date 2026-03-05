@@ -9,7 +9,8 @@
       "latitude": 59.3293,
       "longitude": 18.0686,
       "elprisomrade": "SE3"
-    }
+    },
+    "panel_angle": 90
   },
   "sdk": {
     "db_dir": "db/ss_sdk.db",
@@ -30,25 +31,32 @@
       "name": "Elprisjustnu",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
       "Timer-type": 1,
-      "Rel-time": 50
+      "Rel-time": 50,
+      "boot_from_start": 1
     },
     {
       "name": "ComputeManager",
       "bin_path": "./build/debug/src/compute/sunspots_compute_manager",
       "Timer-type": 1,
-      "Rel-time": 60
+      "Rel-time": 60,
+      "compute_method": 0,
+      "exp_backoff_poll_rate": 3,
+      "exp_backoff_timeout": 5400,
+      "boot_from_start": 1
     },
     {
       "name": "Openmeteo",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo",
       "Timer-type": 1,
-      "Rel-time": 30
+      "Rel-time": 30,
+      "boot_from_start": 1
     },
     {
       "name": "Openmeteo_forecast",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo_forecast",
       "Timer-type": 1,
-      "Rel-time": 100
+      "Rel-time": 100,
+      "boot_from_start": 1
     },
     {
       "name": "BackfillOpenMeteo",

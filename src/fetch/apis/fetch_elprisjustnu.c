@@ -20,7 +20,7 @@
 
 #define API_URL "https://www.elprisetjustnu.se/api/v1/prices/%04d/%02d-%02d_%s.json"
 
-static char g_spotprice_area[8];
+char g_spotprice_area[8] = "SE3";
 
 int fetch_env_vars();
 int normalize_data(char* raw_in, price_data_t** out);
@@ -39,8 +39,9 @@ int main() {
     int rc = EXIT_FAILURE;
 
     if (fetch_env_vars() < 0) {
-        syslog(LOG_ERR, "Fetch API - Elprisjustnu - Failed to set environment variables.");
-        goto done;
+        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Failed to set environment variables, using default=%s", g_spotprice_area);
+    } else {
+        syslog(LOG_INFO, "Fetch API - Elprisjustnu - Fetching spot-price for area=%s", g_spotprice_area);
     }
 
     time_t now = time(NULL);
@@ -127,6 +128,7 @@ done:
 
 int fetch_env_vars() {
     const char* blob_system = getenv("SUNSPOTS_SYSTEM");
+
     if (blob_system == NULL || blob_system[0] == '\0') {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - SUNSPOTS_SYSTEM missing.");
         return -1;
@@ -154,9 +156,13 @@ int fetch_env_vars() {
             syslog(LOG_INFO, "Fetch API - Elprisjustnu - Using area=%s from SUNSPOTS_SYSTEM.", g_spotprice_area);
         } else {
             syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Invalid elprisomrade length.");
+            cJSON_Delete(root);
+            return -1;
         }
     } else {
         syslog(LOG_WARNING, "Fetch API - Elprisjustnu - elprisomrade missing.");
+        cJSON_Delete(root);
+        return -1;
     }
 
     cJSON_Delete(root);
