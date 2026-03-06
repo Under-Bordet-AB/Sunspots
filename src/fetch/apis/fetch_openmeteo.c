@@ -18,7 +18,7 @@
 #include "../../transform/weather/weather_model.h"
 #include "../../transform/weather/weather_transform.h"
 
-#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&current=temperature_2m,cloud_cover&hourly=shortwave_radiation"
+#define API_URL "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&current=temperature_2m,cloud_cover,shortwave_radiation"
 
 double g_latitude = 52.52;
 double g_longitude = 18.06;
@@ -152,11 +152,11 @@ int normalize_data(char* raw_in, weather_data_t** out) {
         return -1;
     }
 
-    if (transform_openmeteo_solar(json_obj, data) != TRANSFORM_OK) {
-        cJSON_Delete(json_obj);
-        free(data);
-        return -1;
-    }
+    // if (transform_openmeteo_solar(json_obj, data) != TRANSFORM_OK) {
+    //     cJSON_Delete(json_obj);
+    //     free(data);
+    //     return -1;
+    // }
 
     if (transform_openmeteo_weather(json_obj, data) != TRANSFORM_OK) {
         cJSON_Delete(json_obj);
@@ -219,25 +219,25 @@ int save_to_database(weather_data_t* weather_data) {
         }
     }
 
-    if (weather_data->has_solar_radiation) {
-        ss_sdk_record record;
-        ss_sdk_status status = ss_sdk_record_make_f64(
-            &record,
-            SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
-            weather_data->solar_radiation_W_per_m2,
-            (int64_t)weather_data->timestamp_unix,
-            SS_SDK_DATA_OBSERVATION);
-        if (status != SS_SDK_OK) {
-            syslog(LOG_WARNING, "Fetch API - Openmeteo - record_make shortwave_radiation failed status=%d", (int)status);
-            return -1;
-        }
+    // if (weather_data->has_solar_radiation) {
+    //     ss_sdk_record record;
+    //     ss_sdk_status status = ss_sdk_record_make_f64(
+    //         &record,
+    //         SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+    //         weather_data->solar_radiation_W_per_m2,
+    //         (int64_t)weather_data->timestamp_unix,
+    //         SS_SDK_DATA_OBSERVATION);
+    //     if (status != SS_SDK_OK) {
+    //         syslog(LOG_WARNING, "Fetch API - Openmeteo - record_make shortwave_radiation failed status=%d", (int)status);
+    //         return -1;
+    //     }
 
-        status = ss_sdk_db_write_record(&record);
-        if (status != SS_SDK_OK) {
-            syslog(LOG_WARNING, "Fetch API - Openmeteo - db_write shortwave_radiation failed status=%d", (int)status);
-            return -1;
-        }
-    }
+    //     status = ss_sdk_db_write_record(&record);
+    //     if (status != SS_SDK_OK) {
+    //         syslog(LOG_WARNING, "Fetch API - Openmeteo - db_write shortwave_radiation failed status=%d", (int)status);
+    //         return -1;
+    //     }
+    // }
 
     return 0;
 }

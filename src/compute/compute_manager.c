@@ -203,14 +203,15 @@ int wait_for_new_data() {
         const int64_t window_end = now + 90 * 60;
 
         ss_metric_id metrics[3] = {
-            SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+            // SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
             SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
-            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C
+            // SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH
         };
 
         int observed_metrics_found = 0;
 
-        for (int m = 0; m < 3; m++) {
+        for (int m = 0; m < 2; m++) {
             int metric_has_observed = 0;
 
             ss_sdk_samples_out samples = {0};
@@ -239,7 +240,7 @@ int wait_for_new_data() {
             }
         }
 
-        if (observed_metrics_found == 3) {
+        if (observed_metrics_found == 2) {
             syslog(LOG_INFO, "Compute Manager - Fresh data found!");
             return 0;
         }
@@ -332,6 +333,18 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
     return 0;
 }
 
+void log_time(const char *label, time_t t)
+{
+    char buf[64];
+    struct tm tm;
+
+    localtime_r(&t, &tm);
+
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+
+    syslog(LOG_INFO, "%s: %s", label, buf);
+}
+
 int load_data(compute_data_t* out) {
     if (!out) return -1;
 
@@ -346,12 +359,21 @@ int load_data(compute_data_t* out) {
     local_tm.tm_sec = 0;
     local_tm.tm_mday += 1;
 
-    const int64_t start_slot = ((int64_t)time(NULL) / SLOT_SECONDS) * SLOT_SECONDS;
-    const int64_t end_slot = (int64_t)mktime(&local_tm);
+    const int64_t start_slot = (now / SLOT_SECONDS) * SLOT_SECONDS;
+    int64_t end_slot = (int64_t)mktime(&local_tm);
+    end_slot = start_slot + ((60 * 60) * 24);
+
+    time_t start = start_slot;
+    time_t end = end_slot;
+
+    // log_time("start_slot", start);
+    // log_time("end_slot", end);
 
     int horizon_slots = (int)((end_slot - start_slot) / SLOT_SECONDS);
     if (horizon_slots < 0) horizon_slots = 0;
     if (horizon_slots > SERIES_LEN) horizon_slots = SERIES_LEN;
+
+    // syslog(LOG_INFO, "horizon_slots: %d", horizon_slots);
 
     ss_metric_id metrics[4] =  {
         SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
@@ -376,6 +398,8 @@ int load_data(compute_data_t* out) {
             return -1;
         }
 
+        // syslog(LOG_INFO, "Samples found: %zu", samples.count);
+
         for (size_t i = 0; i < samples.count; i++) {
             const ss_sdk_sample* s = &samples.samples[i];
 
@@ -396,6 +420,8 @@ int load_data(compute_data_t* out) {
     }
 
     out->horizon_len = count_horizon_len_from_inputs(out, horizon_slots);
+
+    // syslog(LOG_INFO, "horizon_len: %d", out->horizon_len);
 
     if (out->horizon_len <= 0) {
         syslog(LOG_ERR, "Compute Manager - No usable elpris slots.");
