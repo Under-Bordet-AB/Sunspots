@@ -30,13 +30,16 @@
       "name": "Elprisjustnu",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
       "Timer-type": 1,
-      "Rek-time": 50
+      "Rel-time": 50
     },
     {
       "name": "ComputeManager",
       "bin_path": "./build/debug/src/compute/sunspots_compute_manager",
       "Timer-type": 1,
-      "Rel-time": 60
+      "Rel-time": 60,
+      "compute_method": 0,
+      "exp_backoff_poll_rate": 3,
+      "exp_backoff_timeout": 5400
     },
     {
       "name": "Openmeteo",
@@ -48,7 +51,8 @@
       "name": "Openmeteo_forecast",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo_forecast",
       "Timer-type": 1,
-      "Rel-time": 100
+      "Rel-time": 100,
+      "start_at_boot": 1
     },
     {
       "name": "BackfillOpenMeteo",
