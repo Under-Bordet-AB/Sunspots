@@ -391,7 +391,7 @@ int load_data(compute_data_t* out) {
 
     for (int m = 0; m < 4; m++) {
         ss_sdk_samples_out samples = {0};
-        ss_sdk_status status = ss_sdk_db_get_canonical(0, horizon_slots, metrics[m], &samples);
+        ss_sdk_status status = ss_sdk_db_get_canonical(0, 0, metrics[m], &samples);
 
         if (status != SS_SDK_OK && status != SS_SDK_ERR_PARTIAL_DATA) {
             syslog(LOG_ERR, "Compute Manager - ss_sdk_db_get_canonical failed for metric=%d status=%d", (int)metrics[m], (int)status);
