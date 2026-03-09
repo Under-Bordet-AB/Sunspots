@@ -3,7 +3,6 @@
 #include <syslog.h>
 #include <curl/curl.h>
 #include "../libs/json/cJSON.h"
-#include "../libs/curly.h"
 
 typedef struct {
     char* data;

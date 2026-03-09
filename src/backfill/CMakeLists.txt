@@ -4,7 +4,7 @@ add_executable(sunspots_backfill_openmeteo
 target_link_libraries(sunspots_backfill_openmeteo
   PRIVATE
     sunspots_sdk
-    sunspots_curly
+    CURL::libcurl
     sunspots_cjson
     Threads::Threads
 )
