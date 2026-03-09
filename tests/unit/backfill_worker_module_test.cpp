@@ -74,6 +74,28 @@ void remove_dir_if_exists(const std::string &path)
     (void)rmdir(path.c_str());
 }
 
+void remove_dir_contents(const std::string &dir_path)
+{
+    DIR *dir = opendir(dir_path.c_str());
+    struct dirent *ent = NULL;
+
+    if (dir == NULL) {
+        return;
+    }
+    while ((ent = readdir(dir)) != NULL) {
+        const std::string name = ent->d_name;
+
+        if (name == "." || name == "..") {
+            continue;
+        }
+        std::string path = dir_path;
+        path += "/";
+        path += name;
+        remove_file_if_exists(path);
+    }
+    closedir(dir);
+}
+
 int64_t align_to_slot(int64_t ts_utc)
 {
     if (ts_utc < 0) {
@@ -114,7 +136,10 @@ std::string format_utc_ymd(int64_t ts_utc)
 
 std::string make_system_blob(const char *location_json)
 {
-    return std::string("{\"location\":") + location_json + "}";
+    std::string blob = "{\"location\":";
+    blob += location_json;
+    blob += "}";
+    return blob;
 }
 
 bool write_mock_archive_json(const std::string &path, int64_t from_utc, int64_t to_utc)
@@ -222,6 +247,51 @@ bool write_mock_archive_json(const std::string &path, int64_t from_utc, int64_t 
     return true;
 }
 
+bool write_mock_elpris_json(const std::string &path, int64_t day_start_utc)
+{
+    FILE *fp = std::fopen(path.c_str(), "wb");
+
+    if (fp == NULL) {
+        return false;
+    }
+    if (std::fputs("[", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
+
+    for (int i = 0; i < 96; ++i) {
+        const int64_t ts_utc = day_start_utc + (int64_t)i * 900;
+        const double sek = 0.50 + (double)i * 0.01;
+        const double eur = sek / 11.0;
+        const time_t tv = (time_t)ts_utc;
+        struct tm tmv;
+        char time_buf[32];
+
+        if (gmtime_r(&tv, &tmv) == NULL) {
+            (void)std::fclose(fp);
+            return false;
+        }
+        if (strftime(time_buf, sizeof(time_buf), "%Y-%m-%dT%H:%M:%S+00:00", &tmv) == 0U) {
+            (void)std::fclose(fp);
+            return false;
+        }
+        if (i > 0 && std::fputs(",", fp) == EOF) {
+            (void)std::fclose(fp);
+            return false;
+        }
+        if (std::fprintf(fp, "{\"time_start\":\"%s\",\"SEK_per_kWh\":%.6f,\"EUR_per_kWh\":%.6f}", time_buf, sek, eur) < 0) {
+            (void)std::fclose(fp);
+            return false;
+        }
+    }
+
+    if (std::fputs("]", fp) == EOF) {
+        (void)std::fclose(fp);
+        return false;
+    }
+    return std::fclose(fp) == 0;
+}
+
 int pick_free_tcp_port()
 {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -258,7 +328,9 @@ pid_t start_http_fixture_server(const std::string &root_dir, int port)
         return -1;
     }
     if (child == 0) {
-        (void)chdir(root_dir.c_str());
+        if (chdir(root_dir.c_str()) != 0) {
+            _exit(127);
+        }
         execlp("python3", "python3", "-m", "http.server", std::to_string(port).c_str(), "--bind", "127.0.0.1", (char *)NULL);
         _exit(127);
     }
@@ -339,6 +411,32 @@ int run_backfill_binary_once()
     return WEXITSTATUS(rc);
 }
 
+int run_price_backfill_binary_once()
+{
+    pid_t child = fork();
+    int rc;
+
+    if (child < 0) {
+        return -1;
+    }
+    if (child == 0) {
+        (void)execl(PRICE_BACKFILL_BIN_PATH, PRICE_BACKFILL_BIN_PATH, (char *)NULL);
+        _exit(127);
+    }
+
+    rc = 0;
+    while (waitpid(child, &rc, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+    if (!WIFEXITED(rc)) {
+        return -1;
+    }
+    return WEXITSTATUS(rc);
+}
+
 double expected_fixture_temperature(int64_t ts_utc)
 {
     return 2.0 + (double)((ts_utc / 3600) % 24);
@@ -356,6 +454,30 @@ double expected_fixture_radiation(int64_t ts_utc)
 }
 
 void expect_exact_f64_sample(ss_metric_id metric, int64_t ts_utc, double expected_value)
+{
+    ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_EQ(ss_sdk_db_get_canonical(ts_utc, 1, metric, &out), SS_SDK_OK);
+    ASSERT_EQ(out.count, (size_t)1);
+    EXPECT_EQ(out.samples[0].ts_utc, ts_utc);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, expected_value);
+    EXPECT_EQ(out.samples[0].flags, SS_SDK_SAMPLE_OBSERVED);
+    ss_sdk_db_free_samples(&out);
+}
+
+void expect_exact_forecast_f64_sample(ss_metric_id metric, int64_t ts_utc, double expected_value)
+{
+    ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_EQ(ss_sdk_db_get_canonical(ts_utc, 1, metric, &out), SS_SDK_OK);
+    ASSERT_EQ(out.count, (size_t)1);
+    EXPECT_EQ(out.samples[0].ts_utc, ts_utc);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, expected_value);
+    EXPECT_EQ(out.samples[0].flags, SS_SDK_SAMPLE_FORECAST);
+    ss_sdk_db_free_samples(&out);
+}
+
+void expect_exact_observed_f64_sample(ss_metric_id metric, int64_t ts_utc, double expected_value)
 {
     ss_sdk_samples_out out = {NULL, 0};
 
@@ -411,15 +533,15 @@ int count_exact_rows(const std::string &db_path, ss_metric_id metric, int data_k
 class BackfillWorkerFixture : public ::testing::Test {
 protected:
     BackfillWorkerFixture()
-        : cfg_guard_("SUNSPOTS_CONFIG"),
+        : http_server_pid_(-1),
+          http_port_(-1),
+          cfg_guard_("SUNSPOTS_CONFIG"),
           system_guard_("SUNSPOTS_SYSTEM"),
           db_dir_guard_("SS_SDK_DB_DIR"),
           log_level_guard_("SS_SDK_LOG_LEVEL"),
           mirror_enabled_guard_("SS_SDK_LOG_MIRROR_ENABLED"),
           mirror_path_guard_("SS_SDK_LOG_MIRROR_PATH")
     {
-        http_server_pid_ = -1;
-        http_port_ = -1;
     }
 
     void SetUp() override
@@ -429,6 +551,8 @@ protected:
         db_dir_ = dir_ + "/db";
         ASSERT_EQ(mkdir(db_dir_.c_str(), 0775), 0);
         fixture_json_path_ = dir_ + "/archive.json";
+        price_fixture_dir_ = dir_ + "/prices";
+        ASSERT_EQ(mkdir(price_fixture_dir_.c_str(), 0775), 0);
         db_path_ = db_dir_ + "/test-home.db";
     }
 
@@ -437,6 +561,9 @@ protected:
         stop_http_fixture_server(http_server_pid_);
         ss_sdk_shutdown();
         remove_file_if_exists(fixture_json_path_);
+        remove_dir_contents(price_fixture_dir_ + "/2026");
+        remove_dir_if_exists(price_fixture_dir_ + "/2026");
+        remove_dir_if_exists(price_fixture_dir_);
         remove_dir_if_exists(db_dir_);
         remove_dir_if_exists(dir_);
     }
@@ -445,6 +572,7 @@ protected:
     std::string db_dir_;
     std::string db_path_;
     std::string fixture_json_path_;
+    std::string price_fixture_dir_;
     pid_t http_server_pid_;
     int http_port_;
 
@@ -854,4 +982,69 @@ TEST_F(BackfillWorkerFixture, forecast_history_writes_forecast_rows_and_rerun_de
 
     second_count = count_exact_rows(db_path_, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, SS_SDK_DATA_FORECAST, future_slot);
     ASSERT_EQ(second_count, first_count);
+}
+
+TEST_F(BackfillWorkerFixture, price_backfill_populates_price_rows_and_is_idempotent)
+{
+    const int64_t day_start_utc = 1773014400;
+    const int64_t tomorrow_start_utc = day_start_utc + 86400LL;
+    const int64_t slot_utc = day_start_utc + (10LL * 900LL);
+    const int64_t tomorrow_slot_utc = tomorrow_start_utc + (20LL * 900LL);
+    const std::string year_dir = price_fixture_dir_ + "/2026";
+    const std::string server_base = start_http_server();
+    std::string cfg;
+
+    ASSERT_EQ(mkdir(year_dir.c_str(), 0775), 0);
+    ASSERT_TRUE(write_mock_elpris_json(year_dir + "/03-08_SE3.json", day_start_utc));
+    ASSERT_TRUE(write_mock_elpris_json(year_dir + "/03-09_SE3.json", tomorrow_start_utc));
+
+    cfg =
+        "{"
+        "\"name\":\"BackfillElprisjustnu\","
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"start_date_utc\":\"2026-03-08\","
+        "\"retry_max_attempts\":2,"
+        "\"retry_base_backoff_ms\":50,"
+        "\"request_interval_ms\":50,"
+        "\"max_requests_per_minute\":60,"
+        "\"max_requests_per_hour\":500,"
+        "\"max_requests_per_day\":2000,"
+        "\"endpoint\":\"" + server_base + "/prices\""
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+    set_system_location("{\"id\":\"test-home\",\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}");
+    set_common_sdk_env();
+
+    ASSERT_EQ(run_price_backfill_binary_once(), 0);
+    expect_exact_observed_f64_sample(SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH, slot_utc, 0.60);
+    expect_exact_observed_f64_sample(SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH, tomorrow_slot_utc, 0.70);
+
+    ss_sdk_shutdown();
+
+    ASSERT_EQ(run_price_backfill_binary_once(), 0);
+    expect_exact_observed_f64_sample(SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH, slot_utc, 0.60);
+    EXPECT_EQ(count_exact_rows(db_path_, SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH, SS_SDK_DATA_OBSERVATION, slot_utc), 1);
+}
+
+TEST_F(BackfillWorkerFixture, price_backfill_fails_when_elprisomrade_is_missing)
+{
+    const std::string cfg =
+        "{"
+        "\"name\":\"BackfillElprisjustnu\","
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"start_date_utc\":\"2026-03-08\","
+        "\"endpoint\":\"https://www.elprisetjustnu.se/api/v1/prices\""
+        "}"
+        "}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", cfg.c_str(), 1), 0);
+    set_system_location("{\"id\":\"test-home\",\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686}");
+    set_common_sdk_env();
+
+    EXPECT_EQ(run_price_backfill_binary_once(), 1);
+    EXPECT_EQ(count_dir_files(db_dir_), (size_t)0);
 }

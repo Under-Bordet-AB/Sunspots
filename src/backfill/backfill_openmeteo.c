@@ -498,7 +498,7 @@ static void backfill_log_progress_if_due(
     if (snprintf(msg, sizeof(msg), "progress hole=%zu/%zu records_written=%zu", ctx->hole_index, ctx->hole_count, records_written) < 0) {
         backfill_copy_string_safe(msg, sizeof(msg), "backfill progress");
     }
-    (void)SS_LOG_INFO("backfill.progress", msg);
+        (void)SS_LOG_DEBUG("backfill.progress", msg);
     *(ctx->last_progress) = now_ts;
 }
 
@@ -510,12 +510,24 @@ static int backfill_process_chunk(
     char url[BACKFILL_MAX_URL_LEN];
     char *buf = NULL;
     size_t wrote_now = 0U;
+    char msg[256];
 
     if (ctx == NULL || ctx->cfg == NULL || ctx->rl == NULL || ctx->records_written == NULL) {
         return -1;
     }
     if (backfill_build_archive_url(url, ctx->cfg, part_start, next_end) != 0) {
         return -1;
+    }
+
+    if (snprintf(
+            msg,
+            sizeof(msg),
+            "hole=%zu/%zu chunk_start=%" PRId64 " chunk_end=%" PRId64,
+            ctx->hole_index,
+            ctx->hole_count,
+            part_start,
+            next_end) >= 0) {
+        (void)SS_LOG_DEBUG("backfill.chunk_fetch_start", msg);
     }
 
     rate_limiter_maybe_wait(ctx->rl, ctx->cfg);
@@ -531,6 +543,18 @@ static int backfill_process_chunk(
     buf = NULL;
 
     *(ctx->records_written) += wrote_now;
+    if (snprintf(
+            msg,
+            sizeof(msg),
+            "hole=%zu/%zu chunk_start=%" PRId64 " chunk_end=%" PRId64 " rows_written=%zu total_rows=%zu",
+            ctx->hole_index,
+            ctx->hole_count,
+            part_start,
+            next_end,
+            wrote_now,
+            *(ctx->records_written)) >= 0) {
+        (void)SS_LOG_DEBUG("backfill.chunk_fetch_complete", msg);
+    }
     if (ctx->dashboard != NULL) {
         ctx->dashboard->chunks_done += 1U;
         ctx->dashboard->records_written = *(ctx->records_written);
@@ -545,6 +569,9 @@ static int backfill_process_hole(backfill_hole_ctx *ctx, const hole_range *hole)
     int64_t chunk_seconds;
     int64_t part_start;
     int64_t part_end;
+    int64_t span_seconds;
+    int64_t chunk_count;
+    char msg[256];
 
     if (ctx == NULL || ctx->cfg == NULL || hole == NULL) {
         return -1;
@@ -553,6 +580,21 @@ static int backfill_process_hole(backfill_hole_ctx *ctx, const hole_range *hole)
     chunk_seconds = (int64_t)ctx->cfg->chunk_days * 86400;
     part_start = hole->from_utc;
     part_end = hole->to_utc;
+    span_seconds = part_end - part_start;
+    chunk_count = (chunk_seconds > 0) ? ((span_seconds + chunk_seconds - 1) / chunk_seconds) : 0;
+
+    if (snprintf(
+            msg,
+            sizeof(msg),
+            "hole=%zu/%zu from=%" PRId64 " to=%" PRId64 " span_sec=%" PRId64 " chunks=%" PRId64,
+            ctx->hole_index,
+            ctx->hole_count,
+            part_start,
+            part_end,
+            span_seconds,
+            chunk_count) >= 0) {
+        (void)SS_LOG_DEBUG("backfill.hole_fill_start", msg);
+    }
 
     while (part_start < part_end) {
         int64_t next_end = part_start + chunk_seconds;
@@ -566,6 +608,16 @@ static int backfill_process_hole(backfill_hole_ctx *ctx, const hole_range *hole)
 
         part_start = next_end;
         backfill_log_progress_if_due(ctx, *(ctx->records_written));
+    }
+
+    if (snprintf(
+            msg,
+            sizeof(msg),
+            "hole=%zu/%zu completed total_rows=%zu",
+            ctx->hole_index,
+            ctx->hole_count,
+            *(ctx->records_written)) >= 0) {
+        (void)SS_LOG_DEBUG("backfill.hole_fill_complete", msg);
     }
 
     return 0;
@@ -596,6 +648,18 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
         dashboard->chunks_done = 0U;
         backfill_dashboard_set_phase(dashboard, "filling holes");
     }
+    {
+        char msg[160];
+        if (snprintf(
+                msg,
+                sizeof(msg),
+                "holes=%zu chunks_total=%zu chunk_days=%d",
+                holes->count,
+                backfill_count_total_chunks(holes, cfg->chunk_days),
+                cfg->chunk_days) >= 0) {
+            (void)SS_LOG_DEBUG("backfill.hole_fill_plan", msg);
+        }
+    }
 
     for (i = 0U; i < holes->count; ++i) {
         ctx.hole_index = i + 1U;
@@ -611,6 +675,12 @@ static int backfill_holes(const backfill_config *cfg, const hole_list *holes, si
 
     if (out_records_written != NULL) {
         *out_records_written = records_written;
+    }
+    {
+        char msg[160];
+        if (snprintf(msg, sizeof(msg), "holes=%zu total_rows=%zu", holes->count, records_written) >= 0) {
+            (void)SS_LOG_DEBUG("backfill.hole_fill_done", msg);
+        }
     }
     return 0;
 }
@@ -732,17 +802,32 @@ static int backfill_forecast_history_run_once(forecast_history_ctx *ctx, const b
 
 static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list *before, backfill_dashboard *dashboard)
 {
+    char end_date[11];
     char msg[256];
 
     if (backfill_detect_all_holes(start_utc, end_utc, before) != 0) {
         (void)SS_LOG_ERROR("backfill.detect_failed", "failed to analyze current DB holes");
         return -1;
     }
-    if (snprintf(msg, sizeof(msg), "window_start=%" PRId64 " window_end=%" PRId64 " holes_before=%zu", start_utc, end_utc, before->count) <
-        0) {
+    if (backfill_epoch_to_ymd_utc(end_utc > 0 ? end_utc - 1 : end_utc, end_date) != 0) {
+        backfill_copy_string_safe(end_date, sizeof(end_date), "unknown");
+    }
+    if (snprintf(
+            msg,
+            sizeof(msg),
+            "window_start=%" PRId64 " window_end=%" PRId64 " filled_until=%s holes_before=%zu",
+            start_utc,
+            end_utc,
+            end_date,
+            before->count) < 0) {
         backfill_copy_string_safe(msg, sizeof(msg), "backfill analyze");
     }
     (void)SS_LOG_INFO("backfill.analyze", msg);
+    if (before->count == 0U) {
+        if (snprintf(msg, sizeof(msg), "database has no holes and is filled until %s", end_date) >= 0) {
+            (void)SS_LOG_INFO("backfill.no_holes", msg);
+        }
+    }
     if (dashboard != NULL) {
         dashboard->holes_found = before->count;
         dashboard->hole_count = before->count;
@@ -753,14 +838,17 @@ static int backfill_analyze_window(int64_t start_utc, int64_t end_utc, hole_list
 
 static int backfill_verify_window(int64_t start_utc, int64_t end_utc, size_t records_written, hole_list *after, backfill_dashboard *dashboard)
 {
+    char end_date[11];
     char msg[256];
 
     if (backfill_detect_all_holes(start_utc, end_utc, after) != 0) {
         (void)SS_LOG_ERROR("backfill.verify_failed", "failed to verify DB completeness");
         return -1;
     }
-
-    if (snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu", records_written, after->count) < 0) {
+    if (backfill_epoch_to_ymd_utc(end_utc > 0 ? end_utc - 1 : end_utc, end_date) != 0) {
+        backfill_copy_string_safe(end_date, sizeof(end_date), "unknown");
+    }
+    if (snprintf(msg, sizeof(msg), "records_written=%zu holes_after=%zu filled_until=%s", records_written, after->count, end_date) < 0) {
         backfill_copy_string_safe(msg, sizeof(msg), "backfill verify");
     }
     if (dashboard != NULL) {

@@ -60,10 +60,10 @@
     },
     {
       "name": "BackfillOpenMeteo",
-      "bin_path": "./build/debug/src/backfill/backfill",
+      "bin_path": "./build/debug/src/backfill/backfill_openmeteo",
       "Timer-type": 1,
       "Rel-time": 3600,
-      "start_immediately": true,
+      "start_at_boot": 1,
       "backfill": {
         "enabled": true,
         "start_date_utc": "2026-03-01",
@@ -77,6 +77,25 @@
         "max_requests_per_day": 8000,
         "progress_log_interval_sec": 10,
         "usage_daily_path": "logs/backfill_usage_daily.log"
+      }
+    },
+    {
+      "name": "BackfillElprisjustnu",
+      "bin_path": "./build/debug/src/backfill/backfill_elprisetjustnu",
+      "Timer-type": 1,
+      "Rel-time": 3600,
+      "start_at_boot": 1,
+      "backfill": {
+        "enabled": true,
+        "start_date_utc": "2026-03-01",
+        "retry_max_attempts": 5,
+        "retry_base_backoff_ms": 1000,
+        "request_interval_ms": 1000,
+        "max_requests_per_minute": 20,
+        "max_requests_per_hour": 200,
+        "max_requests_per_day": 1000,
+        "usage_daily_path": "logs/backfill_price_usage_daily.log",
+        "endpoint": "https://www.elprisetjustnu.se/api/v1/prices"
       }
     },
     {
