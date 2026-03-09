@@ -513,12 +513,85 @@ static int ss_get_log_path(char *out_path, size_t out_sz)
     return 0;
 }
 
+static ss_sdk_status ss_log_mirror_lock(int fd)
+{
+    if (
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+        ss_log_test_consume(&g_log_test_hooks.fail_flock) ||
+#endif
+        flock(fd, LOCK_EX) != 0
+    ) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    return SS_SDK_OK;
+}
+
+static void ss_log_mirror_unlock(int fd)
+{
+    (void)flock(fd, LOCK_UN);
+}
+
+static ss_sdk_status ss_log_mirror_truncate_if_needed(int fd, size_t max_bytes)
+{
+    struct stat st;
+
+    if (fstat(fd, &st) != 0) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (st.st_size >= 0 && (size_t)st.st_size >= max_bytes) {
+        if (ftruncate(fd, 0) != 0 || lseek(fd, 0, SEEK_SET) < 0) {
+            return SS_SDK_ERR_INTERNAL;
+        }
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_log_mirror_sync(int fd)
+{
+    /* BUGFIX(#35): durable log write acknowledgement by default. */
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (ss_log_test_consume(&g_log_test_hooks.fail_fsync)) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+#endif
+    if (
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+        ss_log_test_consume(&g_log_test_hooks.fail_fsync_call) ||
+#endif
+        fsync(fd) != 0
+    ) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_log_write_mirror_line_opened(int fd, const char *line, size_t max_bytes)
+{
+    if (ss_log_mirror_lock(fd) != SS_SDK_OK) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (ss_log_mirror_truncate_if_needed(fd, max_bytes) != SS_SDK_OK) {
+        ss_log_mirror_unlock(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (ss_write_all(fd, line, strlen(line)) != 0) {
+        ss_log_mirror_unlock(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (ss_log_mirror_sync(fd) != SS_SDK_OK) {
+        ss_log_mirror_unlock(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    ss_log_mirror_unlock(fd);
+    return SS_SDK_OK;
+}
+
 static ss_sdk_status ss_log_write_mirror_line(const char *line)
 {
     char path[SS_SDK_PATH_BUFFER_SIZE];
     int fd;
-    struct stat st;
     size_t max_bytes;
+    ss_sdk_status status;
 
     if (ss_get_log_path(path, sizeof(path)) != 0) {
         return SS_SDK_ERR_INTERNAL;
@@ -537,59 +610,9 @@ static ss_sdk_status ss_log_write_mirror_line(const char *line)
     if (fd < 0) {
         return SS_SDK_ERR_INTERNAL;
     }
-
-    /* Serialize append writes across processes to avoid interleaved log lines. */
-    if (
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-        ss_log_test_consume(&g_log_test_hooks.fail_flock) ||
-#endif
-        flock(fd, LOCK_EX) != 0
-    ) {
-        close(fd);
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    /* Keep sdk.log bounded in size; once cap is reached, start from empty file. */
-    if (fstat(fd, &st) != 0) {
-        flock(fd, LOCK_UN);
-        close(fd);
-        return SS_SDK_ERR_INTERNAL;
-    }
-    if (st.st_size >= 0 && (size_t)st.st_size >= max_bytes) {
-        if (ftruncate(fd, 0) != 0 || lseek(fd, 0, SEEK_SET) < 0) {
-            flock(fd, LOCK_UN);
-            close(fd);
-            return SS_SDK_ERR_INTERNAL;
-        }
-    }
-
-    if (ss_write_all(fd, line, strlen(line)) != 0) {
-        flock(fd, LOCK_UN);
-        close(fd);
-        return SS_SDK_ERR_INTERNAL;
-    }
-    /* BUGFIX(#35): durable log write acknowledgement by default. */
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    if (ss_log_test_consume(&g_log_test_hooks.fail_fsync)) {
-        flock(fd, LOCK_UN);
-        close(fd);
-        return SS_SDK_ERR_INTERNAL;
-    }
-#endif
-    if (
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-        ss_log_test_consume(&g_log_test_hooks.fail_fsync_call) ||
-#endif
-        fsync(fd) != 0
-    ) {
-        flock(fd, LOCK_UN);
-        close(fd);
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    flock(fd, LOCK_UN);
-    close(fd);
-    return SS_SDK_OK;
+    status = ss_log_write_mirror_line_opened(fd, line, max_bytes);
+    (void)close(fd);
+    return status;
 }
 
 static void ss_log_write_syslog(ss_sdk_log_level level, const char *line)

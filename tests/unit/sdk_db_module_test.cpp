@@ -9,6 +9,7 @@
 #include <ctime>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include <limits.h>
 #include <sys/stat.h>
@@ -74,6 +75,20 @@ std::string read_text_file(const std::string &path)
         return "";
     }
     return out;
+}
+
+std::string make_system_blob(const char *id, double latitude, double longitude, const char *name = "Test location")
+{
+    char buf[256];
+    std::snprintf(
+        buf,
+        sizeof(buf),
+        "{\"location\":{\"id\":\"%s\",\"name\":\"%s\",\"latitude\":%.10f,\"longitude\":%.10f,\"elprisomrade\":\"SE3\"}}",
+        id,
+        name,
+        latitude,
+        longitude);
+    return std::string(buf);
 }
 
 class ScopedCwd {
@@ -179,14 +194,10 @@ protected:
         ASSERT_FALSE(dir_.empty());
         db_dir_ = dir_ + "/db";
         ASSERT_EQ(mkdir(db_dir_.c_str(), 0775), 0);
-        db_path_ = db_dir_ + "/59329300_18068600.db";
+        db_path_ = db_dir_ + "/test-home.db";
         ASSERT_EQ(setenv("SS_SDK_DB_DIR", db_dir_.c_str(), 1), 0);
-        ASSERT_EQ(
-            setenv(
-                "SUNSPOTS_SYSTEM",
-                "{\"location\":{\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
-                1),
-            0);
+        const std::string cfg = make_system_blob("test-home", 59.3293, 18.0686);
+        ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", cfg.c_str(), 1), 0);
     }
 
     void TearDown() override
@@ -424,12 +435,16 @@ TEST_F(SdkDbFixture, get_canonical_rejects_negative_from_utc)
         SS_SDK_ERR_INVALID_ARG);
 }
 
-TEST_F(SdkDbFixture, get_canonical_rejects_quarters_above_cap)
+TEST_F(SdkDbFixture, get_canonical_large_bounded_request_returns_clamped_when_data_exists)
 {
+    const int64_t slot = now_slot_utc();
     ss_sdk_samples_out out = {NULL, 0};
-    EXPECT_EQ(
-        ss_sdk_db_get_canonical(0, 673, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out),
-        SS_SDK_ERR_INVALID_ARG);
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 4.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 673, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_CLAMPED);
+    ASSERT_EQ(out.count, (size_t)1);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, 4.0);
+    ss_sdk_db_free_samples(&out);
 }
 
 TEST_F(SdkDbFixture, get_canonical_accepts_max_quarters)
@@ -868,8 +883,110 @@ TEST_F(SdkDbFixture, switch_db_dir_uses_new_database)
     EXPECT_EQ(out_second.samples, (ss_sdk_sample *)NULL);
     EXPECT_EQ(out_second.count, (size_t)0);
 
-    remove_file_if_exists(dir_two + "/59329300_18068600.db");
+    remove_file_if_exists(dir_two + "/test-home.db");
     remove_dir_if_exists(dir_two);
+}
+
+TEST_F(SdkDbFixture, location_id_controls_database_path_even_for_same_coordinates)
+{
+    const int64_t slot = now_slot_utc() - 900;
+    const std::string same_coords_other_id = make_system_blob("neighbor-home", 59.3293, 18.0686, "Neighbor");
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_WIND_SPEED_10M_MS, 4.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+    ASSERT_STREQ(ss_sdk_internal_db_test_db_path(), db_path_.c_str());
+
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", same_coords_other_id.c_str(), 1), 0);
+
+    ss_sdk_samples_out out = {NULL, 0};
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_WIND_SPEED_10M_MS, &out), SS_SDK_ERR_PARTIAL_DATA);
+    EXPECT_EQ(out.samples, (ss_sdk_sample *)NULL);
+    EXPECT_EQ(out.count, (size_t)0);
+    EXPECT_STREQ(ss_sdk_internal_db_test_db_path(), (db_dir_ + "/neighbor-home.db").c_str());
+
+    remove_file_if_exists(db_dir_ + "/neighbor-home.db");
+}
+
+TEST_F(SdkDbFixture, same_location_id_keeps_same_database_path_when_coordinates_change)
+{
+    const int64_t slot = now_slot_utc() - 1800;
+    const std::string moved_coords_same_id = make_system_blob("test-home", 59.3293123456, 18.0686123456, "Moved");
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 8.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+    ASSERT_STREQ(ss_sdk_internal_db_test_db_path(), db_path_.c_str());
+
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", moved_coords_same_id.c_str(), 1), 0);
+
+    ss_sdk_samples_out out = {NULL, 0};
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_OK);
+    ASSERT_EQ(out.count, (size_t)1);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, 8.0);
+    EXPECT_STREQ(ss_sdk_internal_db_test_db_path(), db_path_.c_str());
+    ss_sdk_db_free_samples(&out);
+}
+
+TEST_F(SdkDbFixture, missing_location_id_causes_db_operations_to_fail)
+{
+    const int64_t slot = now_slot_utc() - 900;
+
+    ASSERT_EQ(
+        setenv(
+            "SUNSPOTS_SYSTEM",
+            "{\"location\":{\"name\":\"No Id\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}",
+            1),
+        0);
+
+    EXPECT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 5.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_ERR_INTERNAL);
+}
+
+TEST_F(SdkDbFixture, factory_made_record_writes_without_setting_ingested_utc)
+{
+    const int64_t slot = now_slot_utc() - 900;
+    ss_sdk_record rec;
+    ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_EQ(
+        ss_sdk_record_make_f64(&rec, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 11.25, slot, SS_SDK_DATA_OBSERVATION),
+        SS_SDK_OK);
+    EXPECT_EQ(rec.ingested_utc, (int64_t)0);
+
+    ASSERT_EQ(ss_sdk_db_write_record(&rec), SS_SDK_OK);
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_OK);
+    ASSERT_EQ(out.count, (size_t)1);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, 11.25);
+    ss_sdk_db_free_samples(&out);
+}
+
+TEST_F(SdkDbFixture, oversized_range_returns_clamped_when_available_data_is_shorter_than_requested)
+{
+    const int64_t slot = now_slot_utc() - (int64_t)2 * 900;
+    ss_sdk_samples_out out = {NULL, 0};
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 5.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+    ASSERT_EQ(
+        write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 6.0, slot + 900, SS_SDK_DATA_OBSERVATION),
+        SS_SDK_OK);
+
+    ASSERT_EQ(ss_sdk_db_get_canonical(slot, 1000, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out), SS_SDK_CLAMPED);
+    ASSERT_EQ(out.count, (size_t)2);
+    EXPECT_DOUBLE_EQ(out.samples[0].value.f64, 5.0);
+    EXPECT_DOUBLE_EQ(out.samples[1].value.f64, 6.0);
+    ss_sdk_db_free_samples(&out);
+}
+
+TEST_F(SdkDbFixture, oversized_range_with_holes_returns_clamped_partial_data)
+{
+    const int64_t slot = now_slot_utc() - (int64_t)36 * 900;
+    ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 1.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
+    ASSERT_EQ(
+        write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 2.0, slot + ((int64_t)32 * 900), SS_SDK_DATA_OBSERVATION),
+        SS_SDK_OK);
+
+    ASSERT_EQ(
+        ss_sdk_db_get_canonical(slot, 1000, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out),
+        SS_SDK_CLAMPED_PARTIAL_DATA);
+    EXPECT_EQ(out.samples, (ss_sdk_sample *)NULL);
+    EXPECT_EQ(out.count, (size_t)0);
 }
 
 TEST_F(SdkDbFixture, sdk_debug_level_logs_selected_db_path_for_write)
@@ -964,6 +1081,8 @@ TEST_F(SdkDbFixture, test_hooks_cover_interpolation_and_now_edges)
 {
     const int64_t slot = now_slot_utc();
     ss_sdk_samples_out out = {NULL, 0};
+
+    ASSERT_EQ(write_f64_record(SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, 3.0, slot, SS_SDK_DATA_OBSERVATION), SS_SDK_OK);
 
     ss_sdk_internal_db_test_reset_hooks();
     ss_sdk_internal_db_test_set_hook(SS_SDK_DB_HOOK_FORCE_INTERPOLATION_MAP_INCOMPLETE, 1);

@@ -53,8 +53,6 @@ static char *g_db_open_path = NULL;
 typedef struct {
     double latitude;
     double longitude;
-    long long lat_micro;
-    long long lon_micro;
     char location_id[96];
     char nickname[64];
     char elprisomrade[16];
@@ -63,8 +61,6 @@ typedef struct {
 typedef struct {
     int has_identity;
     char location_id[96];
-    long long lat_micro;
-    long long lon_micro;
 } ss_location_identity_row;
 
 typedef struct {
@@ -80,15 +76,6 @@ typedef struct {
 } ss_db_write_result;
 
 static ss_sdk_status ss_exec(sqlite3 *db, const char *sql);
-
-static long long ss_coord_to_micro(double v)
-{
-    double scaled = v * 1000000.0;
-    if (scaled >= 0.0) {
-        return (long long)(scaled + 0.5);
-    }
-    return (long long)(scaled - 0.5);
-}
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
 ss_db_test_hooks g_db_test_hooks;
@@ -216,10 +203,8 @@ static int ss_location_ctx_from_system_env(ss_location_ctx *out)
 
     out->latitude = location.latitude;
     out->longitude = location.longitude;
-
-    out->lat_micro = ss_coord_to_micro(out->latitude);
-    out->lon_micro = ss_coord_to_micro(out->longitude);
-    if (snprintf(out->location_id, sizeof(out->location_id), "loc_%lld_%lld", out->lat_micro, out->lon_micro) <= 0) {
+    (void)snprintf(out->location_id, sizeof(out->location_id), "%s", location.id);
+    if (out->location_id[0] == '\0') {
         return -1;
     }
     (void)snprintf(out->nickname, sizeof(out->nickname), "%s", location.name);
@@ -248,7 +233,7 @@ static const char *ss_db_path(void)
     if (ss_location_ctx_from_system_env(&loc) != 0) {
         return NULL;
     }
-    n = snprintf(dynamic_path, sizeof(dynamic_path), "%s/%lld_%lld.db", dir_override, loc.lat_micro, loc.lon_micro);
+    n = snprintf(dynamic_path, sizeof(dynamic_path), "%s/%s.db", dir_override, loc.location_id);
     if (n <= 0 || (size_t)n >= sizeof(dynamic_path)) {
         return NULL;
     }
@@ -294,15 +279,11 @@ static ss_sdk_status ss_db_read_identity_row(sqlite3 *db, ss_location_identity_r
     sqlite_result = sqlite3_step(stmt);
     if (sqlite_result == SQLITE_ROW) {
         const unsigned char *id_text = sqlite3_column_text(stmt, 0);
-        double lat = sqlite3_column_double(stmt, 1);
-        double lon = sqlite3_column_double(stmt, 2);
         if (id_text == NULL) {
             sqlite3_finalize(stmt);
             return SS_SDK_ERR_INTERNAL;
         }
         (void)snprintf(out_row->location_id, sizeof(out_row->location_id), "%s", (const char *)id_text);
-        out_row->lat_micro = ss_coord_to_micro(lat);
-        out_row->lon_micro = ss_coord_to_micro(lon);
         out_row->has_identity = 1;
     } else if (sqlite_result != SQLITE_DONE) {
         sqlite3_finalize(stmt);
@@ -350,8 +331,7 @@ static ss_sdk_status ss_db_validate_or_insert_identity(
         return ss_db_insert_identity_row(db, loc);
     }
 
-    if (strcmp(identity_row->location_id, loc->location_id) != 0 || identity_row->lat_micro != loc->lat_micro ||
-        identity_row->lon_micro != loc->lon_micro) {
+    if (strcmp(identity_row->location_id, loc->location_id) != 0) {
         return SS_SDK_ERR_INTERNAL;
     }
     return SS_SDK_OK;
@@ -1467,6 +1447,45 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
     end_utc = max_ts_start + SS_SLOT_SECONDS;
 
     return ss_sdk_internal_db_get_canonical(canonical, start_utc, end_utc, out);
+}
+
+ss_sdk_status ss_sdk_internal_db_clamp_end_utc(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t requested_end_utc,
+    int64_t *out_end_utc,
+    int *out_was_clamped)
+{
+    bool has_value = false;
+    int64_t max_ts_start = 0;
+    int64_t latest_end_utc;
+    ss_sdk_status status;
+
+    if (out_end_utc == NULL || out_was_clamped == NULL || start_utc < 0 || requested_end_utc <= start_utc) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    *out_end_utc = requested_end_utc;
+    *out_was_clamped = 0;
+
+    status = ss_db_select_max_ts_from_start(canonical, start_utc, &max_ts_start, &has_value);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+    if (!has_value) {
+        return SS_SDK_ERR_PARTIAL_DATA;
+    }
+    if (max_ts_start > INT64_MAX - SS_SLOT_SECONDS) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    latest_end_utc = max_ts_start + SS_SLOT_SECONDS;
+    if (requested_end_utc > latest_end_utc) {
+        *out_end_utc = latest_end_utc;
+        *out_was_clamped = 1;
+    }
+
+    return SS_SDK_OK;
 }
 
 void ss_sdk_internal_db_free_samples(ss_sdk_samples_out *out)

@@ -1,3 +1,5 @@
+find_package(SQLite3 REQUIRED)
+
 function(sunspots_add_valgrind_test test_name target_name)
   if(SUNSPOTS_ENABLE_VALGRIND AND VALGRIND_EXECUTABLE AND NOT SUNSPOTS_ENABLE_SANITIZERS)
     add_test(
@@ -75,6 +77,7 @@ target_link_libraries(backfill_worker_module_test
   PRIVATE
     GTest::gtest_main
     sunspots_sdk
+    SQLite::SQLite3
 )
 target_compile_definitions(backfill_worker_module_test
   PRIVATE

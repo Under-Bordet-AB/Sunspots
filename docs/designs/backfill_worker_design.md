@@ -41,7 +41,7 @@ Key policy decisions:
 3. Fetch missing ranges in chunks.
 4. Upsert normalized records.
 5. Re-verify hole coverage.
-6. Report final status and exit (or remain in maintenance mode).
+6. Report final status and exit.
 
 ## 5. Worker State Flow
 
@@ -51,15 +51,13 @@ Key policy decisions:
 4. `VERIFY`
 5. `COMPLETE` or `PARTIAL` or `FAILED`
 
-Optional maintenance branch:
+The daemon timer is responsible for any later reruns.
 
-1. After `COMPLETE`, sleep.
-2. On interval (default daily), rerun `ANALYZE_GAPS -> FETCH_WRITE_LOOP -> VERIFY`.
+## 6. Runtime Cadence
 
-## 6. Startup and Maintenance Modes
-
-1. `oneshot`: run at startup, report status, exit.
-2. `maintenance`: run at startup, then periodic hole checks (for example every 86400 seconds).
+1. Run once when spawned.
+2. Exit after reporting final status.
+3. If recurring runs are desired, the daemon should respawn the worker by timer schedule.
 
 ## 7. Config Contract (Module Block)
 
@@ -76,8 +74,7 @@ Example shape:
   "start_immediately": true,
   "backfill": {
     "enabled": true,
-    "mode": "oneshot",
-    "required_history_days": 14,
+    "start_date_utc": "2025-01-01",
     "chunk_days": 7,
     "retry_max_attempts": 5,
     "retry_base_backoff_ms": 1000,
@@ -87,16 +84,8 @@ Example shape:
     "max_requests_per_hour": 2000,
     "max_requests_per_day": 8000,
     "progress_log_interval_sec": 10,
-    "daily_hole_check_interval_sec": 86400,
     "endpoint": "https://archive-api.open-meteo.com/v1/archive",
-    "latitude": 52.52,
-    "longitude": 13.41
-  },
-  "sdk": {
-    "db_path": "db/ss_sdk.db",
-    "log_level": "info",
-    "log_mirror_enabled": true,
-    "log_mirror_path": "logs/sdk.log"
+    "usage_daily_path": "logs/backfill_usage_daily.log"
   }
 }
 ```
@@ -104,8 +93,8 @@ Example shape:
 Notes:
 
 1. `start_immediately=true` lets daemon spawn this timer module once at daemon startup.
-2. In `oneshot`, process exits after first verification.
-3. In `maintenance`, process stays up and checks on interval.
+2. `start_date_utc` defines the beginning of the backfill window.
+3. Shared SDK config belongs under top-level `system.sdk`, not inside the module block.
 
 ## 8. SDK API Extensions Needed
 
@@ -178,5 +167,5 @@ Backfill is best-effort data preparation, not a calculator correctness gate.
 3. Worker fills only missing ranges and writes idempotently.
 4. Worker reports periodic progress and final status through SDK logger.
 5. Daemon remains alive on backfill partial/failure and logs outcome.
-6. In maintenance mode, worker performs daily hole checks without daemon restarts.
+6. Repeated hole checks are achieved by daemon timer respawns, not an internal maintenance loop.
 7. Calculators remain responsible for verifying required data availability.

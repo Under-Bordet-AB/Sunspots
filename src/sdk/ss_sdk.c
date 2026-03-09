@@ -15,14 +15,110 @@
 #include "sdk/internal/log/ss_log_internal.h"
 
 enum {
-    SS_SLOT_SECONDS = 900,
-    SS_MAX_QUARTERS = 672
+    SS_SLOT_SECONDS = 900
 };
 
 static int g_ss_sdk_atexit_registered = 0;
 static int g_ss_sdk_shutdown_logged = 0;
 
 static void ss_sdk_atexit_shutdown(void);
+static void ss_sdk_shutdown_internal(void);
+static void ss_sdk_log_status_non_ok(const char *event, ss_sdk_status status);
+static int64_t ss_sdk_now_utc(void);
+static int64_t ss_sdk_align_utc_to_slot(int64_t ts_utc);
+
+static ss_sdk_status ss_sdk_read_success_status(int was_clamped)
+{
+    return was_clamped ? SS_SDK_CLAMPED : SS_SDK_OK;
+}
+
+static ss_sdk_status ss_sdk_read_result_status(ss_sdk_status status, int was_clamped)
+{
+    if (status == SS_SDK_ERR_PARTIAL_DATA) {
+        return was_clamped ? SS_SDK_CLAMPED_PARTIAL_DATA : SS_SDK_ERR_PARTIAL_DATA;
+    }
+    if (status == SS_SDK_OK) {
+        return ss_sdk_read_success_status(was_clamped);
+    }
+    return status;
+}
+
+static ss_sdk_status ss_sdk_db_get_canonical_validate(ss_metric_id canonical, ss_sdk_samples_out *out)
+{
+    if (out == NULL) {
+        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "output pointer is null");
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    out->samples = NULL;
+    out->count = 0;
+
+    if (ss_metric_meta_get(canonical) == NULL) {
+        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "canonical id was invalid");
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_sdk_db_get_canonical_normalize_start(int64_t from_utc, int64_t *out_start_utc)
+{
+    if (out_start_utc == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    if (from_utc < 0) {
+        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "from_utc was negative");
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    if (from_utc == 0) {
+        *out_start_utc = ss_sdk_align_utc_to_slot(ss_sdk_now_utc());
+    } else {
+        *out_start_utc = ss_sdk_align_utc_to_slot(from_utc);
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_sdk_db_get_canonical_forward_path(ss_metric_id canonical, int64_t start_utc, ss_sdk_samples_out *out)
+{
+    ss_sdk_status status = ss_sdk_internal_db_get_canonical_forward(canonical, start_utc, out);
+    ss_sdk_status result = ss_sdk_read_result_status(status, 0);
+
+    if (result != SS_SDK_OK) {
+        ss_sdk_log_status_non_ok("sdk.api.db_get.forward_failed", result);
+    }
+    return result;
+}
+
+static ss_sdk_status ss_sdk_db_get_canonical_bounded_path(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    uint16_t quarters_to_fetch,
+    ss_sdk_samples_out *out)
+{
+    int64_t span;
+    int64_t end_utc;
+    int was_clamped = 0;
+    ss_sdk_status status;
+    ss_sdk_status result;
+
+    span = (int64_t)quarters_to_fetch * SS_SLOT_SECONDS;
+    if (start_utc > INT64_MAX - span) {
+        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "time window overflow detected");
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+    end_utc = start_utc + span;
+
+    status = ss_sdk_internal_db_clamp_end_utc(canonical, start_utc, end_utc, &end_utc, &was_clamped);
+    if (status != SS_SDK_OK) {
+        ss_sdk_log_status_non_ok("sdk.api.db_get.clamp_failed", status);
+        return status;
+    }
+
+    status = ss_sdk_internal_db_get_canonical(canonical, start_utc, end_utc, out);
+    result = ss_sdk_read_result_status(status, was_clamped);
+    if (result != SS_SDK_OK && result != SS_SDK_CLAMPED) {
+        ss_sdk_log_status_non_ok("sdk.api.db_get.range_failed", result);
+    }
+    return result;
+}
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
 static int g_ss_sdk_now_override_enabled = 0;
@@ -53,6 +149,10 @@ static const char *ss_sdk_status_to_text(ss_sdk_status status)
     switch (status) {
         case SS_SDK_OK:
             return "ok";
+        case SS_SDK_CLAMPED:
+            return "clamped";
+        case SS_SDK_CLAMPED_PARTIAL_DATA:
+            return "clamped_partial_data";
         case SS_SDK_ERR_PARTIAL_DATA:
             return "partial_data";
         case SS_SDK_ERR_INVALID_ARG:
@@ -78,6 +178,8 @@ static void ss_sdk_log_status_non_ok(const char *event, ss_sdk_status status)
         return;
     }
     switch (status) {
+        case SS_SDK_CLAMPED:
+        case SS_SDK_CLAMPED_PARTIAL_DATA:
         case SS_SDK_ERR_PARTIAL_DATA:
             return;
         case SS_SDK_ERR_INVALID_ARG:
@@ -109,7 +211,7 @@ static void ss_sdk_get_process_name(char out_name[64])
                 n -= 1U;
             }
         }
-        fclose(comm);
+        (void)fclose(comm);
     }
 }
 
@@ -140,22 +242,14 @@ static void ss_sdk_log_started_once(void)
 
 static void ss_sdk_atexit_shutdown(void)
 {
-    ss_sdk_shutdown();
+    ss_sdk_shutdown_internal();
 }
 
-static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *record)
+static ss_sdk_status ss_sdk_validate_record_timestamps(const ss_sdk_record *record)
 {
-    const ss_metric_meta *metric_metadata;
-
     if (record == NULL) {
         return SS_SDK_ERR_INVALID_ARG;
     }
-
-    if (!ss_sdk_is_valid_value_type(record->value_type) ||
-        !ss_sdk_is_valid_data_kind(record->data_kind)) {
-        return SS_SDK_ERR_VALIDATION;
-    }
-
     if (record->ts_start_utc < 0 || record->ts_start_utc % SS_SLOT_SECONDS != 0) {
         return SS_SDK_ERR_VALIDATION;
     }
@@ -168,12 +262,26 @@ static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *record)
     if (record->ingested_utc < 0) {
         return SS_SDK_ERR_VALIDATION;
     }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_sdk_validate_record_value(const ss_sdk_record *record)
+{
+    const ss_metric_meta *metric_metadata;
+
+    if (record == NULL) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    if (!ss_sdk_is_valid_value_type(record->value_type) ||
+        !ss_sdk_is_valid_data_kind(record->data_kind)) {
+        return SS_SDK_ERR_VALIDATION;
+    }
 
     if (record->value_type == SS_SDK_VALUE_F64 && !isfinite(record->value.f64)) {
         return SS_SDK_ERR_VALIDATION;
     }
 
-    // validate that canonical type enum exists
     metric_metadata = ss_metric_meta_get(record->metric);
     if (metric_metadata == NULL) {
         return SS_SDK_ERR_VALIDATION;
@@ -183,6 +291,17 @@ static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *record)
     }
 
     return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_sdk_validate_record(const ss_sdk_record *record)
+{
+    ss_sdk_status status;
+
+    status = ss_sdk_validate_record_timestamps(record);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+    return ss_sdk_validate_record_value(record);
 }
 
 static int64_t ss_sdk_now_utc(void)
@@ -409,66 +528,23 @@ ss_sdk_status ss_sdk_db_get_canonical(
     ss_sdk_samples_out *out)
 {
     int64_t start_utc;
-    int64_t span;
-    int64_t end_utc;
+    ss_sdk_status status;
 
     ss_sdk_log_started_once();
 
-    if (out == NULL) {
-        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "output pointer is null");
-        return SS_SDK_ERR_INVALID_ARG;
+    status = ss_sdk_db_get_canonical_validate(canonical, out);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+    status = ss_sdk_db_get_canonical_normalize_start(from_utc, &start_utc);
+    if (status != SS_SDK_OK) {
+        return status;
     }
 
-    out->samples = NULL;
-    out->count = 0;
-
-    // Do we have a valid canonical?
-    if (ss_metric_meta_get(canonical) == NULL) {
-        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "canonical id was invalid");
-        return SS_SDK_ERR_INVALID_ARG;
-    }
-
-    if (from_utc < 0) {
-        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "from_utc was negative");
-        return SS_SDK_ERR_INVALID_ARG;
-    }
-
-    if (quarters_to_fetch > SS_MAX_QUARTERS) {
-        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "quarters_to_fetch exceeded maximum");
-        return SS_SDK_ERR_INVALID_ARG;
-    }
-
-    // Align start time to SS_SLOT_SECONDS
-    if (from_utc == 0) {
-        start_utc = ss_sdk_align_utc_to_slot(ss_sdk_now_utc());
-    } else {
-        start_utc = ss_sdk_align_utc_to_slot(from_utc);
-    }
-
-    // 0 == fetch current and all forcast
     if (quarters_to_fetch == 0) {
-        ss_sdk_status status = ss_sdk_internal_db_get_canonical_forward(canonical, start_utc, out);
-        if (status != SS_SDK_OK) {
-            ss_sdk_log_status_non_ok("sdk.api.db_get.forward_failed", status);
-            return status;
-        }
-        return SS_SDK_OK;
+        return ss_sdk_db_get_canonical_forward_path(canonical, start_utc, out);
     }
-
-    span = (int64_t)quarters_to_fetch * SS_SLOT_SECONDS;
-    if (start_utc > INT64_MAX - span) {
-        SS_LOG_WARN("sdk.api.db_get.invalid_arg", "time window overflow detected");
-        return SS_SDK_ERR_INVALID_ARG;
-    }
-    end_utc = start_utc + span;
-    {
-        ss_sdk_status status = ss_sdk_internal_db_get_canonical(canonical, start_utc, end_utc, out);
-        if (status != SS_SDK_OK) {
-            ss_sdk_log_status_non_ok("sdk.api.db_get.range_failed", status);
-            return status;
-        }
-        return SS_SDK_OK;
-    }
+    return ss_sdk_db_get_canonical_bounded_path(canonical, start_utc, quarters_to_fetch, out);
 }
 
 void ss_sdk_db_free_samples(ss_sdk_samples_out *out)
@@ -499,7 +575,7 @@ void ss_sdk_log_write_fields(
     ss_sdk_internal_log_write_fields(level, event, message, fields, file, line, func);
 }
 
-void ss_sdk_shutdown(void)
+static void ss_sdk_shutdown_internal(void)
 {
     char process_name[64];
     char msg[96];
@@ -520,3 +596,10 @@ void ss_sdk_shutdown(void)
     g_ss_sdk_now_override_value = 0;
 #endif
 }
+
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+void ss_sdk_shutdown(void)
+{
+    ss_sdk_shutdown_internal();
+}
+#endif

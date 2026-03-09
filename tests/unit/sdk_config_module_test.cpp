@@ -242,14 +242,18 @@ TEST_F(SdkConfigFixture, cfg_util_location_success_and_missing_required_fields)
     ASSERT_EQ(
         setenv(
             "SUNSPOTS_SYSTEM",
-            "{\"location\":{\"name\":\"X\",\"latitude\":59.3,\"longitude\":18.0,\"elprisomrade\":\"SE3\"}}",
+            "{\"location\":{\"id\":\"x-home\",\"name\":\"X\",\"latitude\":59.3,\"longitude\":18.0,\"elprisomrade\":\"SE3\"}}",
             1),
         0);
     EXPECT_EQ(ss_sdk_cfg_get_location_from_system_env(&loc), SS_SDK_CFG_OK);
     EXPECT_DOUBLE_EQ(loc.latitude, 59.3);
     EXPECT_DOUBLE_EQ(loc.longitude, 18.0);
+    EXPECT_STREQ(loc.id, "x-home");
     EXPECT_STREQ(loc.name, "X");
     EXPECT_STREQ(loc.elprisomrade, "SE3");
+
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", "{\"location\":{\"latitude\":59.3,\"longitude\":18.0}}", 1), 0);
+    EXPECT_EQ(ss_sdk_cfg_get_location_from_system_env(&loc), SS_SDK_CFG_NOT_FOUND);
 
     ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", "{\"location\":{\"longitude\":18.0}}", 1), 0);
     EXPECT_EQ(ss_sdk_cfg_get_location_from_system_env(&loc), SS_SDK_CFG_NOT_FOUND);

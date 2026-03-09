@@ -5,6 +5,7 @@
     "log_path": "./logs/daemon.log",
     "socket_path": "./logs/sunspots.sock",
     "location": {
+      "id": "stockholm-home",
       "name": "Stockholm",
       "latitude": 59.3293,
       "longitude": 18.0686,
@@ -59,14 +60,13 @@
     },
     {
       "name": "BackfillOpenMeteo",
-      "bin_path": "./build/debug/src/backfill/sunspots_backfill_openmeteo",
+      "bin_path": "./build/debug/src/backfill/backfill",
       "Timer-type": 1,
-      "Rel-time": 86400,
+      "Rel-time": 3600,
       "start_immediately": true,
       "backfill": {
         "enabled": true,
-        "start_date_utc": "2025-01-01",
-        "required_history_days": 14,
+        "start_date_utc": "2026-03-01",
         "chunk_days": 7,
         "retry_max_attempts": 5,
         "retry_base_backoff_ms": 1000,

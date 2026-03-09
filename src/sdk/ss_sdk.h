@@ -13,6 +13,8 @@
  */
 typedef enum {
     SS_SDK_OK = 0,         /**< Call succeeded. */
+    SS_SDK_CLAMPED,        /**< Call succeeded after SDK clamped the requested range to its supported limit. */
+    SS_SDK_CLAMPED_PARTIAL_DATA, /**< Request was clamped and completeness was still not met. */
     SS_SDK_ERR_PARTIAL_DATA, /**< Data completeness signal: data may be usable, but request completeness was not met. */
     SS_SDK_ERR_INVALID_ARG,  /**< Invalid function arguments. */
     SS_SDK_ERR_VALIDATION,   /**< Input failed SDK validation rules. */
@@ -249,12 +251,11 @@ void ss_sdk_log_write_fields(
     int line,
     const char *func);
 
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
 /**
- * @brief Optional SDK shutdown hook.
+ * @brief Test-only teardown hook for resetting process-local SDK state.
  */
 void ss_sdk_shutdown(void);
-
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
 /**
  * @brief Test hook: override SDK wall-clock source.
  *

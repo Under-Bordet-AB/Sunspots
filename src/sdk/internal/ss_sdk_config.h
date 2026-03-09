@@ -22,7 +22,7 @@
 #define SS_SDK_PATH_BUFFER_SIZE 1024 // Compile-time fallback path buffer size (number).
 #endif
 
-// Bootstrap SS_SDK_* env vars from SUNSPOTS_CONFIG JSON when daemon does not export SS_SDK_* directly.
+// Bootstrap SS_SDK_* env vars from SUNSPOTS_SYSTEM.sdk when daemon does not export SS_SDK_* directly.
 // Precedence: existing SS_SDK_* env vars are preserved and never overridden.
 void ss_sdk_config_bootstrap_env_from_blob(void);
 

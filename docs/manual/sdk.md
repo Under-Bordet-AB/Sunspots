@@ -14,10 +14,16 @@ It does not cover internal implementation details.
 Most SDK calls return `ss_sdk_status`.
 
 - `SS_SDK_OK`: call succeeded
+- `SS_SDK_CLAMPED`: call succeeded, and the bounded read was clamped to available data
+- `SS_SDK_CLAMPED_PARTIAL_DATA`: bounded read was clamped, and completeness was still not met
 - `SS_SDK_ERR_INVALID_ARG`: invalid input arguments
 - `SS_SDK_ERR_VALIDATION`: input failed SDK validation
 - `SS_SDK_ERR_PARTIAL_DATA`: data-completeness signal (result may be usable, but incomplete for the requested semantics)
 - `SS_SDK_ERR_INTERNAL`: internal/config/I/O failure
+
+`SS_SDK_CLAMPED` is not a failure. It means the caller asked for a bounded range that extended past the latest available stored slot, and the SDK returned the available bounded window instead.
+
+`SS_SDK_CLAMPED_PARTIAL_DATA` means the SDK had to clamp the bounded request and, even after clamping, some requested slots still could not be satisfied.
 
 `SS_SDK_ERR_PARTIAL_DATA` is not always a hard failure in product terms. Treat it as "you should know data is incomplete" and handle according to your module policy.
 
@@ -56,6 +62,19 @@ Use the record factory that matches the metric value type:
 
 If you use the wrong factory (wrong function), the SDK returns `SS_SDK_ERR_VALIDATION`.
 
+### `ingested_utc` Behavior
+
+`ss_sdk_record.ingested_utc` is public, but normal call sites do not need to set it manually.
+
+Factory functions initialize it to `0`.
+
+When a record is written with `ingested_utc == 0`:
+
+1. Observation records keep `ingested_utc = 0`
+2. Forecast records get a write-time ingest timestamp assigned by the SDK
+
+This keeps existing module call sites backward-compatible while still letting forecast writes carry release identity.
+
 ### Read Canonical Samples
 
 Prefer named query variables instead of literals (`0`, `8`, inline metric ids), especially when reading many canonical series.
@@ -69,7 +88,7 @@ const int64_t from_utc = 0; /* 0 => start from and with current 15-minute slot *
 const uint16_t quarters_to_fetch = 0; /* 0 => forward horizon */
 
 st = ss_sdk_db_get_canonical(from_utc, quarters_to_fetch, SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C, &out);
-if (st != SS_SDK_OK) {
+if (st != SS_SDK_OK && st != SS_SDK_CLAMPED && st != SS_SDK_CLAMPED_PARTIAL_DATA) {
     return st;
 }
 
@@ -95,6 +114,9 @@ double avg_c = sum / (double)n;
 - `from_utc > 0` is floor-aligned to 15-minute slot.
 - `quarters_to_fetch > 0` reads exactly that many 15-minute slots.
 - `quarters_to_fetch == 0` reads forward horizon (from start to latest available data).
+- If `quarters_to_fetch > 0` and the requested end extends past the latest available stored slot for that canonical, the read is clamped.
+- If the clamped bounded read is otherwise complete, the SDK returns `SS_SDK_CLAMPED`.
+- If the clamped bounded read is still incomplete, the SDK returns `SS_SDK_CLAMPED_PARTIAL_DATA`.
 
 ### Interpolation Behavior
 
@@ -125,8 +147,9 @@ Flags in returned samples:
 
 Caller guidance:
 
-1. Treat `SS_SDK_ERR_PARTIAL_DATA` as an explicit completeness signal.
-2. Always call `ss_sdk_db_free_samples(&out)` when `out.samples` is non-NULL, including partial-data cases.
+1. Treat `SS_SDK_CLAMPED` as successful data with a bounded-window warning.
+2. Treat `SS_SDK_CLAMPED_PARTIAL_DATA` and `SS_SDK_ERR_PARTIAL_DATA` as explicit completeness signals.
+3. Always call `ss_sdk_db_free_samples(&out)` when `out.samples` is non-NULL, including partial-data cases.
 
 ## Logging Usage
 
@@ -191,23 +214,36 @@ if (st != SS_SDK_OK) {
   - `system.sdk.log_mirror_enabled`
   - `system.sdk.log_mirror_path`
   - `system.sdk.log_mirror_max_bytes`
+- Location identity and metadata come from `system.location`:
+  - `system.location.id`
+  - `system.location.latitude`
+  - `system.location.longitude`
+  - `system.location.name`
+  - `system.location.elprisomrade`
 - Default behavior with no SDK config/env:
-  - DB path defaults to `db/<lat_micro>_<lon_micro>.db` (requires `SUNSPOTS_SYSTEM.location`)
+  - DB path defaults to `db/<location_id>.db` (requires `SUNSPOTS_SYSTEM.location.id`)
   - Log level defaults to `debug`
   - Mirror defaults to on
   - Default mirror path is `logs/sdk.log` (if no path is provided)
   - Mirror max file size defaults to `5242880` bytes (5 MiB)
+- SDK cleanup is automatic at process exit through internal `atexit` handling. Normal module code does not need to call an SDK shutdown API.
 - With SDK mirror enabled, mirror writes are blocking per call: each log call locks the mirror file, writes, then unlocks.
 - Performance guideline: avoid logging inside tight loops; collect state in loop variables and emit one summary log at the end (for example via a final `switch`/result branch).
 - Recommended pattern for larger modules: use enum + lookup table for stable event strings.
 
 ### Team Config Handoff (Copy/Paste)
 
-When teammates ask for the "SDK/DB/log strings", use one shared `system.sdk` block:
+When teammates ask for the "SDK/DB/log strings", use one shared `system` block:
 
 ```json
 "system": {
-  "...": "...",
+  "location": {
+    "id": "stockholm-home",
+    "name": "Stockholm",
+    "latitude": 59.3293,
+    "longitude": 18.0686,
+    "elprisomrade": "SE3"
+  },
   "sdk": {
     "db_dir": "db",
     "log_level": "info",
@@ -221,9 +257,10 @@ When teammates ask for the "SDK/DB/log strings", use one shared `system.sdk` blo
 Notes:
 
 1. Keep exactly one shared SDK config under `system.sdk`.
-2. Do not place SDK keys anywhere else in config.
-3. `log_mirror_max_bytes` is a hard cap trigger: when the mirror file reaches/exceeds the cap, SDK truncates it before writing the next line.
-4. No fallback locations are supported; only `system.sdk` is read.
+2. Keep exactly one shared location identity under `system.location`, especially `location.id`.
+3. Do not place SDK keys anywhere else in config.
+4. `log_mirror_max_bytes` is a hard cap trigger: when the mirror file reaches/exceeds the cap, SDK truncates it before writing the next line.
+5. No fallback locations are supported; only `system.sdk` and `system.location` are read.
 
 ## See Also
 

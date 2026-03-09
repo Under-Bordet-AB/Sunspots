@@ -31,13 +31,6 @@ Behavior:
 3. On daemon hot-reload, `start_immediately: true` triggers one new immediate run.
 4. Daemon does not fail startup if backfill fails.
 
-## Backfill Modes
-
-`backfill.mode`:
-
-1. `oneshot`: run one pass and exit.
-2. `maintenance`: run one pass, sleep `daily_hole_check_interval_sec`, repeat forever.
-
 ## Supported Metrics
 
 Current module writes:
@@ -48,24 +41,23 @@ Current module writes:
 
 ## Configuration Keys
 
-The daemon passes module JSON as `SUNSPOTS_CONFIG`. Backfill reads `backfill` from module config, location from `SUNSPOTS_SYSTEM.location`, and SDK runtime config from exported `SS_SDK_*` env vars (typically sourced from shared `system.sdk`).
+The daemon passes the `BackfillOpenMeteo` module JSON from `config/sunspots.json` as `SUNSPOTS_CONFIG`. Backfill reads `backfill` from that module config, location from `SUNSPOTS_SYSTEM.location`, and SDK runtime config from exported `SS_SDK_*` env vars (typically sourced from shared `system.sdk`).
 
 `backfill` keys:
 
 1. `enabled` (bool): default `true`
-2. `mode` (string): `oneshot` or `maintenance`, default `oneshot`
-3. `required_history_days` (int): default `14`
-4. `chunk_days` (int): default `7`
-5. `retry_max_attempts` (int): default `5`
-6. `retry_base_backoff_ms` (int): default `1000`
-7. `freshness_lag_minutes` (int): default `120` (avoid partial trailing window before latest stable hourly data)
-8. `request_interval_ms` (int): default `250`
-9. `max_requests_per_minute` (int): default `240`, capped to `600`
-10. `max_requests_per_hour` (int): default `2000`, capped to `5000`
-11. `max_requests_per_day` (int): default `8000`, capped to `10000`
-12. `progress_log_interval_sec` (int): default `10`
-13. `daily_hole_check_interval_sec` (int): default `86400`
-14. `endpoint` (string): default `https://archive-api.open-meteo.com/v1/archive`
+2. `start_date_utc` (string, `YYYY-MM-DD`): earliest UTC day to backfill from; the worker fills forward from this date to the current freshness-lag cutoff. Default `2025-01-01`
+3. `chunk_days` (int): default `7`
+4. `retry_max_attempts` (int): default `5`
+5. `retry_base_backoff_ms` (int): default `1000`
+6. `freshness_lag_minutes` (int): default `120` (avoid partial trailing window before latest stable hourly data)
+7. `request_interval_ms` (int): default `250`
+8. `max_requests_per_minute` (int): default `240`, capped to `600`
+9. `max_requests_per_hour` (int): default `2000`, capped to `5000`
+10. `max_requests_per_day` (int): default `8000`, capped to `10000`
+11. `progress_log_interval_sec` (int): default `10`
+12. `endpoint` (string): default `https://archive-api.open-meteo.com/v1/archive`
+13. `usage_daily_path` (string): path used for local request-usage accounting. Default `logs/backfill_usage_daily.log`
 
 Shared `system.sdk` keys follow SDK conventions (for example `db_dir`, `log_level`, mirror settings).
 
@@ -139,8 +131,7 @@ Backfill module entry:
   "start_immediately": true,
   "backfill": {
     "enabled": true,
-    "mode": "oneshot",
-    "required_history_days": 14,
+    "start_date_utc": "2025-01-01",
     "chunk_days": 7,
     "retry_max_attempts": 5,
     "retry_base_backoff_ms": 1000,
@@ -150,8 +141,8 @@ Backfill module entry:
     "max_requests_per_hour": 2000,
     "max_requests_per_day": 8000,
     "progress_log_interval_sec": 10,
-    "daily_hole_check_interval_sec": 86400,
-    "endpoint": "https://archive-api.open-meteo.com/v1/archive"
+    "endpoint": "https://archive-api.open-meteo.com/v1/archive",
+    "usage_daily_path": "logs/backfill_usage_daily.log"
   }
 }
 ```
