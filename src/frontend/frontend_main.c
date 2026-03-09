@@ -25,13 +25,13 @@ int main() {
     openlog("SUNSPOTS_HTTP_SERVER", LOG_PID, LOG_DAEMON);
 
     int skipped = 1;
-    if(ALLOW_STANDALONE_EXEC)
-        goto skip;
 
     /* In any spawned module binary — replaces argv parsing */
     int    daemon_pid    = getppid();
     char  *sig_env       = getenv("SUNSPOTS_SIGNAL");
     if(sig_env == NULL) {
+        if(ALLOW_STANDALONE_EXEC)
+            goto skip;
         printf("Missing environment variable: SUNSPOTS_SIGNAL\n");
         syslog(LOG_ERR, "<frontend/frontend_main.c> Missing environment variable: SUNSPOTS_SIGNAL");
         exit(EXIT_FAILURE);
