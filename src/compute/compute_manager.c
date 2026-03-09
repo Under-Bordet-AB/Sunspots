@@ -363,8 +363,8 @@ int load_data(compute_data_t* out) {
     int64_t end_slot = (int64_t)mktime(&local_tm);
     end_slot = start_slot + ((60 * 60) * 24);
 
-    time_t start = start_slot;
-    time_t end = end_slot;
+    // time_t start = start_slot;
+    // time_t end = end_slot;
 
     // log_time("start_slot", start);
     // log_time("end_slot", end);
