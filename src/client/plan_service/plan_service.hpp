@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <ctime>
 #include "config.hpp"
 #include "../http/http_client.hpp"
 
@@ -19,13 +20,14 @@ class PlanService
    public:
     PlanService(HttpClient &client);
 
-    void getNow();
-    void displayNow();
-    void showDay();
+    bool getResult();
+    void displayLive();
+    void displayGraph();
 
    private:
     HttpClient client;
     Result cachedResult;
+    std::time_t data_start_time = 0;
 
     Result parseResponse(const std::string &buffer);
     int getCurrentQuarterIndex();

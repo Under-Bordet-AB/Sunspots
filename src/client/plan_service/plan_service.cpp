@@ -1,6 +1,7 @@
 #include <iostream>
 #include <iomanip>
 #include <string>
+#include <cmath>
 
 #include "plan_service.hpp"
 #include "../utils/utils.hpp"
@@ -30,23 +31,22 @@ bool reportIfFailed(const HttpResponse& response, const char* endpoint)
 
 PlanService::PlanService(HttpClient &client) : client(client){}
 
-void PlanService::getNow()
+bool PlanService::getResult()
 {
-    HttpResponse response = client.get(Config::PATH_SHOW_NOW);
-    if (reportIfFailed(response, Config::PATH_SHOW_NOW))
-        return;
+    HttpResponse response = client.get(Config::PATH_SHOW_RESULT);
+    if (reportIfFailed(response, Config::PATH_SHOW_RESULT))
+        return false;
 
     cachedResult = parseResponse(response.body);
-
-    // cachedResult = parseResponse("{\"result\":{\"buy_electricity\":[0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.593475,0.58695,0.580425,0.5739,0.551625,0.52935,0.507075,0.4848,0.45825,0.4317,0.40515,0.3786,0.3552,0.3318,0.3084,0.285,0.28095,0.2769,0.27285,0.2688,0.282975,0.29715,0.311325,0.3255,0.32415,0.3228,0.32145,0.3201,0.323475,0.32685,0.330225,0.3336,0.363525,0.39345,0.423375,0.4533,0.475575,0.49785,0.520125,0.5424,0.555225,0.56805,0.580875,0.5937,0.595275,0.59685,0.598425,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6,0.6],\"direct_use\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.006525,0.01305,0.019575,0.0261,0.048375,0.07065,0.092925,0.1152,0.14175,0.1683,0.19485,0.2214,0.2448,0.2682,0.2916,0.315,0.31905,0.3231,0.32715,0.3312,0.317025,0.30285,0.288675,0.2745,0.27585,0.2772,0.27855,0.2799,0.276525,0.27315,0.269775,0.2664,0.236475,0.20655,0.176625,0.1467,0.124425,0.10215,0.079875,0.0576,0.044775,0.03195,0.019125,0.0063,0.004725,0.00315,0.001575,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"charge_battery\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sell_excess\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"timestamp\":1772056619}}");
+    return true;
 }
 
-void PlanService::displayNow()
+void PlanService::displayLive()
 {
     std::string currentTime = formatUnixTime(std::time (nullptr));
 
     int index = getCurrentQuarterIndex();
-    if (index <= 0 || index >= 96 || cachedResult.buy_electricity.size() < 96)
+    if (index < 0 || index >= 96 || cachedResult.buy_electricity.size() < 96)
     {
         std::cerr << "Error: invalid data\n";
         return;
@@ -71,11 +71,54 @@ void PlanService::displayNow()
 
 }
 
-void PlanService::showDay()
+void PlanService::displayGraph()
 {
-    HttpResponse response = client.get(Config::PATH_SHOW_DAY);
-    if (reportIfFailed(response, Config::PATH_SHOW_DAY))
-        return;
+    
+
+    constexpr double y_axis = 21;
+    constexpr double x_axis = 96;
+
+    std::cout << std::string(103, '_') << std::endl;
+    for (int i = 0; i < y_axis; i++)     // Y-Axis
+    {
+        double resultValue = std::round((1.0 - (i * 0.05)) * 20.0) / 20.0;
+        std::cout << std::fixed << std::setprecision(2) << resultValue << " - ";
+
+        for (int j = 0; j < x_axis; j++) // X-Axis
+        {
+            if (resultValue == roundToTenth(cachedResult.buy_electricity[j]))
+            {
+                std::cout << "\033[31m●\033[0m";
+            }
+            else if (resultValue == roundToTenth(cachedResult.direct_use[j]))
+            {
+                std::cout << "\033[32m●\033[0m";
+            }
+            else if (resultValue == roundToTenth(cachedResult.charge_battery[j]))
+            {
+                std::cout << "\033[33m●\033[0m";
+            }
+            else if (resultValue == roundToTenth(cachedResult.sell_excess[j]))
+            {
+                std::cout << "\033[34m●\033[0m";
+            }
+            else if (i == y_axis - 1)
+            {
+                std::cout << "-";
+            }
+            else
+            {
+                std::cout << " ";
+            }
+        }
+
+        resultValue -= 0.05;
+        std::cout << "|" << std::endl;
+    }
+    std::cout << "        \033[31m | Buy Electricity |\033[0m        \033[32m| Direct Use |\033[0m        \033[33m| Charge Battery |\033[0m        \033[34m| Sell Excess |\033[0m" << std::endl;
+
+    while (true);
+    
 }
 
 Result PlanService::parseResponse(const std::string &buffer)
@@ -111,11 +154,25 @@ Result PlanService::parseResponse(const std::string &buffer)
     if (!cJSON_IsArray(buy) ||
         !cJSON_IsArray(dir) ||
         !cJSON_IsArray(cha) ||
-        !cJSON_IsArray(sel) ||
-        !cJSON_IsNumber(tim))
+        !cJSON_IsArray(sel))
     {
         cJSON_Delete(root);
         return Result{};
+    }
+    
+    // Handle timestamp as either a number or an array
+    std::time_t ts = 0;
+    if (cJSON_IsNumber(tim))
+    {
+        ts = static_cast<std::time_t>(tim->valuedouble);
+    }
+    else if (cJSON_IsArray(tim))
+    {
+        cJSON *firstTimestamp = cJSON_GetArrayItem(tim, 0);
+        if (firstTimestamp && cJSON_IsNumber(firstTimestamp))
+        {
+            ts = static_cast<std::time_t>(firstTimestamp->valuedouble);
+        }
     }
 
     auto fillVector = [](cJSON* array, std::vector<double> &vec)
@@ -126,6 +183,10 @@ Result PlanService::parseResponse(const std::string &buffer)
             if (cJSON_IsNumber(item))
             {
                 vec.push_back(item->valuedouble);
+            }
+            else if (cJSON_IsNull(item))
+            {
+                vec.push_back(0.0);
             }
         }
     };
@@ -140,8 +201,8 @@ Result PlanService::parseResponse(const std::string &buffer)
     fillVector(cha, result.charge_battery);
     fillVector(sel, result.sell_excess);
 
-    std::time_t ts = static_cast<std::time_t>(tim->valuedouble);
     result.timestamp = formatUnixTime(ts);
+    data_start_time = ts;  // Store the data start time for quarter offset calculation
     
     cJSON_Delete(root);
     return result;
@@ -152,8 +213,22 @@ int PlanService::getCurrentQuarterIndex()
     std::time_t now = std::time(nullptr);
     std::tm* tm = std::localtime(&now);
 
-    int hour = tm->tm_hour;
-    int minute = tm->tm_min;
+    int current_hour = tm->tm_hour;
+    int current_minute = tm->tm_min;
+    int current_quarter = current_hour * 4 + (current_minute / 15);
 
-    return hour * 4 + (minute / 15);
+    // Parse the data start timestamp to get its quarter
+    std::tm* data_tm = std::localtime(&data_start_time);
+    int data_hour = data_tm->tm_hour;
+    int data_minute = data_tm->tm_min;
+    int data_quarter = data_hour * 4 + (data_minute / 15);
+
+    // Return the offset from data start
+    int offset = current_quarter - data_quarter;
+    
+    // Handle day wraparound
+    if (offset < 0)
+        offset += 96;
+    
+    return offset;
 }
