@@ -277,6 +277,11 @@ ss_sdk_cfg_status ss_sdk_cfg_get_location_from_system_env(ss_sdk_cfg_location *o
         return status;
     }
 
+    status = ss_sdk_cfg_get_string_from_env_json("SUNSPOTS_SYSTEM", "location.id", out_location->id, sizeof(out_location->id));
+    if (status != SS_SDK_CFG_OK) {
+        return status;
+    }
+
     (void)ss_sdk_cfg_get_string_from_env_json("SUNSPOTS_SYSTEM", "location.name", out_location->name, sizeof(out_location->name));
     (void)ss_sdk_cfg_get_string_from_env_json(
         "SUNSPOTS_SYSTEM",

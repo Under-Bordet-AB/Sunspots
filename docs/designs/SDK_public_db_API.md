@@ -9,7 +9,7 @@ Define the smallest useful SDK DB API for calculator and fetcher modules.
 1. SQLite only.
 2. WAL mode enabled.
 3. Lazy init on first SDK DB call (no module init call).
-4. Only runtime config is `sdk_db.db_path` from daemon env config.
+4. Runtime config is read from shared `system.sdk`, and DB identity is read from `system.location.id`.
 5. Calculator data model is UTC 15-minute slots.
 6. Public read API is single-canonical (`ss_sdk_db_get_canonical`).
 7. Typical bounded read behavior is one now-slot (`quarters_to_fetch=1`); `quarters_to_fetch=0` is forward horizon.
@@ -18,14 +18,14 @@ Define the smallest useful SDK DB API for calculator and fetcher modules.
 10. V1 canonical payload types are limited to `i64` / `f64` / `bool` (no string canonical values in V1).
 11. `from_utc` normalization order is strict: validate `from_utc >= 0`; then `0 => current slot`; otherwise floor-align to 15-minute slot start (`aligned = ts - (ts % 900)`).
 12. `quarters_to_fetch` normalization is: `0` => forward horizon from start slot; non-zero => exact number of quarters.
-13. `quarters_to_fetch` hard cap is `672` quarters (7 days); larger values return `SS_SDK_ERR_INVALID_ARG`.
+13. For bounded reads, if the requested end extends past the latest available stored slot for the canonical, the SDK clamps the window to available data. Complete clamped reads return `SS_SDK_CLAMPED`; incomplete clamped reads return `SS_SDK_CLAMPED_PARTIAL_DATA`.
 14. Any function that is not part of an exposed header must be `static` (file-local).
 15. `src/sdk/ss_canonical.def` (X-macro catalog) is the single source of truth for canonical IDs, value types, and units.
 16. The canonical `records` table only accepts and returns canonicals defined in `ss_canonical.def`.
 17. Non-canonical or experimental data must use separate tables and separate APIs (not these V1 canonical APIs).
 18. Across calls, canonical reads support `i64`/`f64`/`bool`; each call reads one canonical and returns that canonical's declared value type.
-19. Canonical storage enforces one row per `(canonical, data_kind, ts_start_utc)`; reads return at most one selected value per requested slot.
-20. Canonical ingest authority is single-writer per canonical slot in V1. Competing writers for the same `(canonical, data_kind, ts_start_utc)` are out of scope and must be routed through non-canonical staging APIs.
+19. Canonical storage may contain multiple releases for the same slot, keyed by `(canonical, data_kind, ts_start_utc, ingested_utc)`; reads return at most one selected value per requested slot.
+20. Forecast releases are distinguished by `ingested_utc`; observation rows commonly use `ingested_utc = 0`.
 
 ## 3. Public SDK API (Minimal)
 
@@ -62,7 +62,6 @@ ss_sdk_status ss_sdk_db_get_canonical(
 );
 
 void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
-void ss_sdk_shutdown(void);
 ```
 
 ## 4. Default Behavior (No Extra Knobs)
@@ -73,7 +72,7 @@ void ss_sdk_shutdown(void);
 4. If floor-alignment from rule 3 yields `start_utc == 0` (for example input `1..899`), start slot is UNIX epoch start (`0`), not current slot.
 5. For `ss_sdk_db_get_canonical`, `quarters_to_fetch=0` means fetch from `start_utc` through latest available stored slot for the canonical metric (forward horizon).
 6. For `ss_sdk_db_get_canonical`, `quarters_to_fetch=1` means fetch exactly one quarter.
-7. For `ss_sdk_db_get_canonical`, `quarters_to_fetch > 672` returns `SS_SDK_ERR_INVALID_ARG`.
+7. For `ss_sdk_db_get_canonical`, bounded reads are clamped to the latest available stored slot for the canonical. Complete clamped reads return `SS_SDK_CLAMPED`; incomplete clamped reads return `SS_SDK_CLAMPED_PARTIAL_DATA`.
 8. For `quarters_to_fetch > 0`, window slots are exactly `quarters_to_fetch` slots:
    `ts_utc = start_utc + k*900`, where `k in [0, quarters_to_fetch)`.
 9. Equivalent interval form for bounded reads is `[start_utc, start_utc + quarters_to_fetch*900)` (`end_utc` exclusive).
@@ -107,7 +106,7 @@ void ss_sdk_shutdown(void);
     `SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE`,
     `SS_METRIC_WEATHER_IS_DAY`.
 19. Any canonical add/remove in `ss_canonical.def` must update this interpolation map in the same change; implementation must enforce full canonical coverage (no silent fallback policy).
-20. Canonical schema disallows multi-row ties within the same class for the same slot (`UNIQUE(canonical, data_kind, ts_start_utc)`).
+20. Canonical schema allows multiple releases for the same slot and kind; exact duplicates are ignored by `(canonical, data_kind, ts_start_utc, ingested_utc)`.
 21. Output sort order is deterministic: `(ts_utc ASC, canonical ASC)`.
 22. `SS_SDK_OK` is returned only when the requested canonical has one selected value for every slot in the requested window.
 23. `SS_SDK_ERR_PARTIAL_DATA` is returned when one or more requested slots are missing after selection policy, including the case where no rows are returned.
@@ -129,16 +128,18 @@ void ss_sdk_shutdown(void);
 
 `ss_sdk_db_get_canonical`:
 1. `SS_SDK_OK`
-2. `SS_SDK_ERR_PARTIAL_DATA`
-3. `SS_SDK_ERR_INVALID_ARG`
-4. `SS_SDK_ERR_INTERNAL`
+2. `SS_SDK_CLAMPED`
+3. `SS_SDK_CLAMPED_PARTIAL_DATA`
+4. `SS_SDK_ERR_PARTIAL_DATA`
+5. `SS_SDK_ERR_INVALID_ARG`
+6. `SS_SDK_ERR_INTERNAL`
 
 Note: `SS_SDK_ERR_PARTIAL_DATA` completeness semantics are not yet implemented as a stable SDK contract.
 
 Read API notes:
 1. Invalid canonical enum IDs return `SS_SDK_ERR_INVALID_ARG`.
 2. Validation order is: validate `from_utc >= 0` first, then normalize `from_utc` per rules in Section 4.
-3. `quarters_to_fetch > 672` returns `SS_SDK_ERR_INVALID_ARG`.
+3. If a bounded read extends past the latest available stored slot for the canonical, the SDK clamps the window; complete reads in that case return `SS_SDK_CLAMPED`, incomplete reads return `SS_SDK_CLAMPED_PARTIAL_DATA`.
 4. SQLite busy-timeout exhaustion and lock failures map to `SS_SDK_ERR_INTERNAL` in V1.
 5. Calculator/default caller policy currently treats any non-`SS_SDK_OK` status as an error path.
 6. `SS_SDK_ERR_PARTIAL_DATA` triggering rules are TBD and will be specified when partial-data semantics are implemented.
@@ -175,9 +176,9 @@ Visibility rules:
 
 1. One canonical `records` table, created as a SQLite `STRICT` table.
 2. `UNIQUE` dedupe identity is exactly:
-   `(canonical, data_kind, ts_start_utc)`.
-3. Required indexes are `(canonical, data_kind, ts_start_utc)`.
-4. Required indexes are `(canonical, ts_start_utc)`.
+   `(canonical, data_kind, ts_start_utc, ingested_utc)`.
+3. Required indexes include `(canonical, data_kind, ts_start_utc)`.
+4. Required indexes include `(canonical, ts_start_utc)`.
 5. Keep forecast and observation rows separate via `data_kind`.
 6. `records.canonical` must map to known canonical IDs from `ss_canonical.def`.
 7. `records.value_type` must match the canonical's declared value type (from X-macro metadata).

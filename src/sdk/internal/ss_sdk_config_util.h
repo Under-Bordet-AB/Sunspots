@@ -15,6 +15,7 @@ typedef enum {
 typedef struct {
     double latitude;
     double longitude;
+    char id[96];
     char name[64];
     char elprisomrade[16];
 } ss_sdk_cfg_location;

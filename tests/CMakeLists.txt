@@ -1,3 +1,5 @@
+find_package(SQLite3 REQUIRED)
+
 function(sunspots_add_valgrind_test test_name target_name)
   if(SUNSPOTS_ENABLE_VALGRIND AND VALGRIND_EXECUTABLE AND NOT SUNSPOTS_ENABLE_SANITIZERS)
     add_test(
@@ -75,12 +77,14 @@ target_link_libraries(backfill_worker_module_test
   PRIVATE
     GTest::gtest_main
     sunspots_sdk
+    SQLite::SQLite3
 )
 target_compile_definitions(backfill_worker_module_test
   PRIVATE
     BACKFILL_BIN_PATH="$<TARGET_FILE:sunspots_backfill_openmeteo>"
+    PRICE_BACKFILL_BIN_PATH="$<TARGET_FILE:sunspots_backfill_elprisetjustnu>"
 )
-add_dependencies(backfill_worker_module_test sunspots_backfill_openmeteo)
+add_dependencies(backfill_worker_module_test sunspots_backfill_openmeteo sunspots_backfill_elprisetjustnu)
 target_compile_features(backfill_worker_module_test PRIVATE cxx_std_11)
 sunspots_apply_target_defaults(backfill_worker_module_test)
 add_test(NAME backfill.worker.module.test COMMAND backfill_worker_module_test)

@@ -13,6 +13,8 @@
  */
 typedef enum {
     SS_SDK_OK = 0,         /**< Call succeeded. */
+    SS_SDK_CLAMPED,        /**< Call succeeded after SDK clamped the requested range to its supported limit. */
+    SS_SDK_CLAMPED_PARTIAL_DATA, /**< Request was clamped and completeness was still not met. */
     SS_SDK_ERR_PARTIAL_DATA, /**< Data completeness signal: data may be usable, but request completeness was not met. */
     SS_SDK_ERR_INVALID_ARG,  /**< Invalid function arguments. */
     SS_SDK_ERR_VALIDATION,   /**< Input failed SDK validation rules. */
@@ -55,6 +57,7 @@ typedef struct ss_sdk_record {
     int64_t ts_start_utc; // 15-minute slot start timestamp (UTC epoch seconds).
     int64_t ts_end_utc; // 15-minute slot end timestamp (UTC epoch seconds).
     ss_sdk_data_kind data_kind; // Observation/forecast marker.
+    int64_t ingested_utc; // Optional ingest/release timestamp override (UTC epoch seconds). 0 => SDK uses current time.
 } ss_sdk_record;
 
 typedef uint8_t ss_sdk_sample_flags;
@@ -185,7 +188,6 @@ void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
 
 /**
  * @brief Log helper macro (debug level) with source location.
- * @return `ss_sdk_status`
  */
 #ifndef SS_SDK_LOG_FILE_TOKEN
 #if defined(__FILE_NAME__)
@@ -198,17 +200,14 @@ void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
 #define SS_LOG_DEBUG(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
  * @brief Log helper macro (info level) with source location.
- * @return `ss_sdk_status`
  */
 #define SS_LOG_INFO(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_INFO,  (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
  * @brief Log helper macro (warning level) with source location.
- * @return `ss_sdk_status`
  */
 #define SS_LOG_WARN(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_WARN,  (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
  * @brief Log helper macro (error level) with source location.
- * @return `ss_sdk_status`
  */
 #define SS_LOG_ERROR(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 
@@ -221,9 +220,8 @@ void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
  * @param file Source file path.
  * @param line Source line number.
  * @param func Source function name.
- * @return SDK status code.
  */
-ss_sdk_status ss_sdk_log_write_auto(
+void ss_sdk_log_write_auto(
     ss_sdk_log_level level,
     const char *event,
     const char *message,
@@ -243,9 +241,8 @@ ss_sdk_status ss_sdk_log_write_auto(
  * @param file Source file path.
  * @param line Source line number.
  * @param func Source function name.
- * @return SDK status code.
  */
-ss_sdk_status ss_sdk_log_write_fields(
+void ss_sdk_log_write_fields(
     ss_sdk_log_level level,
     const char *event,
     const char *message,
@@ -254,12 +251,11 @@ ss_sdk_status ss_sdk_log_write_fields(
     int line,
     const char *func);
 
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
 /**
- * @brief Optional SDK shutdown hook.
+ * @brief Test-only teardown hook for resetting process-local SDK state.
  */
 void ss_sdk_shutdown(void);
-
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
 /**
  * @brief Test hook: override SDK wall-clock source.
  *

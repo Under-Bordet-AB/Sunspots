@@ -12,9 +12,8 @@
  * @param file Source file path.
  * @param line Source line number.
  * @param func Source function name.
- * @return SDK status code.
  */
-ss_sdk_status ss_sdk_internal_log_write_auto(
+void ss_sdk_internal_log_write_auto(
     ss_sdk_log_level level,
     const char *event,
     const char *message,
@@ -33,9 +32,8 @@ ss_sdk_status ss_sdk_internal_log_write_auto(
  * @param file Source file path.
  * @param line Source line number.
  * @param func Source function name.
- * @return SDK status code.
  */
-ss_sdk_status ss_sdk_internal_log_write_fields(
+void ss_sdk_internal_log_write_fields(
     ss_sdk_log_level level,
     const char *event,
     const char *message,

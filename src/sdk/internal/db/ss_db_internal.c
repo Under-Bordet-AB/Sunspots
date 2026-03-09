@@ -20,15 +20,15 @@
 // Lookup table for all SQL queries
 static const char *const g_ss_db_sql[SS_DB_SQL_COUNT] = {
     [SS_DB_SQL_SELECT_ROWS_WINDOW] =
-        "SELECT ts_start_utc, data_kind, value_type, value_i64, value_f64, value_bool "
+        "SELECT ts_start_utc, data_kind, value_type, value_i64, value_f64, value_bool, ingested_utc "
         "FROM records "
         "WHERE canonical = ?1 AND ts_start_utc >= ?2 AND ts_start_utc < ?3 "
-        "ORDER BY ts_start_utc ASC, data_kind ASC",
+        "ORDER BY ts_start_utc ASC, data_kind ASC, ingested_utc DESC, rowid DESC",
     [SS_DB_SQL_INSERT_RECORD] =
         "INSERT INTO records("
-        "canonical, value_type, value_i64, value_f64, value_bool, ts_start_utc, ts_end_utc, data_kind"
-        ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
-        "ON CONFLICT(canonical, data_kind, ts_start_utc) DO NOTHING",
+        "canonical, value_type, value_i64, value_f64, value_bool, ts_start_utc, ts_end_utc, data_kind, ingested_utc"
+        ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) "
+        "ON CONFLICT(canonical, data_kind, ts_start_utc, ingested_utc) DO NOTHING",
     [SS_DB_SQL_SELECT_MAX_TS_FROM_START] =
         "SELECT MAX(ts_start_utc) "
         "FROM records "
@@ -53,8 +53,6 @@ static char *g_db_open_path = NULL;
 typedef struct {
     double latitude;
     double longitude;
-    long long lat_micro;
-    long long lon_micro;
     char location_id[96];
     char nickname[64];
     char elprisomrade[16];
@@ -63,8 +61,6 @@ typedef struct {
 typedef struct {
     int has_identity;
     char location_id[96];
-    long long lat_micro;
-    long long lon_micro;
 } ss_location_identity_row;
 
 typedef struct {
@@ -80,15 +76,6 @@ typedef struct {
 } ss_db_write_result;
 
 static ss_sdk_status ss_exec(sqlite3 *db, const char *sql);
-
-static long long ss_coord_to_micro(double v)
-{
-    double scaled = v * 1000000.0;
-    if (scaled >= 0.0) {
-        return (long long)(scaled + 0.5);
-    }
-    return (long long)(scaled - 0.5);
-}
 
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
 ss_db_test_hooks g_db_test_hooks;
@@ -216,10 +203,8 @@ static int ss_location_ctx_from_system_env(ss_location_ctx *out)
 
     out->latitude = location.latitude;
     out->longitude = location.longitude;
-
-    out->lat_micro = ss_coord_to_micro(out->latitude);
-    out->lon_micro = ss_coord_to_micro(out->longitude);
-    if (snprintf(out->location_id, sizeof(out->location_id), "loc_%lld_%lld", out->lat_micro, out->lon_micro) <= 0) {
+    (void)snprintf(out->location_id, sizeof(out->location_id), "%s", location.id);
+    if (out->location_id[0] == '\0') {
         return -1;
     }
     (void)snprintf(out->nickname, sizeof(out->nickname), "%s", location.name);
@@ -248,7 +233,7 @@ static const char *ss_db_path(void)
     if (ss_location_ctx_from_system_env(&loc) != 0) {
         return NULL;
     }
-    n = snprintf(dynamic_path, sizeof(dynamic_path), "%s/%lld_%lld.db", dir_override, loc.lat_micro, loc.lon_micro);
+    n = snprintf(dynamic_path, sizeof(dynamic_path), "%s/%s.db", dir_override, loc.location_id);
     if (n <= 0 || (size_t)n >= sizeof(dynamic_path)) {
         return NULL;
     }
@@ -294,15 +279,11 @@ static ss_sdk_status ss_db_read_identity_row(sqlite3 *db, ss_location_identity_r
     sqlite_result = sqlite3_step(stmt);
     if (sqlite_result == SQLITE_ROW) {
         const unsigned char *id_text = sqlite3_column_text(stmt, 0);
-        double lat = sqlite3_column_double(stmt, 1);
-        double lon = sqlite3_column_double(stmt, 2);
         if (id_text == NULL) {
             sqlite3_finalize(stmt);
             return SS_SDK_ERR_INTERNAL;
         }
         (void)snprintf(out_row->location_id, sizeof(out_row->location_id), "%s", (const char *)id_text);
-        out_row->lat_micro = ss_coord_to_micro(lat);
-        out_row->lon_micro = ss_coord_to_micro(lon);
         out_row->has_identity = 1;
     } else if (sqlite_result != SQLITE_DONE) {
         sqlite3_finalize(stmt);
@@ -350,8 +331,7 @@ static ss_sdk_status ss_db_validate_or_insert_identity(
         return ss_db_insert_identity_row(db, loc);
     }
 
-    if (strcmp(identity_row->location_id, loc->location_id) != 0 || identity_row->lat_micro != loc->lat_micro ||
-        identity_row->lon_micro != loc->lon_micro) {
+    if (strcmp(identity_row->location_id, loc->location_id) != 0) {
         return SS_SDK_ERR_INTERNAL;
     }
     return SS_SDK_OK;
@@ -566,22 +546,25 @@ static ss_sdk_status ss_db_create_canonical_data_schema(sqlite3 *db)
         "ts_start_utc INTEGER NOT NULL,"
         "ts_end_utc INTEGER NOT NULL,"
         "data_kind INTEGER NOT NULL,"
+        "ingested_utc INTEGER NOT NULL,"
         "CHECK(canonical >= 0),"
         "CHECK(value_type IN (0,1,2)),"
         "CHECK(data_kind IN (0,1)),"
+        "CHECK(ingested_utc >= 0),"
         "CHECK(ts_start_utc >= 0),"
         "CHECK(ts_start_utc % 900 = 0),"
         "CHECK(ts_end_utc = ts_start_utc + 900),"
         "CHECK((value_type = 0 AND value_i64 IS NOT NULL AND typeof(value_i64) = 'integer' AND value_f64 IS NULL AND value_bool IS NULL)"
         "   OR (value_type = 1 AND value_f64 IS NOT NULL AND (typeof(value_f64) = 'real' OR typeof(value_f64) = 'integer') AND value_i64 IS NULL AND value_bool IS NULL)"
         "   OR (value_type = 2 AND value_bool IN (0,1) AND typeof(value_bool) = 'integer' AND value_i64 IS NULL AND value_f64 IS NULL)),"
-        "UNIQUE(canonical, data_kind, ts_start_utc)"
+        "UNIQUE(canonical, data_kind, ts_start_utc, ingested_utc)"
         ") STRICT;"
         "CREATE INDEX IF NOT EXISTS idx_records_canonical_data_kind_ts "
         "ON records(canonical, data_kind, ts_start_utc);"
+        "CREATE INDEX IF NOT EXISTS idx_records_canonical_ts_kind_ingested "
+        "ON records(canonical, ts_start_utc, data_kind, ingested_utc DESC);"
         "CREATE INDEX IF NOT EXISTS idx_records_canonical_ts "
         "ON records(canonical, ts_start_utc);";
-
     return ss_exec(db, k_canonical_data_schema_sql);
 }
 
@@ -812,6 +795,12 @@ static ss_db_write_result ss_db_bind_insert_record(sqlite3_stmt *stmt, const ss_
     bind_error_count += (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)record->ts_start_utc) != SQLITE_OK);
     bind_error_count += (sqlite3_bind_int64(stmt, 7, (sqlite3_int64)record->ts_end_utc) != SQLITE_OK);
     bind_error_count += (sqlite3_bind_int(stmt, 8, (int)record->data_kind) != SQLITE_OK);
+    bind_error_count +=
+        (sqlite3_bind_int64(
+             stmt,
+             9,
+             (sqlite3_int64)(record->ingested_utc > 0 ? record->ingested_utc :
+                             (record->data_kind == SS_SDK_DATA_OBSERVATION ? 0 : time(NULL)))) != SQLITE_OK);
 
     if (bind_error_count != 0) {
         result.log_event = "sdk.db.bind_failed";
@@ -842,7 +831,7 @@ static ss_db_write_result ss_db_execute_insert_step(sqlite3_stmt *stmt)
     if (sqlite_result == SQLITE_DONE) {
         if (sqlite3_changes(g_db) == 0) {
             result.log_event = "sdk.db.dedupe_drop";
-            result.log_message = "duplicate canonical slot ignored";
+            result.log_message = "duplicate canonical slot/release ignored";
         }
         result.status = SS_SDK_OK;
         return result;
@@ -1458,6 +1447,45 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
     end_utc = max_ts_start + SS_SLOT_SECONDS;
 
     return ss_sdk_internal_db_get_canonical(canonical, start_utc, end_utc, out);
+}
+
+ss_sdk_status ss_sdk_internal_db_clamp_end_utc(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t requested_end_utc,
+    int64_t *out_end_utc,
+    int *out_was_clamped)
+{
+    bool has_value = false;
+    int64_t max_ts_start = 0;
+    int64_t latest_end_utc;
+    ss_sdk_status status;
+
+    if (out_end_utc == NULL || out_was_clamped == NULL || start_utc < 0 || requested_end_utc <= start_utc) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    *out_end_utc = requested_end_utc;
+    *out_was_clamped = 0;
+
+    status = ss_db_select_max_ts_from_start(canonical, start_utc, &max_ts_start, &has_value);
+    if (status != SS_SDK_OK) {
+        return status;
+    }
+    if (!has_value) {
+        return SS_SDK_ERR_PARTIAL_DATA;
+    }
+    if (max_ts_start > INT64_MAX - SS_SLOT_SECONDS) {
+        return SS_SDK_ERR_INVALID_ARG;
+    }
+
+    latest_end_utc = max_ts_start + SS_SLOT_SECONDS;
+    if (requested_end_utc > latest_end_utc) {
+        *out_end_utc = latest_end_utc;
+        *out_was_clamped = 1;
+    }
+
+    return SS_SDK_OK;
 }
 
 void ss_sdk_internal_db_free_samples(ss_sdk_samples_out *out)

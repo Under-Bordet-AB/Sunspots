@@ -174,6 +174,8 @@ Sample runtime config keys live in `config/sunspots.json` under `system.sdk`:
 - `log_mirror_enabled`: mirror toggle (default `true`)
 - `log_mirror_path`: mirror output path (default `logs/sdk.log`)
 
+SDK DB identity comes from `system.location.id`. The default DB filename shape is `db/<location_id>.db`.
+
 ## Documentation
 
 - SDK manual: `docs/manual/sdk.md`

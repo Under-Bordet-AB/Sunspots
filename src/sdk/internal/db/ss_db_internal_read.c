@@ -13,42 +13,39 @@ bool ss_value_type_is_supported(ss_sdk_value_type value_type)
            value_type == SS_SDK_VALUE_BOOL;
 }
 
+static const ss_interp_policy g_interp_policy_by_metric[SS_METRIC_COUNT] = {
+    [SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_HUMIDITY_RELATIVE_2M_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_WIND_SPEED_10M_MS] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_WIND_GUST_10M_MS] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_WIND_DIRECTION_10M_DEG] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_PRESSURE_MSL_HPA] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_VISIBILITY_KM] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_CLOUD_COVER_LOW_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_CLOUD_COVER_MID_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_CLOUD_COVER_HIGH_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_PRECIP_AMOUNT_MM] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_PRECIP_PROBABILITY_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_TEMPERATURE_DEW_POINT_C] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_TEMPERATURE_APPARENT_C] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_PRECIP_THUNDERSTORM_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_WEATHER_FOG_PROBABILITY_PCT] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_ENERGY_FX_SEK_PER_EUR] = SS_INTERP_POLICY_LINEAR,
+    [SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH] = SS_INTERP_POLICY_STEP,
+    [SS_METRIC_ENERGY_PRICE_SPOT_EUR_KWH] = SS_INTERP_POLICY_STEP,
+    [SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE] = SS_INTERP_POLICY_NONE,
+    [SS_METRIC_WEATHER_IS_DAY] = SS_INTERP_POLICY_NONE,
+};
+
 // Not all canonicals are interpolated the same way. Price data should never interpolate for example.
 ss_interp_policy ss_interpolation_policy(ss_metric_id canonical)
 {
-    switch (canonical) {
-        case SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C:
-        case SS_METRIC_WEATHER_HUMIDITY_RELATIVE_2M_PCT:
-        case SS_METRIC_WEATHER_WIND_SPEED_10M_MS:
-        case SS_METRIC_WEATHER_WIND_GUST_10M_MS:
-        case SS_METRIC_WEATHER_WIND_DIRECTION_10M_DEG:
-        case SS_METRIC_WEATHER_PRESSURE_MSL_HPA:
-        case SS_METRIC_WEATHER_VISIBILITY_KM:
-        case SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT:
-        case SS_METRIC_WEATHER_CLOUD_COVER_LOW_PCT:
-        case SS_METRIC_WEATHER_CLOUD_COVER_MID_PCT:
-        case SS_METRIC_WEATHER_CLOUD_COVER_HIGH_PCT:
-        case SS_METRIC_WEATHER_PRECIP_AMOUNT_MM:
-        case SS_METRIC_WEATHER_PRECIP_PROBABILITY_PCT:
-        case SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2:
-        case SS_METRIC_WEATHER_TEMPERATURE_DEW_POINT_C:
-        case SS_METRIC_WEATHER_TEMPERATURE_APPARENT_C:
-        case SS_METRIC_WEATHER_PRECIP_THUNDERSTORM_PCT:
-        case SS_METRIC_WEATHER_FOG_PROBABILITY_PCT:
-        case SS_METRIC_ENERGY_FX_SEK_PER_EUR:
-            return SS_INTERP_POLICY_LINEAR;
-
-        case SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH:
-        case SS_METRIC_ENERGY_PRICE_SPOT_EUR_KWH:
-            return SS_INTERP_POLICY_STEP;
-
-        case SS_METRIC_WEATHER_CONDITION_SYMBOL_CODE:
-        case SS_METRIC_WEATHER_IS_DAY:
-            return SS_INTERP_POLICY_NONE;
-
-        default:
-            return SS_INTERP_POLICY_INVALID;
+    if (canonical < 0 || canonical >= SS_METRIC_COUNT) {
+        return SS_INTERP_POLICY_INVALID;
     }
+    return g_interp_policy_by_metric[canonical];
 }
 
 bool ss_all_metrics_have_interpolation_policy(void)
@@ -202,6 +199,9 @@ static bool ss_find_prev_row(
     ss_raw_row *out)
 {
     size_t i;
+    int64_t candidate_ts = -1;
+    bool have_candidate = false;
+    ss_raw_row candidate = {0};
 
     if (rows == NULL || out == NULL || count == 0U) {
         return false;
@@ -213,7 +213,23 @@ static bool ss_find_prev_row(
         if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
             continue;
         }
-        *out = rows[i];
+        if (!have_candidate) {
+            candidate = rows[i];
+            candidate_ts = rows[i].ts_utc;
+            have_candidate = true;
+            continue;
+        }
+        if (rows[i].ts_utc == candidate_ts) {
+            // Rows are sorted newest-first inside each slot, so keep walking
+            // to end up on the newest entry when scanning backwards.
+            candidate = rows[i];
+            continue;
+        }
+        break;
+    }
+
+    if (have_candidate) {
+        *out = candidate;
         return true;
     }
 
@@ -243,12 +259,35 @@ static bool ss_find_prev_next_rows(
 
     i = first_gt;
     while (i > 0U) {
+        int64_t candidate_ts = -1;
+        bool have_candidate = false;
+        ss_raw_row candidate = {0};
         i -= 1U;
-        if (!ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast)) {
-            continue;
+        while (true) {
+            if (ss_data_kind_is_allowed(rows[i].data_kind, allow_observation, allow_forecast) &&
+                rows[i].ts_utc < ts_utc) {
+                if (!have_candidate) {
+                    candidate = rows[i];
+                    candidate_ts = rows[i].ts_utc;
+                    have_candidate = true;
+                } else if (rows[i].ts_utc == candidate_ts) {
+                    candidate = rows[i];
+                } else {
+                    break;
+                }
+            }
+
+            if (i == 0U) {
+                break;
+            }
+            if (rows[i - 1U].ts_utc != rows[i].ts_utc) {
+                break;
+            }
+            i -= 1U;
         }
-        if (rows[i].ts_utc < ts_utc) {
-            *out_prev = rows[i];
+
+        if (have_candidate) {
+            *out_prev = candidate;
             have_prev = true;
             break;
         }

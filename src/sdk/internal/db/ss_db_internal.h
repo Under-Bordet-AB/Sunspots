@@ -20,6 +20,13 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
     int64_t start_utc,
     ss_sdk_samples_out *out);
 
+ss_sdk_status ss_sdk_internal_db_clamp_end_utc(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t requested_end_utc,
+    int64_t *out_end_utc,
+    int *out_was_clamped);
+
 void ss_sdk_internal_db_free_samples(ss_sdk_samples_out *out);
 
 void ss_sdk_internal_db_shutdown(void);
