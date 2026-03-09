@@ -67,3 +67,22 @@ sunspots_apply_target_defaults(sdk_config_module_test)
 add_test(NAME sdk.config.module.test COMMAND sdk_config_module_test)
 set_tests_properties(sdk.config.module.test PROPERTIES LABELS "unit;component:sdk")
 sunspots_add_valgrind_test(sdk.config.module.test sdk_config_module_test)
+
+add_executable(backfill_worker_module_test
+  unit/backfill_worker_module_test.cpp
+)
+target_link_libraries(backfill_worker_module_test
+  PRIVATE
+    GTest::gtest_main
+    sunspots_sdk
+)
+target_compile_definitions(backfill_worker_module_test
+  PRIVATE
+    BACKFILL_BIN_PATH="$<TARGET_FILE:sunspots_backfill_openmeteo>"
+)
+add_dependencies(backfill_worker_module_test sunspots_backfill_openmeteo)
+target_compile_features(backfill_worker_module_test PRIVATE cxx_std_11)
+sunspots_apply_target_defaults(backfill_worker_module_test)
+add_test(NAME backfill.worker.module.test COMMAND backfill_worker_module_test)
+set_tests_properties(backfill.worker.module.test PROPERTIES LABELS "unit;component:backfill")
+sunspots_add_valgrind_test(backfill.worker.module.test backfill_worker_module_test)

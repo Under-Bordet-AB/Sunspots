@@ -65,6 +65,7 @@
       "start_immediately": true,
       "backfill": {
         "enabled": true,
+        "start_date_utc": "2025-01-01",
         "required_history_days": 14,
         "chunk_days": 7,
         "retry_max_attempts": 5,
@@ -74,7 +75,8 @@
         "max_requests_per_minute": 240,
         "max_requests_per_hour": 2000,
         "max_requests_per_day": 8000,
-        "progress_log_interval_sec": 10
+        "progress_log_interval_sec": 10,
+        "usage_daily_path": "logs/backfill_usage_daily.log"
       }
     },
     {

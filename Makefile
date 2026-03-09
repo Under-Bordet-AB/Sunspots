@@ -101,7 +101,7 @@ C_YELLOW := \033[33m
 C_RED := \033[31m
 endif
 
-.PHONY: help all build build-valgrind build-tests build-tests-valgrind run run-valgrind run-tests run-tests-valgrind list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-sunspots e2e e2e-valgrind clean deepclean
+.PHONY: help all build build-valgrind build-tests build-tests-valgrind run run-valgrind run-tests run-tests-valgrind list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
 
 help:
 	@printf "\nSunspots Make Targets\n\n"
@@ -124,6 +124,7 @@ help:
 	@printf "  %-26s %s\n" "make lizard" "Run lizard complexity checks on src/ and tests/"
 	@printf "  %-26s %s\n" "make warnings" "Build all lanes + refresh warning/analysis reports"
 	@printf "  %-26s %s\n" "make kill" "Kill all running Sunspots processes"
+	@printf "  %-26s %s\n" "make kill-all" "Graceful shutdown (5s) then force-kill daemon descendants"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make e2e" "Placeholder: not implemented yet"
 	@printf "  %-26s %s\n" "make e2e-valgrind" "Placeholder: not implemented yet"
@@ -1003,39 +1004,69 @@ e2e:
 	@printf "      planned: full system scenario runner\n"
 	@exit 2
 
-kill:
-	@printf "%b[run]%b kill Sunspots processes\n" "$(C_CYAN)" "$(C_RESET)"
-	@daemon_rows="$$(ps -eo pid=,stat=,comm= | awk '$$3 ~ /^sunspots_daemon/ && $$2 !~ /Z/ {printf "%s\t%s\t%s\n", $$1, $$2, $$3}')"; \
-	daemon_pids="$$(printf "%s\n" "$$daemon_rows" | awk -F'\t' 'NF>=1 {print $$1}' | tr '\n' ' ')"; \
-	if [ -n "$$daemon_pids" ]; then \
+kill: kill-all
+
+kill-all:
+	@printf "%b[run]%b graceful shutdown of Sunspots daemon tree\n" "$(C_CYAN)" "$(C_RESET)"
+	@ps_snapshot() { ps -eo pid=,ppid=,stat=,comm=; }; \
+	descendant_rows() { \
+		roots="$$1"; \
+		ps_snapshot | awk -v roots="$$roots" ' \
+			BEGIN { n = split(roots, root_arr, /[[:space:]]+/); for (i = 1; i <= n; ++i) if (root_arr[i] != "") wanted[root_arr[i]] = 1; changed = 1; } \
+			{ pid=$$1; ppid=$$2; stat=$$3; comm=$$4; rows[pid]=$$0; parent[pid]=ppid; } \
+			END { \
+				while (changed) { \
+					changed = 0; \
+					for (pid in parent) if (wanted[parent[pid]] && !wanted[pid]) { wanted[pid] = 1; changed = 1; } \
+				} \
+				for (pid in wanted) if (!(pid in rows)) delete wanted[pid]; \
+				for (pid in wanted) print rows[pid]; \
+			}'; \
+	}; \
+	print_rows() { \
+		printf "%s\n" "$$1" | awk 'NF >= 4 {printf "        pid=%s ppid=%s stat=%s name=%s\n", $$1, $$2, $$3, $$4}'; \
+	}; \
+	daemon_rows="$$(ps_snapshot | awk '$$4 ~ /^sunspots_daemon/ && $$3 !~ /Z/ {print}')"; \
+	daemon_pids="$$(printf "%s\n" "$$daemon_rows" | awk 'NF >= 1 {print $$1}' | tr '\n' ' ')"; \
+	if [ -z "$$daemon_pids" ]; then \
+		zombie_rows="$$(ps_snapshot | awk '($$4 ~ /^sunspots_/ || $$4 == "backfill") && $$3 ~ /Z/ {print}')"; \
+		zombie_count="$$(printf "%s\n" "$$zombie_rows" | awk 'NF >= 4 {c++} END {print c+0}')"; \
+		printf "      no running daemon found\n"; \
+		if [ "$$zombie_count" -gt 0 ]; then \
+			printf "      zombies detected: %s\n" "$$zombie_count"; \
+		fi; \
+		exit 0; \
+	else \
+		printf "      sending SIGTERM to daemon roots:\n"; \
+		print_rows "$$daemon_rows"; \
 		kill $$daemon_pids >/dev/null 2>&1 || true; \
-		printf "      sent SIGTERM to daemon:\n"; \
-		printf "%s\n" "$$daemon_rows" | awk -F'\t' 'NF>=3 {printf "        pid=%s stat=%s name=%s\n", $$1, $$2, $$3}'; \
-		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do \
-			remaining_daemons="$$(ps -eo pid=,stat=,comm= | awk '$$3 ~ /^sunspots_daemon/ && $$2 !~ /Z/ {print $$1}' | tr '\n' ' ')"; \
+		printf "      waiting up to 5s for graceful shutdown\n"; \
+		for i in 1 2 3 4 5; do \
+			sleep 1; \
+			remaining_daemons="$$(ps_snapshot | awk '$$4 ~ /^sunspots_daemon/ && $$3 !~ /Z/ {print $$1}' | tr '\n' ' ')"; \
 			if [ -z "$$remaining_daemons" ]; then \
 				break; \
 			fi; \
-			sleep 0.1; \
 		done; \
 	fi; \
-	running_rows="$$(ps -eo pid=,stat=,comm= | awk '($$3 ~ /^sunspots_/ || $$3 == "backfill") && $$2 !~ /Z/ {printf "%s\t%s\t%s\n", $$1, $$2, $$3}')"; \
-	zombie_rows="$$(ps -eo pid=,stat=,comm= | awk '($$3 ~ /^sunspots_/ || $$3 == "backfill") && $$2 ~ /Z/ {printf "%s\t%s\t%s\n", $$1, $$2, $$3}')"; \
-	running_pids="$$(printf "%s\n" "$$running_rows" | awk -F'\t' 'NF>=1 {print $$1}' | tr '\n' ' ')"; \
-	zombie_count="$$(printf "%s\n" "$$zombie_rows" | awk -F'\t' 'NF>=3 {c++} END {print c+0}')"; \
+	all_rows="$$(descendant_rows "$$daemon_pids")"; \
+	running_rows="$$(printf "%s\n" "$$all_rows" | awk 'NF >= 4 && $$4 ~ /^sunspots_/ && $$3 !~ /Z/ {print} NF >= 4 && $$4 == "backfill" && $$3 !~ /Z/ {print}')"; \
+	zombie_rows="$$(printf "%s\n" "$$all_rows" | awk 'NF >= 4 && $$4 ~ /^sunspots_/ && $$3 ~ /Z/ {print} NF >= 4 && $$4 == "backfill" && $$3 ~ /Z/ {print}')"; \
+	running_pids="$$(printf "%s\n" "$$running_rows" | awk 'NF >= 1 {print $$1}' | tr '\n' ' ')"; \
+	zombie_count="$$(printf "%s\n" "$$zombie_rows" | awk 'NF >= 4 {c++} END {print c+0}')"; \
 	if [ -n "$$running_pids" ]; then \
 		kill -9 $$running_pids >/dev/null 2>&1 || true; \
-		printf "      force-killed remaining running processes:\n"; \
-		printf "%s\n" "$$running_rows" | awk -F'\t' 'NF>=3 {printf "        pid=%s stat=%s name=%s\n", $$1, $$2, $$3}'; \
+		printf "      force-killed remaining daemon descendants:\n"; \
+		print_rows "$$running_rows"; \
 	else \
-		printf "      graceful shutdown complete; no running sunspots processes found\n"; \
+		printf "      graceful shutdown complete; no remaining daemon descendants\n"; \
 	fi; \
 	if [ "$$zombie_count" -gt 0 ]; then \
-		printf "      %s zombies found\n" "$$zombie_count"; \
+		printf "      zombies detected: %s\n" "$$zombie_count"; \
 	fi
-	@printf "%b[ok]%b kill complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "%b[ok]%b kill-all complete\n" "$(C_GREEN)" "$(C_RESET)"
 
-kill-sunspots: kill
+kill-sunspots: kill-all
 
 e2e-valgrind:
 	@printf "%b[note]%b e2e-valgrind target is not yet implemented\n" "$(C_YELLOW)" "$(C_RESET)"
