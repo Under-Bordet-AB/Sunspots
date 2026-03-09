@@ -1,4 +1,5 @@
 #include <ctime>
+#include <cmath>
 #include <sstream>
 #include <iomanip>
 
@@ -33,4 +34,9 @@ std::string formatUnixTime(std::time_t unixTime)
     std::ostringstream oss;
     oss << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
     return oss.str();
+}
+
+double roundToTenth(double value) 
+{
+    return std::round(value * 20.0) / 20.0;
 }
