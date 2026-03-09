@@ -223,23 +223,22 @@ int wait_for_new_data() {
         syslog(LOG_INFO, "Compute Manager - Looking for fresh data...");
 
         const int64_t now = (int64_t)time(NULL);
-        const int64_t window_start = now - 90 * 60;
-        const int64_t window_end = now + 90 * 60;
+        const int64_t window_start = now;
 
-        ss_metric_id metrics[3] = {
-            // SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+        ss_metric_id metrics[4] = {
+            SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
             SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
-            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C
-            // SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH
         };
 
         int observed_metrics_found = 0;
 
-        for (int m = 0; m < 2; m++) {
+        for (int m = 0; m < 4; m++) {
             int metric_has_observed = 0;
 
             ss_sdk_samples_out samples = {0};
-            ss_sdk_status status = ss_sdk_db_get_canonical(window_start, 13, metrics[m], &samples);
+            ss_sdk_status status = ss_sdk_db_get_canonical(window_start, 0, metrics[m], &samples);
 
             if (status != SS_SDK_OK && status != SS_SDK_ERR_PARTIAL_DATA) {
                 syslog(LOG_ERR, "Compute Manager - ss_sdk_db_get_canonical_failed for metric=%d status=%d", (int)metrics[m], (int)status);
@@ -249,9 +248,9 @@ int wait_for_new_data() {
             for (size_t i = 0; i < samples.count; i++) {
                 const ss_sdk_sample* s = &samples.samples[i];
                 if (s->value_type != SS_SDK_VALUE_F64) continue;
-                if (s->ts_utc < window_start || s->ts_utc > window_end) continue;
+                if (s->ts_utc < window_start) continue;
 
-                if ((s->flags & SS_SDK_SAMPLE_OBSERVED) != 0) {
+                if (samples.count >= 96) {
                     metric_has_observed = 1;
                     break;
                 }
@@ -264,7 +263,7 @@ int wait_for_new_data() {
             }
         }
 
-        if (observed_metrics_found == 2) {
+        if (observed_metrics_found == 4) {
             syslog(LOG_INFO, "Compute Manager - Fresh data found!");
             return 0;
         }
