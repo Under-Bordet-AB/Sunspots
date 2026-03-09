@@ -356,6 +356,8 @@ void http_request_dispose(http_request** request_var)
             free((void*)request->path);
         if(request->headers != NULL)
             LinkedList_dispose(&request->headers, http_header_free);
+        if(request->query != NULL)
+            LinkedList_dispose(&request->query, http_query_free);
         free(request);
         *request_var = NULL;
     }
@@ -365,6 +367,16 @@ void http_header_free(void* header_var) {
     if(header_var)
     {
         http_header* hdr = (http_header*)header_var;
+        free((void*)hdr->Name);
+        free((void*)hdr->Value);
+        free(hdr);
+    }
+}
+
+void http_query_free(void* query_var) {
+    if(query_var)
+    {
+        http_query_param* hdr = (http_query_param*)query_var;
         free((void*)hdr->Name);
         free((void*)hdr->Value);
         free(hdr);

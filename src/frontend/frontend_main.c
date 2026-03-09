@@ -24,6 +24,10 @@ int main() {
 
     openlog("SUNSPOTS_HTTP_SERVER", LOG_PID, LOG_DAEMON);
 
+    int skipped = 1;
+    if(ALLOW_STANDALONE_EXEC)
+        goto skip;
+
     /* In any spawned module binary — replaces argv parsing */
     int    daemon_pid    = getppid();
     char  *sig_env       = getenv("SUNSPOTS_SIGNAL");
@@ -108,6 +112,10 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
+    skipped = 0;
+
+skip:
+
     syslog(LOG_INFO, "<frontend/frontend_main.c> Initializing HTTP server...");
     http_server* srv = http_init();
     if(!srv)
@@ -125,15 +133,18 @@ int main() {
 
     while(1)
     {
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        int64_t elapsed_ns = (int64_t)(now.tv_sec - last.tv_sec) * 1000000000LL + (now.tv_nsec - last.tv_nsec);
-        if(elapsed_ns >= hb_interval * 1000000000LL)
+        if(!skipped)
         {
-            if (kill(daemon_pid, sig_number) == -1) {
-                syslog(LOG_ERR, "<frontend/frontend_main.c> Could not signal daemon, panic!!!");
-                exit(EXIT_FAILURE);
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            int64_t elapsed_ns = (int64_t)(now.tv_sec - last.tv_sec) * 1000000000LL + (now.tv_nsec - last.tv_nsec);
+            if(elapsed_ns >= hb_interval * 1000000000LL)
+            {
+                if (kill(daemon_pid, sig_number) == -1) {
+                    syslog(LOG_ERR, "<frontend/frontend_main.c> Could not signal daemon, panic!!!");
+                    exit(EXIT_FAILURE);
+                }
+                last = now;
             }
-            last = now;
         }
 
         int count = http_accept(srv);
