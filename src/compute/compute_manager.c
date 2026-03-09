@@ -48,8 +48,7 @@ int compute(const compute_data_t* data, result_t* out_result);
 int save_result(const result_t* result, int horizon_len);
 
 // Utilities
-int save_forecast(const compute_data_t* data, int horizon_len);
-int save_elpris(const compute_data_t* data, int horizon_len);
+int export_forecast(const compute_data_t* data, int horizon_len);
 
 //          MAIN           //
 //*************************//
@@ -362,7 +361,7 @@ int load_data(compute_data_t* out) {
         return -1;
     }
 
-    if (save_forecast(out, out->horizon_len) < 0) {
+    if (export_forecast(out, out->horizon_len) < 0) {
         syslog(LOG_ERR, "Compute Manager - Failed to save forecast data to endpoints folder.");
         return -1;
     }
@@ -454,7 +453,7 @@ int save_result(const result_t* result, int horizon_len) {
 //          UTILITIES           //
 //******************************//
 
-int save_forecast(const compute_data_t* data, int horizon_len) {
+int export_forecast(const compute_data_t* data, int horizon_len) {
     if (!data) return -1;
 
     if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
@@ -475,6 +474,7 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
     if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, SERIES_LEN, horizon_len) < 0 ||
         add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, SERIES_LEN, horizon_len) < 0 ||
         add_series_to_json(forecast_obj, "temperature", data->temperature, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "spot-price", data->price_kwh, SERIES_LEN, horizon_len) < 0 ||
         add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, SERIES_LEN, horizon_len)) {
         cJSON_Delete(forecast_obj);
         cJSON_Delete(root);

@@ -1,56 +1,74 @@
+#include <string.h>
 #include <time.h>
+#include <syslog.h>
+#include <curl/curl.h>
 #include "../libs/json/cJSON.h"
 #include "../libs/curly.h"
 
+typedef struct {
+    char* data;
+    size_t size;
+} memory;
+
+static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t realsize = size * nmemb;
+    memory* mem = (memory*)userp;
+
+    char* ptr = realloc(mem->data, mem->size + realsize + 1);
+    if (ptr == NULL) {
+        return 0;
+    }
+
+    mem->data = ptr;
+
+    memcpy(&(mem->data[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->data[mem->size] = 0;
+
+    return realsize;
+}
+
 int fetch_from_url(char* url, char** buffer, int timeout) {
-    curly_t* curly = NULL;
-    if (curly_init(&curly) < 0) {
-        printf("Curly failed to initiate\n");
+    CURL* curl;
+    CURLcode res;
+    memory chunk = {0};
+
+    if (url == NULL || buffer == NULL || timeout <= 0) {
         return -1;
     }
 
-    if (curly_make_request(&curly, url) < 0) {
-        printf("Request failed\n");
-        curly_cleanup(&curly);
+    *buffer = NULL;
+
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+        syslog(LOG_WARNING, "curl_global_init failed.");
         return -1;
     }
 
-    int iterations = 0;
-    int max_iterations = timeout * 10;
-
-    while (curly_poll(&curly) == 0) {
-        if (curly_is_running(&curly) == 0) {
-            break;
-        }
-
-        iterations++;
-        if (iterations > max_iterations) {
-            printf("Fetching from URL timed out\n");
-            curly_cleanup(&curly);
-            return -1;
-        }
-
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 10 * 1000 * 1000;
-        nanosleep(&ts, NULL);
-    }
-
-    char* response = NULL;
-    if (curly_read_response(&curly, &response) < 0) {
-        printf("Reading response failed\n");
-        curly_cleanup(&curly);
+    curl = curl_easy_init();
+    if (curl == NULL) {
+        syslog(LOG_WARNING, "curl_easy_init failed.");
+        curl_global_cleanup();
         return -1;
     }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&chunk);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+
+    res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        syslog(LOG_WARNING, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        curl_easy_cleanup(curl);
+        curl_global_cleanup();
+        free(chunk.data);
+        return -1;
+    }
+
     
-    if (response) {
-        *buffer = response;
-    }
-
-    if (curly_cleanup(&curly) < 0) {
-        printf("Failed to cleanup curly\n");
-        return -1;
-    }
-
+    curl_easy_cleanup(curl);
+    curl_global_cleanup();
+    
+    *buffer = chunk.data;
     return 0;
 }
