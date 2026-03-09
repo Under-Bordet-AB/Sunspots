@@ -30,25 +30,52 @@
       "name": "Elprisjustnu",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_elprisjustnu",
       "Timer-type": 1,
-      "Rel-time": 50
+      "Rel-time": 50,
+      "start_at_boot": 1
     },
     {
       "name": "ComputeManager",
       "bin_path": "./build/debug/src/compute/sunspots_compute_manager",
       "Timer-type": 1,
-      "Rel-time": 60
+      "Rel-time": 60,
+      "compute_method": 0,
+      "exp_backoff_poll_rate": 3,
+      "exp_backoff_timeout": 5400,
+      "start_at_boot": 1
     },
     {
       "name": "Openmeteo",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo",
       "Timer-type": 1,
-      "Rel-time": 30
+      "Rel-time": 30,
+      "start_at_boot": 1
     },
     {
       "name": "Openmeteo_forecast",
       "bin_path": "./build/debug/src/fetch/apis/sunspots_fetch_openmeteo_forecast",
       "Timer-type": 1,
-      "Rel-time": 100
+      "Rel-time": 100,
+      "start_at_boot": 1
+    },
+    {
+      "name": "BackfillOpenMeteo",
+      "bin_path": "./build/debug/src/backfill/sunspots_backfill_openmeteo",
+      "Timer-type": 1,
+      "Rel-time": 86400,
+      "start_immediately": true,
+      "backfill": {
+        "enabled": true,
+        "required_history_days": 14,
+        "chunk_days": 7,
+        "retry_max_attempts": 5,
+        "retry_base_backoff_ms": 1000,
+        "freshness_lag_minutes": 120,
+        "request_interval_ms": 250,
+        "max_requests_per_minute": 240,
+        "max_requests_per_hour": 2000,
+        "max_requests_per_day": 8000,
+        "progress_log_interval_sec": 10
+      }
     },
     {
       "name": "Frontend",

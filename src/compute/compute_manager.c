@@ -21,10 +21,17 @@
 #define ENDPOINTS_FORECAST_FILE "endpoints/forecast.json"
 #define SLOT_SECONDS 900
 
+int g_compute_method = 0;
+int g_exp_backoff_poll_rate = 3;
+int g_exp_backoff_timeout = 5 * 60;
+
 void cleanup(void);
 
 //          FORWARD DECLARATIONS           //
 //*****************************************//
+
+// Environment variables
+int fetch_env_vars();
 
 // Load data
 int wait_for_new_data();
@@ -53,6 +60,11 @@ int main() {
 
     compute_data_t data;
     result_t result = {0};
+
+    if (fetch_env_vars() < 0) {
+        syslog(LOG_ERR, "Compute Manager - Unable to fetch environment variables.");
+        return EXIT_FAILURE;
+    }
 
     if (wait_for_new_data() < 0) {
         syslog(LOG_ERR, "Compute Manager - No new data detected.");
@@ -83,13 +95,103 @@ void cleanup(void) {
     closelog();
 }
 
+int fetch_env_vars() {
+    const char* blob_config = getenv("SUNSPOTS_CONFIG");
+
+    if (blob_config == NULL || blob_config[0] == '\0') {
+        syslog(LOG_WARNING, "Compute Manager - SUNSPOTS_CONFIG missing.");
+        return -1;
+    }
+
+    cJSON* root = cJSON_Parse(blob_config);
+    if (!root) {
+        syslog(LOG_WARNING, "Compute Manager - Invalid SUNSPOTS_CONFIG JSON.");
+        return -1;
+    }
+
+    cJSON* config_obj = cJSON_GetObjectItemCaseSensitive(root, "system");
+    if (!cJSON_IsObject(config_obj)) {
+        config_obj = root;
+    }
+
+    cJSON* method_obj = cJSON_GetObjectItemCaseSensitive(config_obj, "compute_method");
+    cJSON* exp_backoff_poll_rate_obj = cJSON_GetObjectItemCaseSensitive(config_obj, "exp_backoff_poll_rate");
+    cJSON* exp_backoff_timeout_obj = cJSON_GetObjectItemCaseSensitive(config_obj, "exp_backoff_timeout");
+
+    if (!cJSON_IsNumber(method_obj)) {
+        syslog(LOG_WARNING, "Compute Manager - Missing/invalid compute_method.");
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    if (!cJSON_IsNumber(exp_backoff_poll_rate_obj)) {
+        syslog(LOG_WARNING, "Compute Manager - Missing/invalid exp_backoff_poll_rate.");
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    if (!cJSON_IsNumber(exp_backoff_timeout_obj)) {
+        syslog(LOG_WARNING, "Compute Manager - Missing/invalid exp_backoff_timeout.");
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    double method_d = method_obj->valuedouble;
+    double poll_rate_d = exp_backoff_poll_rate_obj->valuedouble;
+    double timeout_d = exp_backoff_timeout_obj->valuedouble;
+
+    /* Enforce integer-only config values */
+    if (method_d != (double)(int)method_d ||
+        poll_rate_d != (double)(int)poll_rate_d ||
+        timeout_d != (double)(int)timeout_d) {
+        syslog(LOG_WARNING, "Compute Manager - compute_method, exp_backoff_poll_rate and exp_backoff_timeout must be integers.");
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    int method = (int)method_d;
+    int poll_rate = (int)poll_rate_d;
+    int timeout = (int)timeout_d;
+
+    if (method < 0 || method > 1) {
+        syslog(LOG_WARNING, "Compute Manager - compute_method out of range: %d", method);
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    if (poll_rate < 1) {
+        syslog(LOG_WARNING, "Compute Manager - poll_rate must be > 0 (got %d)", poll_rate);
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    if (timeout < 300) {
+        syslog(LOG_WARNING, "Compute Manager - exp_backoff_timeout must be >= 300 (got %d)", timeout);
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    if (timeout < poll_rate) {
+        syslog(LOG_WARNING, "Compute Manager - exp_backoff_timeout (%d) must be >= exp_backoff_poll_rate (%d)", timeout, poll_rate);
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    g_compute_method = method;
+    g_exp_backoff_poll_rate = poll_rate;
+    g_exp_backoff_timeout = timeout;
+
+    syslog(LOG_INFO, "Compute Manager - Config loaded: compute_method=%d exp_backoff_poll_rate=%d exp_backoff_timeout=%d", g_compute_method, g_exp_backoff_poll_rate, g_exp_backoff_timeout);
+
+    cJSON_Delete(root);
+    return 0;
+}
+
 //          LOAD DATA           //
 //******************************//
 
 int wait_for_new_data() {
-    const int poll_seconds = 3;
-    const int timeout_seconds = 5 * 60; // 5 minutes
-    const int max_cycles = timeout_seconds / poll_seconds;
+    const int max_cycles = g_exp_backoff_timeout / g_exp_backoff_poll_rate;
 
     int cycles = 0;
 
@@ -99,15 +201,15 @@ int wait_for_new_data() {
         const int64_t window_end = now + 90 * 60;
 
         ss_metric_id metrics[3] = {
-            SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
+            // SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
             SS_METRIC_WEATHER_CLOUD_COVER_TOTAL_PCT,
-            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
+            SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C
+            // SS_METRIC_ENERGY_PRICE_SPOT_SEK_KWH
         };
 
         int observed_metrics_found = 0;
 
-        for (int m = 0; m < 3; m++) {
-            printf("Looking for samples...\n");
+        for (int m = 0; m < 2; m++) {
             int metric_has_observed = 0;
 
             ss_sdk_samples_out samples = {0};
@@ -122,10 +224,8 @@ int wait_for_new_data() {
                 const ss_sdk_sample* s = &samples.samples[i];
                 if (s->value_type != SS_SDK_VALUE_F64) continue;
                 if (s->ts_utc < window_start || s->ts_utc > window_end) continue;
-                printf("Sample found: %d\n", i);
 
                 if ((s->flags & SS_SDK_SAMPLE_OBSERVED) != 0) {
-                    printf("Observed metric found.\n");
                     metric_has_observed = 1;
                     break;
                 }
@@ -138,12 +238,13 @@ int wait_for_new_data() {
             }
         }
 
-        if (observed_metrics_found == 3) {
-            return 0; // all required weather metrics observed
+        if (observed_metrics_found == 2) {
+            syslog(LOG_INFO, "Compute Manager - Fresh data found!");
+            return 0;
         }
 
         cycles++;
-        sleep(poll_seconds);
+        sleep(g_exp_backoff_poll_rate);
     }
 
     syslog(LOG_WARNING, "Compute Manager - Timeout waiting for new observed weather data.");
@@ -230,6 +331,18 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
     return 0;
 }
 
+void log_time(const char *label, time_t t)
+{
+    char buf[64];
+    struct tm tm;
+
+    localtime_r(&t, &tm);
+
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+
+    syslog(LOG_INFO, "%s: %s", label, buf);
+}
+
 int load_data(compute_data_t* out) {
     if (!out) return -1;
 
@@ -244,12 +357,21 @@ int load_data(compute_data_t* out) {
     local_tm.tm_sec = 0;
     local_tm.tm_mday += 1;
 
-    const int64_t start_slot = ((int64_t)time(NULL) / SLOT_SECONDS) * SLOT_SECONDS;
-    const int64_t end_slot = (int64_t)mktime(&local_tm);
+    const int64_t start_slot = (now / SLOT_SECONDS) * SLOT_SECONDS;
+    int64_t end_slot = (int64_t)mktime(&local_tm);
+    end_slot = start_slot + ((60 * 60) * 24);
+
+    time_t start = start_slot;
+    time_t end = end_slot;
+
+    // log_time("start_slot", start);
+    // log_time("end_slot", end);
 
     int horizon_slots = (int)((end_slot - start_slot) / SLOT_SECONDS);
     if (horizon_slots < 0) horizon_slots = 0;
     if (horizon_slots > SERIES_LEN) horizon_slots = SERIES_LEN;
+
+    // syslog(LOG_INFO, "horizon_slots: %d", horizon_slots);
 
     ss_metric_id metrics[4] =  {
         SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
@@ -274,6 +396,8 @@ int load_data(compute_data_t* out) {
             return -1;
         }
 
+        // syslog(LOG_INFO, "Samples found: %zu", samples.count);
+
         for (size_t i = 0; i < samples.count; i++) {
             const ss_sdk_sample* s = &samples.samples[i];
 
@@ -294,6 +418,8 @@ int load_data(compute_data_t* out) {
     }
 
     out->horizon_len = count_horizon_len_from_inputs(out, horizon_slots);
+
+    // syslog(LOG_INFO, "horizon_len: %d", out->horizon_len);
 
     if (out->horizon_len <= 0) {
         syslog(LOG_ERR, "Compute Manager - No usable elpris slots.");
@@ -326,8 +452,7 @@ int compute(const compute_data_t* data, result_t* out_result) {
 
     init_result_data(out_result);
 
-    int compute_method = 0;
-    switch (compute_method) {
+    switch (g_compute_method) {
         case 0:
             if (compute_heuristic(data, out_result) < 0) {
                 return -1;
