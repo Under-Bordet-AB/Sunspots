@@ -196,6 +196,8 @@ int wait_for_new_data() {
     int cycles = 0;
 
     while (cycles < max_cycles) {
+        syslog(LOG_INFO, "Compute Manager - Looking for fresh data...");
+
         const int64_t now = (int64_t)time(NULL);
         const int64_t window_start = now - 90 * 60;
         const int64_t window_end = now + 90 * 60;

@@ -43,8 +43,8 @@ struct module {
     long module_relative_time;     
     int module_timer_fd;           
     int module_heartbeat;
-    int module_start_at_boot;
-    int module_is_first_run;
+	int module_start_at_boot;
+	int module_is_first_run;
 };
 
 static char *module_read_conf_file(const char *filepath);
@@ -145,19 +145,13 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
 		new_table[i].system_config   = cJSON_PrintUnformatted(system);
         new_table[i].module_timer_fd = -1;
 
-        {
-            cJSON *start_at_boot = cJSON_GetObjectItemCaseSensitive(mod, "start_at_boot");
-            cJSON *start_immediately = cJSON_GetObjectItemCaseSensitive(mod, "start_immediately");
-
-            if (cJSON_IsNumber(start_at_boot)) {
-                new_table[i].module_start_at_boot = start_at_boot->valueint != 0;
-            } else if (cJSON_IsBool(start_immediately)) {
-                new_table[i].module_start_at_boot = cJSON_IsTrue(start_immediately) ? 1 : 0;
-            }
-            if (new_table[i].module_start_at_boot) {
-                new_table[i].module_is_first_run = 1;
-            }
-        }
+		/** Set flags for start at boot */
+		cJSON *sab = cJSON_GetObjectItemCaseSensitive(mod, "start_at_boot");
+		if (cJSON_IsNumber(sab))
+		{
+			new_table[i].module_start_at_boot = sab->valueint;
+			new_table[i].module_is_first_run  = 1;
+		}
 
         cJSON *t_flag = cJSON_GetObjectItemCaseSensitive(mod, "Timer-type");
         if (cJSON_IsNumber(t_flag) && t_flag->valueint == 1)
@@ -211,7 +205,7 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
 					new_table[j].module_pid      = old_table[k].module_pid;
 					new_table[j].module_alive    = old_table[k].module_alive;
 					new_table[j].module_timer_fd = old_table[k].module_timer_fd;
-                    new_table[j].module_is_first_run = old_table[k].module_is_first_run;
+					new_table[j].module_is_first_run = old_table[k].module_is_first_run;
 				}
 				else
 				{
@@ -326,6 +320,7 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig)
         self->module_pid   = p;
         self->module_alive = 1;
         syslog(LOG_INFO, "Execvp on: '%s' [PID %d]", self->module_name, p);
+		daemon_logger_send(self->module_name, "Started.");
     }
     close(pipefd[0]);
 }
@@ -413,15 +408,18 @@ void module_timer_config(module_t *self, int epoll_fd)
     }
 	else
 	{
-        if (self->module_start_at_boot && self->module_is_first_run)
-        {
-            its.it_value.tv_sec = 1;
-            self->module_is_first_run = 0;
-        }
-        else
-        {
-            its.it_value.tv_sec = self->module_relative_time;
-        }
+		if (self->module_start_at_boot && self->module_is_first_run)
+		{
+			/** Will run in 1 sec */
+			its.it_value.tv_sec = 1;
+			self->module_is_first_run = 0;
+		}
+		else
+		{
+			/** Use rel-time value and don't fire at boot */
+		    its.it_value.tv_sec = self->module_relative_time;	
+		}
+		/** Interval is always real value from self */
         its.it_interval.tv_sec = self->module_relative_time;
     }    
     timerfd_settime(self->module_timer_fd, timerfd_flags, &its, NULL);
