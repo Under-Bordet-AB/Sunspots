@@ -12,7 +12,7 @@ Menu::Menu() {}
 // Loads and shows menu with interactable options
 void Menu::show(PlanService &service)
 {
-    std::vector<std::string> options = {"Now", "Day", "Exit"};
+    std::vector<std::string> options = {"Live status", "Graph", "Exit"};
 
     while (true)
     {
@@ -24,7 +24,7 @@ void Menu::show(PlanService &service)
             {
                 // Option 1
                 clearScreen();
-                service.getNow();
+                if (!service.getResult()) break;
                 
                 std::atomic<bool> running(true);
                 std::thread updater([&]()
@@ -32,7 +32,7 @@ void Menu::show(PlanService &service)
                     while (running)
                     {
                         clearScreen();
-                        service.displayNow();
+                        service.displayLive();
 
                         std::this_thread::sleep_for(std::chrono::seconds(1));
                     }
@@ -51,14 +51,15 @@ void Menu::show(PlanService &service)
             case 1:
             {
                 // Option 2
-                // Show next 24 hours
                 clearScreen();
-                service.showDay();
+                if (!service.getResult()) break;
+                service.displayGraph();
 
                 while (Input::getArrowKey() != Input::Key::ENTER)
                 {
-                    clearScreen();
+                    // Don't do anything
                 }
+
                 break;
             }
             case 2:
