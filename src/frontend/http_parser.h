@@ -90,6 +90,9 @@ void http_request_dispose(http_request** request_var);
 // Helper function for http_request_dispose when freeing http_request->headers, converts void* to http_header*
 void http_header_free(void* header_var);
 
+// Helper function for http_request_dispose when freeing http_request->query, converts void* to http_query_param*
+void http_query_free(void* query_var);
+
 /*
 Initialize a new HTTP response struct from a status code and response body.
 If body is a null terminated string, bodyLen can be set to `HTTPRESPONSE_BODYLEN_AUTODETECT` and the value will evaluate to strlen(body)
