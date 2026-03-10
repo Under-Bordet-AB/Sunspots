@@ -39,12 +39,12 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig);
 /**
  * @brief Checks if heartbeat modules are alive; restarts them if hung or dead.
  */
-void module_health_check_all(module_t *array, int count, const char *prj_root_path, int heartbeat_sig);
+void module_health_check_all(module_t *self, int count, const char *prj_root_path, int heartbeat_sig);
 
 /**
  * @brief Identifies which module's timer triggered and reacts.
  */
-void module_handle_timer_event(module_t *array, int count, int timer_fd, 
+void module_handle_timer_event(module_t *self, int count, int timer_fd, 
                                const char *prj_root, int epoll_fd, int heartbeat_sig);
 
 /**
@@ -53,9 +53,9 @@ void module_handle_timer_event(module_t *array, int count, int timer_fd,
 void module_timer_config(module_t *self, int epoll_fd);
 
 /**
- * @brief Finds a module in an array based on its Process ID.
+ * @brief Finds a module in an self based on its Process ID.
  */
-module_t *module_find_by_pid(module_t *array, int count, pid_t pid);
+module_t *module_find_by_pid(module_t *self, int count, pid_t pid);
 
 /**
  * @breif Returns system config

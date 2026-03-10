@@ -325,50 +325,50 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig)
     close(pipefd[0]);
 }
 
-void module_health_check_all(module_t *array, int count, const char *prj_root_path, int heartbeat_sig)
+void module_health_check_all(module_t *self, int count, const char *prj_root_path, int heartbeat_sig)
 {
-    if (!array) return;
+    if (!self) return;
     for (int i = 0; i < count; i++)
     {
-        if (array[i].module_timertype != MODE_HEARTBEAT) continue;
-        if (array[i].module_pid <= 0)
+        if (self[i].module_timertype != MODE_HEARTBEAT) continue;
+        if (self[i].module_pid <= 0)
 		{
-            syslog(LOG_ERR, "Process '%s' terminated. Restarting.", array[i].module_name);
-            daemon_logger_send("DAEMON", "A process terminated, restarting.");
-            module_spawn(&array[i], prj_root_path, heartbeat_sig);
+            syslog(LOG_ERR, "Process '%s' terminated. Restarting.", self[i].module_name);
+            daemon_logger_send(self[i].module_name, "Terminated, restarting!");
+            module_spawn(&self[i], prj_root_path, heartbeat_sig);
         }
-        else if (!array[i].module_alive)
+        else if (!self[i].module_alive)
 		{
-            syslog(LOG_ERR, "Process '%s' hung (no heartbeat). Restarting.", array[i].module_name);
-			daemon_logger_send("DAEMON", "A process hung, restarting");
-            kill(array[i].module_pid, SIGKILL);
-            waitpid(array[i].module_pid, NULL, 0);
-            array[i].module_pid = 0;
-            module_spawn(&array[i], prj_root_path, heartbeat_sig);
+            syslog(LOG_ERR, "Process '%s' hung (no heartbeat). Restarting.", self[i].module_name);
+			daemon_logger_send(self[i].module_name, "Hung, restarting!");
+            kill(self[i].module_pid, SIGKILL);
+            waitpid(self[i].module_pid, NULL, 0);
+            self[i].module_pid = 0;
+            module_spawn(&self[i], prj_root_path, heartbeat_sig);
         }
         else
 		{
-            array[i].module_alive = 0;
+            self[i].module_alive = 0;
         }
     }
 }
 
-void module_handle_timer_event(module_t *array, int count, int timer_fd, const char *prj_root, int epoll_fd, int heartbeat_sig)
+void module_handle_timer_event(module_t *self, int count, int timer_fd, const char *prj_root, int epoll_fd, int heartbeat_sig)
 {
     for (int i = 0; i < count; i++)
 	{
-        if (array[i].module_timer_fd == timer_fd)
+        if (self[i].module_timer_fd == timer_fd)
 		{
             uint64_t exp;
             if (read(timer_fd, &exp, sizeof(exp)) > 0)
 			{
-                if (array[i].module_pid <= 0)
+                if (self[i].module_pid <= 0)
 				{
-                    module_spawn(&array[i], prj_root, heartbeat_sig);
+                    module_spawn(&self[i], prj_root, heartbeat_sig);
                 }
-                if (array[i].module_timertype == MODE_ABSTIME)
+                if (self[i].module_timertype == MODE_ABSTIME)
 				{
-                    module_timer_config(&array[i], epoll_fd);
+                    module_timer_config(&self[i], epoll_fd);
                 }
             }
             break;
@@ -444,12 +444,12 @@ void module_set_alive(module_t *self, int value)
 	if (self) self->module_alive = value;
 }
 
-module_t *module_find_by_pid(module_t *array, int count, pid_t pid)
+module_t *module_find_by_pid(module_t *self, int count, pid_t pid)
 {
-    if (!array) return NULL;
+    if (!self) return NULL;
     for (int i = 0; i < count; i++)
 	{
-        if (array[i].module_pid == pid) return &array[i];
+        if (self[i].module_pid == pid) return &self[i];
     }
     return NULL;
 }

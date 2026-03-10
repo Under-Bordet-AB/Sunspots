@@ -60,7 +60,7 @@ static inline void daemon_logger_send(const char *sending_module, const char *ms
 	struct tm *now = localtime(&tv.tv_sec);
 	
     /** Send message to file via socket */
-	len = snprintf(buf, sizeof(buf), "%02d:%02d:%02d | %s »» %s", now->tm_hour,
+	len = snprintf(buf, sizeof(buf), "%02d:%02d:%02d | %s -> %s", now->tm_hour,
 				   now->tm_min,
 				   now->tm_sec,
 				   sending_module,
