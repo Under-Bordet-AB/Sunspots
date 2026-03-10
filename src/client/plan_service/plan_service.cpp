@@ -9,7 +9,7 @@
 
 namespace
 {
-bool reportIfFailed(const HttpResponse& response, const char* endpoint)
+bool responseSucceeded(const HttpResponse& response, const char* endpoint)
 {
     if (response.hasError())
     {
@@ -34,7 +34,7 @@ PlanService::PlanService(HttpClient &client) : client(client){}
 bool PlanService::getResult()
 {
     HttpResponse response = client.get(Config::PATH_SHOW_RESULT);
-    if (reportIfFailed(response, Config::PATH_SHOW_RESULT))
+    if (responseSucceeded(response, Config::PATH_SHOW_RESULT))
         return false;
 
     cachedResult = parseResponse(response.body);
@@ -73,32 +73,56 @@ void PlanService::displayLive()
 
 void PlanService::displayGraph()
 {
-    
-
     constexpr double y_axis = 21;
     constexpr double x_axis = 96;
 
-    std::cout << std::string(103, '_') << std::endl;
+    std::cout << " " << std::string(104, '_') << std::endl;
     for (int i = 0; i < y_axis; i++)     // Y-Axis
     {
         double resultValue = std::round((1.0 - (i * 0.05)) * 20.0) / 20.0;
-        std::cout << std::fixed << std::setprecision(2) << resultValue << " - ";
+        std::cout << "| " << std::fixed << std::setprecision(2) << resultValue << " - ";
 
         for (int j = 0; j < x_axis; j++) // X-Axis
         {
-            if (resultValue == roundToTenth(cachedResult.buy_electricity[j]))
+            // Determine if a dot should be drawn at this coordinate
+            auto shouldDraw = [&](const std::vector<double>& data) -> bool 
+            {
+                double currentVal = roundToTenth(data[j]);
+                
+                if (resultValue == currentVal)
+                    return true;
+                
+                // Draw connecting line
+                if (j > 0)
+                {
+                    double prevVal = roundToTenth(data[j-1]);
+                    if (prevVal != currentVal)
+                    {
+                        double minVal = std::min(prevVal, currentVal);
+                        double maxVal = std::max(prevVal, currentVal);
+                        
+                        // Draw if we're between the two values
+                        if (resultValue > minVal && resultValue < maxVal)
+                            return true;
+                    }
+                }
+                
+                return false;
+            };
+            
+            if (shouldDraw(cachedResult.buy_electricity))
             {
                 std::cout << "\033[31m●\033[0m";
             }
-            else if (resultValue == roundToTenth(cachedResult.direct_use[j]))
+            else if (shouldDraw(cachedResult.direct_use))
             {
                 std::cout << "\033[32m●\033[0m";
             }
-            else if (resultValue == roundToTenth(cachedResult.charge_battery[j]))
+            else if (shouldDraw(cachedResult.charge_battery))
             {
                 std::cout << "\033[33m●\033[0m";
             }
-            else if (resultValue == roundToTenth(cachedResult.sell_excess[j]))
+            else if (shouldDraw(cachedResult.sell_excess))
             {
                 std::cout << "\033[34m●\033[0m";
             }
@@ -108,17 +132,56 @@ void PlanService::displayGraph()
             }
             else
             {
-                std::cout << " ";
+                std::cout << "-";
             }
         }
 
         resultValue -= 0.05;
         std::cout << "|" << std::endl;
     }
-    std::cout << "        \033[31m | Buy Electricity |\033[0m        \033[32m| Direct Use |\033[0m        \033[33m| Charge Battery |\033[0m        \033[34m| Sell Excess |\033[0m" << std::endl;
-
-    while (true);
     
+    // Hour tick marks
+    std::cout << "         ";
+    for (int j = 0; j <= x_axis; j++)
+    {
+        if (j % 4 == 0)  // Every hour (4 quarters = 1 hour)
+            std::cout << "|";
+        else
+            std::cout << " ";
+    }
+    std::cout << std::endl;
+    
+    // Time labels
+    std::cout << "      ";
+    for (int j = 0; j <= x_axis; j++)
+    {
+        if (j % 12 == 0 && j + 1 < x_axis)  // Every 3 hours
+        {
+            // Calculate actual time for this quarter
+            std::time_t quarterTime = dataStartTime + (j * 15 * 60);
+            std::tm* tm = std::localtime(&quarterTime);
+            
+            std::cout << " " << std::setw(2) << std::setfill('0') << tm->tm_hour << ":" 
+                      << std::setw(2) << std::setfill('0') << tm->tm_min << std::setfill(' ');
+            j += 5; // Skip positions
+        }
+        else if (j == x_axis)
+        {
+            std::time_t quarterTime = dataStartTime + (x_axis * 15 * 60);
+            std::tm* tm = std::localtime(&quarterTime);
+            
+            std::cout << " " << std::setw(2) << std::setfill('0') << tm->tm_hour << ":" 
+                      << std::setw(2) << std::setfill('0') << tm->tm_min << std::setfill(' ');
+            break;
+        }
+        else
+        {
+            std::cout << " ";
+        }
+    }
+    std::cout << std::endl;
+    std::cout << "\n        \033[31m ● Buy Electricity\033[0m        \033[32m● Direct Use\033[0m        \033[33m● Charge Battery\033[0m        \033[34m● Sell Excess\033[0m" << std::endl;
+    std::cout << "Back < " << std::endl;
 }
 
 Result PlanService::parseResponse(const std::string &buffer)
@@ -202,7 +265,7 @@ Result PlanService::parseResponse(const std::string &buffer)
     fillVector(sel, result.sell_excess);
 
     result.timestamp = formatUnixTime(ts);
-    data_start_time = ts;  // Store the data start time for quarter offset calculation
+    dataStartTime = ts;  // Store the data start time for quarter offset calculation
     
     cJSON_Delete(root);
     return result;
@@ -213,18 +276,18 @@ int PlanService::getCurrentQuarterIndex()
     std::time_t now = std::time(nullptr);
     std::tm* tm = std::localtime(&now);
 
-    int current_hour = tm->tm_hour;
-    int current_minute = tm->tm_min;
-    int current_quarter = current_hour * 4 + (current_minute / 15);
+    int currentHour = tm->tm_hour;
+    int currentMinute = tm->tm_min;
+    int currentQuarter = currentHour * 4 + (currentMinute / 15);
 
     // Parse the data start timestamp to get its quarter
-    std::tm* data_tm = std::localtime(&data_start_time);
-    int data_hour = data_tm->tm_hour;
-    int data_minute = data_tm->tm_min;
-    int data_quarter = data_hour * 4 + (data_minute / 15);
+    std::tm* data_tm = std::localtime(&dataStartTime);
+    int dataHour = data_tm->tm_hour;
+    int dataMinute = data_tm->tm_min;
+    int dataQuarter = dataHour * 4 + (dataMinute / 15);
 
     // Return the offset from data start
-    int offset = current_quarter - data_quarter;
+    int offset = currentQuarter - dataQuarter;
     
     // Handle day wraparound
     if (offset < 0)

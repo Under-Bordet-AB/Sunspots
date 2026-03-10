@@ -27,7 +27,7 @@ class PlanService
    private:
     HttpClient client;
     Result cachedResult;
-    std::time_t data_start_time = 0;
+    std::time_t dataStartTime = 0;
 
     Result parseResponse(const std::string &buffer);
     int getCurrentQuarterIndex();
