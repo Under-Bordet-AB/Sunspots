@@ -250,7 +250,7 @@ int wait_for_new_data() {
                 if (s->value_type != SS_SDK_VALUE_F64) continue;
                 if (s->ts_utc < window_start) continue;
 
-                if (samples.count >= 96) {
+                if (samples.count >= 6) {
                     metric_has_observed = 1;
                     break;
                 }
