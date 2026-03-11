@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 extern "C" {
+#include "backfill/backfill_config.h"
 #include "sdk/ss_sdk.h"
 }
 
@@ -1047,4 +1048,122 @@ TEST_F(BackfillWorkerFixture, price_backfill_fails_when_elprisomrade_is_missing)
 
     EXPECT_EQ(run_price_backfill_binary_once(), 1);
     EXPECT_EQ(count_dir_files(db_dir_), (size_t)0);
+}
+
+TEST(BackfillConfigParseTest, perfmode_slow_applies_conservative_rate_limits)
+{
+    ScopedEnvVar cfg_guard("SUNSPOTS_CONFIG");
+    ScopedEnvVar sys_guard("SUNSPOTS_SYSTEM");
+    backfill_config cfg;
+    const char *config_blob =
+        "{"
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"perfmode\":\"slow\""
+        "}"
+        "}";
+    const char *system_blob =
+        "{\"location\":{\"id\":\"test-home\",\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", config_blob, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", system_blob, 1), 0);
+
+    backfill_config_parse(&cfg);
+
+    EXPECT_STREQ(cfg.perfmode, "slow");
+    EXPECT_EQ(cfg.chunk_days, 1);
+    EXPECT_EQ(cfg.process_nice, 19);
+    EXPECT_EQ(cfg.request_interval_ms, 5000);
+    EXPECT_EQ(cfg.max_requests_per_minute, 10);
+    EXPECT_EQ(cfg.max_requests_per_hour, 120);
+    EXPECT_EQ(cfg.max_requests_per_day, 500);
+}
+
+TEST(BackfillConfigParseTest, explicit_rate_limits_override_perfmode_preset)
+{
+    ScopedEnvVar cfg_guard("SUNSPOTS_CONFIG");
+    ScopedEnvVar sys_guard("SUNSPOTS_SYSTEM");
+    backfill_config cfg;
+    const char *config_blob =
+        "{"
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"perfmode\":\"slow\","
+        "\"request_interval_ms\":300,"
+        "\"max_requests_per_minute\":40,"
+        "\"max_requests_per_hour\":300,"
+        "\"max_requests_per_day\":1500"
+        "}"
+        "}";
+    const char *system_blob =
+        "{\"location\":{\"id\":\"test-home\",\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", config_blob, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", system_blob, 1), 0);
+
+    backfill_config_parse(&cfg);
+
+    EXPECT_STREQ(cfg.perfmode, "slow");
+    EXPECT_EQ(cfg.chunk_days, 1);
+    EXPECT_EQ(cfg.process_nice, 19);
+    EXPECT_EQ(cfg.request_interval_ms, 300);
+    EXPECT_EQ(cfg.max_requests_per_minute, 40);
+    EXPECT_EQ(cfg.max_requests_per_hour, 300);
+    EXPECT_EQ(cfg.max_requests_per_day, 1500);
+}
+
+TEST(BackfillConfigParseTest, perfmode_fast_applies_aggressive_rate_limits)
+{
+    ScopedEnvVar cfg_guard("SUNSPOTS_CONFIG");
+    ScopedEnvVar sys_guard("SUNSPOTS_SYSTEM");
+    backfill_config cfg;
+    const char *config_blob =
+        "{"
+        "\"backfill\":{"
+        "\"enabled\":true,"
+        "\"perfmode\":\"fast\""
+        "}"
+        "}";
+    const char *system_blob =
+        "{\"location\":{\"id\":\"test-home\",\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", config_blob, 1), 0);
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", system_blob, 1), 0);
+
+    backfill_config_parse(&cfg);
+
+    EXPECT_STREQ(cfg.perfmode, "fast");
+    EXPECT_EQ(cfg.chunk_days, 7);
+    EXPECT_EQ(cfg.process_nice, 0);
+    EXPECT_EQ(cfg.request_interval_ms, 100);
+    EXPECT_EQ(cfg.max_requests_per_minute, 550);
+    EXPECT_EQ(cfg.max_requests_per_hour, 4500);
+    EXPECT_EQ(cfg.max_requests_per_day, 9000);
+}
+
+TEST(BackfillConfigParseTest, legacy_perfmode_names_still_map_to_new_modes)
+{
+    ScopedEnvVar cfg_guard("SUNSPOTS_CONFIG");
+    ScopedEnvVar sys_guard("SUNSPOTS_SYSTEM");
+    backfill_config cfg;
+    const char *system_blob =
+        "{\"location\":{\"id\":\"test-home\",\"name\":\"Test location\",\"latitude\":59.3293,\"longitude\":18.0686,\"elprisomrade\":\"SE3\"}}";
+
+    ASSERT_EQ(setenv("SUNSPOTS_SYSTEM", system_blob, 1), 0);
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", "{\"backfill\":{\"perfmode\":\"low\"}}", 1), 0);
+    backfill_config_parse(&cfg);
+    EXPECT_STREQ(cfg.perfmode, "slow");
+    EXPECT_EQ(cfg.chunk_days, 1);
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", "{\"backfill\":{\"perfmode\":\"quiet\"}}", 1), 0);
+    backfill_config_parse(&cfg);
+    EXPECT_STREQ(cfg.perfmode, "slow");
+    EXPECT_EQ(cfg.chunk_days, 1);
+
+    ASSERT_EQ(setenv("SUNSPOTS_CONFIG", "{\"backfill\":{\"perfmode\":\"high\"}}", 1), 0);
+    backfill_config_parse(&cfg);
+    EXPECT_STREQ(cfg.perfmode, "fast");
+    EXPECT_EQ(cfg.chunk_days, 7);
+    EXPECT_EQ(cfg.request_interval_ms, 100);
 }

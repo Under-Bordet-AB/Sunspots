@@ -2,8 +2,10 @@
 
 #include "backfill_common.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <time.h>
 
 int64_t backfill_align_to_slot(int64_t ts_utc)
@@ -123,4 +125,19 @@ int backfill_epoch_to_ymdhm_utc(int64_t ts_utc, char out[17])
         return -1;
     }
     return 0;
+}
+
+int backfill_apply_process_priority(const backfill_config *cfg)
+{
+    if (cfg == NULL) {
+        return -1;
+    }
+    if (cfg->process_nice <= 0) {
+        return 0;
+    }
+    errno = 0;
+    if (setpriority(PRIO_PROCESS, 0, cfg->process_nice) != 0) {
+        return -1;
+    }
+    return 1;
 }

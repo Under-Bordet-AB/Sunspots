@@ -66,15 +66,16 @@
       "start_at_boot": 1,
       "backfill": {
         "enabled": true,
+        "perfmode": "fast",
         "start_date_utc": "2026-03-01",
-        "chunk_days": 7,
+        "chunk_days": 1,
         "retry_max_attempts": 5,
         "retry_base_backoff_ms": 1000,
         "freshness_lag_minutes": 120,
-        "request_interval_ms": 250,
-        "max_requests_per_minute": 240,
-        "max_requests_per_hour": 2000,
-        "max_requests_per_day": 8000,
+        "request_interval_ms": 5000,
+        "max_requests_per_minute": 10,
+        "max_requests_per_hour": 120,
+        "max_requests_per_day": 500,
         "progress_log_interval_sec": 10,
         "usage_daily_path": "logs/backfill_usage_daily.log"
       }
@@ -87,13 +88,14 @@
       "start_at_boot": 1,
       "backfill": {
         "enabled": true,
+        "perfmode": "fast",
         "start_date_utc": "2026-03-01",
         "retry_max_attempts": 5,
         "retry_base_backoff_ms": 1000,
-        "request_interval_ms": 1000,
-        "max_requests_per_minute": 20,
-        "max_requests_per_hour": 200,
-        "max_requests_per_day": 1000,
+        "request_interval_ms": 5000,
+        "max_requests_per_minute": 10,
+        "max_requests_per_hour": 120,
+        "max_requests_per_day": 500,
         "usage_daily_path": "logs/backfill_price_usage_daily.log",
         "endpoint": "https://www.elprisetjustnu.se/api/v1/prices"
       }

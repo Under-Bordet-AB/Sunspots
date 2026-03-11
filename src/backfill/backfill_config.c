@@ -14,6 +14,15 @@ typedef struct {
     int *field;
 } cfg_int_binding;
 
+typedef struct {
+    int chunk_days;
+    int process_nice;
+    int request_interval_ms;
+    int max_requests_per_minute;
+    int max_requests_per_hour;
+    int max_requests_per_day;
+} backfill_perf_preset;
+
 static int clamp_min_int(int v, int min_v, int fallback)
 {
     if (v < min_v) {
@@ -26,18 +35,20 @@ static void backfill_config_defaults(backfill_config *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
     cfg->enabled = 1;
-    cfg->chunk_days = 7;
+    cfg->chunk_days = 1;
+    cfg->process_nice = 19;
     cfg->retry_max_attempts = 5;
     cfg->retry_base_backoff_ms = 1000;
     cfg->progress_log_interval_sec = 10;
     cfg->freshness_lag_minutes = 120;
-    cfg->request_interval_ms = 250;
-    cfg->max_requests_per_minute = 240;
-    cfg->max_requests_per_hour = 2000;
-    cfg->max_requests_per_day = 8000;
+    cfg->request_interval_ms = 5000;
+    cfg->max_requests_per_minute = 10;
+    cfg->max_requests_per_hour = 120;
+    cfg->max_requests_per_day = 500;
     cfg->latitude = 0.0;
     cfg->longitude = 0.0;
     cfg->has_system_location = 0;
+    backfill_copy_string_safe(cfg->perfmode, sizeof(cfg->perfmode), "slow");
     cfg->location_name[0] = '\0';
     cfg->elprisomrade[0] = '\0';
     backfill_copy_string_safe(cfg->endpoint, sizeof(cfg->endpoint), "https://archive-api.open-meteo.com/v1/archive");
@@ -140,6 +151,64 @@ static void backfill_cfg_apply_int(const char *key, int min_v, int *field)
     }
 }
 
+static void backfill_cfg_apply_perf_preset(backfill_config *cfg, const backfill_perf_preset *preset)
+{
+    if (cfg == NULL || preset == NULL) {
+        return;
+    }
+    cfg->chunk_days = preset->chunk_days;
+    cfg->process_nice = preset->process_nice;
+    cfg->request_interval_ms = preset->request_interval_ms;
+    cfg->max_requests_per_minute = preset->max_requests_per_minute;
+    cfg->max_requests_per_hour = preset->max_requests_per_hour;
+    cfg->max_requests_per_day = preset->max_requests_per_day;
+}
+
+static void backfill_cfg_apply_perfmode(backfill_config *cfg)
+{
+    static const backfill_perf_preset low_preset = {
+        1,
+        19,
+        5000,
+        10,
+        120,
+        500
+    };
+    static const backfill_perf_preset high_preset = {
+        7,
+        0,
+        100,
+        550,
+        4500,
+        9000
+    };
+
+    if (cfg == NULL) {
+        return;
+    }
+
+    if (strcmp(cfg->perfmode, "slow") == 0 ||
+        strcmp(cfg->perfmode, "quiet") == 0 ||
+        strcmp(cfg->perfmode, "low") == 0) {
+        if (strcmp(cfg->perfmode, "slow") != 0) {
+            backfill_copy_string_safe(cfg->perfmode, sizeof(cfg->perfmode), "slow");
+        }
+        backfill_cfg_apply_perf_preset(cfg, &low_preset);
+        return;
+    }
+    if (strcmp(cfg->perfmode, "fast") == 0 || strcmp(cfg->perfmode, "high") == 0) {
+        if (strcmp(cfg->perfmode, "high") == 0) {
+            backfill_copy_string_safe(cfg->perfmode, sizeof(cfg->perfmode), "fast");
+        }
+        backfill_cfg_apply_perf_preset(cfg, &high_preset);
+        return;
+    }
+
+    backfill_copy_string_safe(cfg->perfmode, sizeof(cfg->perfmode), "slow");
+    backfill_cfg_apply_perf_preset(cfg, &low_preset);
+    (void)SS_LOG_WARN("backfill.config.invalid_perfmode", "invalid perfmode, falling back to slow");
+}
+
 int backfill_has_env_config(void)
 {
     const char *cfg = getenv("SUNSPOTS_CONFIG");
@@ -178,6 +247,9 @@ void backfill_config_parse(backfill_config *cfg)
 
     if (backfill_cfg_try_get_bool("enabled", &value)) {
         cfg->enabled = value ? 1 : 0;
+    }
+    if (backfill_cfg_try_get_string("perfmode", cfg->perfmode, sizeof(cfg->perfmode))) {
+        backfill_cfg_apply_perfmode(cfg);
     }
     for (i = 0U; i < sizeof(int_bindings) / sizeof(int_bindings[0]); ++i) {
         backfill_cfg_apply_int(int_bindings[i].key, int_bindings[i].min_v, int_bindings[i].field);
