@@ -101,7 +101,7 @@ C_YELLOW := \033[33m
 C_RED := \033[31m
 endif
 
-.PHONY: help all build build-valgrind build-tests build-tests-valgrind run run-valgrind run-tests run-tests-valgrind list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
+.PHONY: help all build build-valgrind build-tests build-tests-valgrind build-backfill build-backfill-monitor run run-valgrind run-tests run-tests-valgrind run-backfill-monitor list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
 
 help:
 	@printf "\nSunspots Make Targets\n\n"
@@ -111,11 +111,14 @@ help:
 	@printf "  %-26s %s\n" "make build-valgrind" "Configure + build valgrind lane only"
 	@printf "  %-26s %s\n" "make build-tests" "Configure + build test binaries (debug lane)"
 	@printf "  %-26s %s\n" "make build-tests-valgrind" "Configure + build test binaries (valgrind lane)"
+	@printf "  %-26s %s\n" "make build-backfill" "Build backfill worker binaries in debug lane"
+	@printf "  %-26s %s\n" "make build-backfill-monitor" "Build shared SDK bridge needed by backfill DB monitor"
 	@printf "  %-26s %s\n" "make list-modules" "Discover runnable module targets in debug lane"
 	@printf "  %-26s %s\n" "make list-modules-valgrind" "Discover runnable module targets in valgrind lane"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make run" "Run daemon (default) or module (with M=...) from debug build"
 	@printf "  %-26s %s\n" "make run-valgrind" "Valgrind run on daemon (default, expected unreliable) or module (with M=...)"
+	@printf "  %-26s %s\n" "make run-backfill-monitor" "Run live backfill DB coverage monitor"
 	@printf "  %-26s %s\n" "make run-tests" "Run tests in existing $(BUILD_DIR) (no rebuild)"
 	@printf "  %-26s %s\n" "make run-tests-valgrind" "Run valgrind tests in existing $(VALGRIND_BUILD_DIR) (no rebuild)"
 	@printf "\n"
@@ -196,6 +199,44 @@ build:
 	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
 	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
 
+build-backfill:
+	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@printf "%b[1/2]%b configure debug build\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
+		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[2/2]%b build backfill targets\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target \
+		sunspots_backfill_openmeteo \
+		sunspots_backfill_elprisetjustnu > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
+		tail -n 40 "$(DEBUG_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[ok]%b backfill build complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
+	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
+
+build-backfill-monitor:
+	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@printf "%b[1/2]%b configure debug build\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
+		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[2/2]%b build backfill monitor bridge\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target sunspots_sdk_shared > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
+		tail -n 40 "$(DEBUG_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[ok]%b backfill monitor build complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
+	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
+
 build-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure valgrind build (sanitizers OFF)\n" "$(C_CYAN)" "$(C_RESET)"
@@ -264,6 +305,25 @@ run:
 	fi; \
 	printf "%b[ok]%b run started\n" "$(C_GREEN)" "$(C_RESET)"; \
 	printf "      use 'make kill' to exit\n"
+
+run-backfill-monitor:
+	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@if [ ! -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
+		printf "%b[run]%b configure debug build for backfill monitor\n" "$(C_CYAN)" "$(C_RESET)"; \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+			printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
+			tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
+			exit 1; \
+		}; \
+	fi
+	@printf "%b[run]%b build SDK shared bridge for backfill monitor\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target sunspots_sdk_shared > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
+		tail -n 40 "$(DEBUG_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[run]%b python3 scripts/backfill_db_monitor.py %s\n" "$(C_CYAN)" "$(C_RESET)" "$(RUN_ARGS)"
+	@python3 scripts/backfill_db_monitor.py $(RUN_ARGS)
 
 run-valgrind:
 	@if ! command -v valgrind >/dev/null 2>&1; then \

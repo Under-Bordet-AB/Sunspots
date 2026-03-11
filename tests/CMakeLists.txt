@@ -76,6 +76,7 @@ add_executable(backfill_worker_module_test
 target_link_libraries(backfill_worker_module_test
   PRIVATE
     GTest::gtest_main
+    sunspots_backfill_internal
     sunspots_sdk
     SQLite::SQLite3
 )

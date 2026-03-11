@@ -1,6 +1,7 @@
 add_library(sunspots_cjson STATIC
   json/cJSON.c
 )
+set_target_properties(sunspots_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(sunspots_cjson
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/json

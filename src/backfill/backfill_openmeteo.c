@@ -217,12 +217,14 @@ static void log_cfg(const backfill_config *cfg)
     char msg[384];
     if (snprintf(msg,
                  sizeof(msg),
-                 "enabled=%d location=%s area=%s start_date=%s chunk_days=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s single_runs=%.80s",
+                 "enabled=%d location=%s area=%s perfmode=%s start_date=%s chunk_days=%d nice=%d retries=%d backoff_ms=%d lag_min=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d lat=%.4f lon=%.4f endpoint=%.80s single_runs=%.80s",
                  cfg->enabled,
                  cfg->location_name,
                  cfg->elprisomrade,
+                 cfg->perfmode,
                  cfg->start_date_utc,
                  cfg->chunk_days,
+                 cfg->process_nice,
                  cfg->retry_max_attempts,
                  cfg->retry_base_backoff_ms,
                  cfg->freshness_lag_minutes,
@@ -948,6 +950,14 @@ int main(int argc, char **argv)
     if (!cfg.has_system_location) {
         (void)SS_LOG_ERROR("backfill.config.invalid_location", "missing system.location latitude/longitude");
         return EXIT_FAILURE;
+    }
+    {
+        int priority_rc = backfill_apply_process_priority(&cfg);
+        if (priority_rc > 0) {
+            (void)SS_LOG_INFO("backfill.priority", "applied low process priority");
+        } else if (priority_rc < 0 && cfg.process_nice > 0) {
+            (void)SS_LOG_WARN("backfill.priority_failed", "failed to apply low process priority");
+        }
     }
 
     if (run_backfill_once(&cfg) != 0) {

@@ -21,6 +21,7 @@
 typedef struct {
     int enabled;
     int chunk_days;
+    int process_nice;
     int retry_max_attempts;
     int retry_base_backoff_ms;
     int progress_log_interval_sec;
@@ -32,6 +33,7 @@ typedef struct {
     double latitude;
     double longitude;
     int has_system_location;
+    char perfmode[16];
     char location_name[64];
     char elprisomrade[16];
     char endpoint[BACKFILL_MAX_URL_LEN];
@@ -65,5 +67,6 @@ int backfill_parse_utc_hour(const char *s, int64_t *out_epoch);
 int backfill_parse_utc_date(const char *s, int64_t *out_epoch);
 int backfill_epoch_to_ymd_utc(int64_t ts_utc, char out[11]);
 int backfill_epoch_to_ymdhm_utc(int64_t ts_utc, char out[17]);
+int backfill_apply_process_priority(const backfill_config *cfg);
 
 #endif

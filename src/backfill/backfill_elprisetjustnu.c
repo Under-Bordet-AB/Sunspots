@@ -502,10 +502,12 @@ static void log_cfg(const backfill_config *cfg)
     if (snprintf(
             msg,
             sizeof(msg),
-            "enabled=%d area=%s start_date=%s retries=%d backoff_ms=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d endpoint=%.120s",
+            "enabled=%d area=%s perfmode=%s start_date=%s nice=%d retries=%d backoff_ms=%d req_interval_ms=%d limit_m=%d limit_h=%d limit_d=%d endpoint=%.120s",
             cfg->enabled,
             cfg->elprisomrade,
+            cfg->perfmode,
             cfg->start_date_utc,
+            cfg->process_nice,
             cfg->retry_max_attempts,
             cfg->retry_base_backoff_ms,
             cfg->request_interval_ms,
@@ -596,6 +598,14 @@ int main(int argc, char **argv)
     if (!cfg.has_system_location || cfg.elprisomrade[0] == '\0') {
         (void)SS_LOG_ERROR("backfill.price.invalid_location", "missing system.location elprisomrade");
         return EXIT_FAILURE;
+    }
+    {
+        int priority_rc = backfill_apply_process_priority(&cfg);
+        if (priority_rc > 0) {
+            (void)SS_LOG_INFO("backfill.price.priority", "applied low process priority");
+        } else if (priority_rc < 0 && cfg.process_nice > 0) {
+            (void)SS_LOG_WARN("backfill.price.priority_failed", "failed to apply low process priority");
+        }
     }
     return (run_price_backfill_once(&cfg) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
