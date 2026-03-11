@@ -22,7 +22,7 @@ target_link_libraries(sunspots_backfill_openmeteo
   PRIVATE
     sunspots_backfill_internal
     sunspots_sdk
-    sunspots_curly
+    CURL::libcurl
     sunspots_cjson
     Threads::Threads
 )

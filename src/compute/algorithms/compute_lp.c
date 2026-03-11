@@ -10,8 +10,8 @@
 #define SELL_COL(slots, t) (1 + 3 * (slots) + (t))
 
 // PV model constants
-#define NOCT_C 45.0
-#define CELL_REF_TEMP_C 25.0
+#define NOCT_C 45.0 // Nominal Operating Cell Temperature (C)
+#define CELL_REF_TEMP_C 25.0 // Cell reference temperature (C)
 #define IRRADIANCE_REF_WM2 1000.0 // Reference irradiance (W/m^2)
 #define TEMP_COEFF_PER_C -0.004 // Power temperature coefficient (-0.4% per +1C)
 #define PERFORMANCE_RATIO 0.85 // System loss factor

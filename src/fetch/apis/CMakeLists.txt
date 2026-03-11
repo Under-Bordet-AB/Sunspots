@@ -4,7 +4,7 @@ function(sunspots_add_fetch_api target_name source_file)
   )
   target_link_libraries(${target_name}
     PRIVATE
-      sunspots_curly
+      CURL::libcurl
       sunspots_cjson
       sunspots_sdk
       sunspots_weather_transform
