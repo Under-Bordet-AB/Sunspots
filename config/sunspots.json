@@ -65,8 +65,8 @@
       "Rel-time": 3600,
       "start_at_boot": 1,
       "backfill": {
-        "enabled": true,
-        "perfmode": "fast",
+        "enabled": false,
+        "perfmode": "slow",
         "start_date_utc": "2026-03-01",
         "chunk_days": 1,
         "retry_max_attempts": 5,
@@ -87,8 +87,8 @@
       "Rel-time": 3600,
       "start_at_boot": 1,
       "backfill": {
-        "enabled": true,
-        "perfmode": "fast",
+        "enabled": false,
+        "perfmode": "slow",
         "start_date_utc": "2026-03-01",
         "retry_max_attempts": 5,
         "retry_base_backoff_ms": 1000,
