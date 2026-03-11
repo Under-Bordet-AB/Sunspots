@@ -9,10 +9,12 @@
 #include <errno.h>
 #include <string.h>
 
+// libs
 #include "../sdk/ss_sdk.h"
 #include "../libs/json/cJSON.h"
 #include "../utils/json_utils.h"
 
+// internal
 #include "compute_models.h"
 #include "algorithms/compute_heuristic.h"
 #include "algorithms/compute_lp.h"
