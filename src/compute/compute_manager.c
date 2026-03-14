@@ -33,14 +33,14 @@ int g_exp_backoff_timeout = 5 * 60;
 
 // Basics
 void cleanup(void);
-int fetch_env_vars();
+int fetch_env_vars(void);
 
 // Memory management
 void init_compute_data(compute_data_t* data);
 void init_result_data(result_t* result);
 
 // Load data
-int wait_for_new_data();
+int wait_for_new_data(void);
 int load_data(compute_data_t* out);
 
 // Compute
@@ -55,8 +55,8 @@ int export_forecast(const compute_data_t* data, int horizon_len);
 //          MAIN           //
 //*************************//
 
-int main() {
-    atexit(cleanup);
+int main(void) {
+    (void)atexit(cleanup);
     openlog("SUNSPOTS_COMPUTE_MANAGER", LOG_PID, LOG_DAEMON);
 
     syslog(LOG_INFO, "Compute Manager - Starting...");
@@ -98,7 +98,7 @@ void cleanup(void) {
     closelog();
 }
 
-int fetch_env_vars() {
+int fetch_env_vars(void) {
     const char* blob_config = getenv("SUNSPOTS_CONFIG");
 
     if (blob_config == NULL || blob_config[0] == '\0') {
@@ -216,7 +216,7 @@ void init_result_data(result_t* result) {
 //          LOAD DATA           //
 //******************************//
 
-int wait_for_new_data() {
+int wait_for_new_data(void) {
     const int max_cycles = g_exp_backoff_timeout / g_exp_backoff_poll_rate;
 
     int cycles = 0;

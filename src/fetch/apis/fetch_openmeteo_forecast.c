@@ -29,7 +29,7 @@ int save_to_database(forecast_data_t* price_data);
 void cleanup(void);
 
 int main() {
-    atexit(cleanup);
+    (void)atexit(cleanup);
 
     openlog("SUNSPOTS_FETCH_OPENMETEO_FORECAST", LOG_PID, LOG_DAEMON);
 

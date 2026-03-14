@@ -29,7 +29,7 @@ void cleanup(void);
 static int fetch_and_store_for_day(const struct tm* day, int day_offset);
 
 int main() {
-    atexit(cleanup);
+    (void)atexit(cleanup);
 
     openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID, LOG_DAEMON);
 

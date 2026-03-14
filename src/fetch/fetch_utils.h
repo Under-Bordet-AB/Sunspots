@@ -64,7 +64,6 @@ int fetch_from_url(char* url, char** buffer, int timeout) {
         return -1;
     }
 
-    
     curl_easy_cleanup(curl);
     curl_global_cleanup();
     

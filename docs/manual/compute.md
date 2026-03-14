@@ -1,4 +1,4 @@
-## Compute
+# Compute
 
 The compute modules are responsible for calculating the energy-plan based on spot-price and weather-data.
 
