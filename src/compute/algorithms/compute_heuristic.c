@@ -48,8 +48,6 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
     double high_price_threshold = min_price + (0.66 * price_span);
 
     for (int time_slot = 0; time_slot < slots; time_slot++) {
-        syslog(LOG_INFO, "time_slot: %d", time_slot);
-        syslog(LOG_INFO, "---------------------------");
 
         // Read weather + price signal for this slot
         double irradiance_wm2 = data_in->irradiance[time_slot];
@@ -57,11 +55,6 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
         double ambient_temp_c = data_in->temperature[time_slot];
         double price_kwh = data_in->price_kwh[time_slot];
 
-        syslog(LOG_INFO, "irradiance_wm2: %.3f", irradiance_wm2);
-        syslog(LOG_INFO, "cloudiness_percent: %.3f", cloudiness_percent);
-        syslog(LOG_INFO, "ambient_temp_c: %.3f", ambient_temp_c);
-        syslog(LOG_INFO, "price_kwh: %.3f", price_kwh);
-        syslog(LOG_INFO, "---------------------------");
 
         // Normalize cloudiness variable
         double cloudiness_factor = clamp01(1.0 - (cloudiness_percent / 100.0));
@@ -81,13 +74,6 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
 
         // Final normalized PV availability [0,1] after weather + system losses
         double pv_cap_norm = clamp01((effective_irradiance_wm2 / IRRADIANCE_REF_WM2) * PERFORMANCE_RATIO * temp_derate);
-        
-        syslog(LOG_INFO, "coudiness_factor: %.3f", cloudiness_factor);
-        syslog(LOG_INFO, "effective_irradiance_wm2: %.3f", effective_irradiance_wm2);
-        syslog(LOG_INFO, "cell_temp_c: %.3f", cell_temp_c);
-        syslog(LOG_INFO, "temp_derate: %.3f", temp_derate);
-        syslog(LOG_INFO, "pv_cap_norm: %.3f", pv_cap_norm);
-        syslog(LOG_INFO, "---------------------------");
 
         // Output controls for this slot (normalized 0..1)
         double direct_use = 0.0;
@@ -97,8 +83,8 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
 
         // High price: prioritize direct usage and selling over charging
         if (price_kwh >= high_price_threshold) {
-            direct_use = 0.7 * pv_cap_norm;
-            sell_excess = 0.3 * pv_cap_norm;
+            direct_use = 1.0 * pv_cap_norm;
+            sell_excess = 0.5 * pv_cap_norm;
             charge_battery = 0.0;
             buy_electricity = (pv_cap_norm < 0.10) ? 0.15 : 0.0;
         // Low price: prioritize charging for later
@@ -106,7 +92,7 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
             direct_use = 0.6 * pv_cap_norm;
             charge_battery = 0.4 * pv_cap_norm;
             sell_excess = 0.0;
-            buy_electricity = (pv_cap_norm < 0.20) ? 0.35 : 0.0;
+            buy_electricity = (pv_cap_norm < 0.20) ? (1.0 / pv_cap_norm) - 0.5 : 0.0;
         // Mid price: keep a balanced strategy
         } else {
             direct_use = 0.8 * pv_cap_norm;
@@ -115,10 +101,11 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
             buy_electricity = (pv_cap_norm < 0.10) ? 0.10 : 0.0;
         }
 
-        syslog(LOG_INFO, "direct_use: %.3f", direct_use);
-        syslog(LOG_INFO, "charge_battery: %.3f", charge_battery);
-        syslog(LOG_INFO, "sell_excess: %.3f", sell_excess);
-        syslog(LOG_INFO, "buy_electricity: %.3f", buy_electricity);
+        direct_use = (1.0 * pv_cap_norm) + price_kwh;
+        sell_excess = price_kwh;
+        charge_battery = direct_use / price_kwh;
+        buy_electricity = 1.0 - (pv_cap_norm + price_kwh);
+
 
         // Store clamped outputs in result buffers
         result_out->buy_electricity[time_slot] = clamp01(buy_electricity);
@@ -126,8 +113,28 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
         result_out->charge_battery[time_slot] = clamp01(charge_battery);
         result_out->sell_excess[time_slot] = clamp01(sell_excess);
 
-        syslog(LOG_INFO, ">");
-        syslog(LOG_INFO, ">");
+        int logging = 0;
+        if (logging == 1) {
+            syslog(LOG_INFO, "time_slot: %d", time_slot);
+            syslog(LOG_INFO, "---------------------------");
+            syslog(LOG_INFO, "irradiance_wm2: %.3f", irradiance_wm2);
+            syslog(LOG_INFO, "cloudiness_percent: %.3f", cloudiness_percent);
+            syslog(LOG_INFO, "ambient_temp_c: %.3f", ambient_temp_c);
+            syslog(LOG_INFO, "price_kwh: %.3f", price_kwh);
+            syslog(LOG_INFO, "---------------------------");
+            syslog(LOG_INFO, "coudiness_factor: %.3f", cloudiness_factor);
+            syslog(LOG_INFO, "effective_irradiance_wm2: %.3f", effective_irradiance_wm2);
+            syslog(LOG_INFO, "cell_temp_c: %.3f", cell_temp_c);
+            syslog(LOG_INFO, "temp_derate: %.3f", temp_derate);
+            syslog(LOG_INFO, "pv_cap_norm: %.3f", pv_cap_norm);
+            syslog(LOG_INFO, "---------------------------");
+            syslog(LOG_INFO, "direct_use: %.3f", direct_use);
+            syslog(LOG_INFO, "charge_battery: %.3f", charge_battery);
+            syslog(LOG_INFO, "sell_excess: %.3f", sell_excess);
+            syslog(LOG_INFO, "buy_electricity: %.3f", buy_electricity);
+            syslog(LOG_INFO, ">");
+            syslog(LOG_INFO, ">");
+        }
     }
 
     return 0;
