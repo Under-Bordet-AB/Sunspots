@@ -71,7 +71,7 @@ target_include_directories(sunspots_fetch_manager_fuzz_obj
 )
 target_link_libraries(sunspots_fetch_manager_fuzz_obj
   PRIVATE
-    sunspots_curly
+    CURL::libcurl
     sunspots_cjson
     Threads::Threads
 )
@@ -81,7 +81,7 @@ sunspots_apply_target_defaults(sunspots_fetch_manager_fuzz_obj)
 sunspots_add_fuzzer(fetch_manager_config_fuzzer fetch_manager_config_fuzzer.cpp)
 target_link_libraries(fetch_manager_config_fuzzer
   PRIVATE
-    sunspots_curly
+    CURL::libcurl
     sunspots_cjson
     Threads::Threads
     $<TARGET_OBJECTS:sunspots_fetch_manager_fuzz_obj>

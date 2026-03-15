@@ -9,7 +9,6 @@
 
 #include "../fetch_utils.h"
 
-#include "../../libs/curly.h"
 #include "../../libs/json/cJSON.h"
 
 #include "../../sdk/ss_sdk.h"

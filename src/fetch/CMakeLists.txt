@@ -8,7 +8,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fetch_manager.c")
   )
   target_link_libraries(sunspots_fetch_manager
     PRIVATE
-      sunspots_curly
+      CURL::libcurl
       sunspots_cjson
       Threads::Threads
   )
