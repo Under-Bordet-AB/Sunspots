@@ -8,6 +8,7 @@ Following a general introduction and an overview of the daemon that initializes 
 1. [What is Sunspots-systems](#what-is-sunspots-systems)
    1. [System design](#system-desgin)
 2. [Starting and maintaining the system](#starting-and-maintaining-the-system)
+   1. [Daemon design choices](#daemon-design-choices)
 3. [Fetching data](#fetching-data)
 4. [Normalizing data](#normalizing-data)
 5. [Storing data](#storing-data)
@@ -19,19 +20,37 @@ Following a general introduction and an overview of the daemon that initializes 
 ---
 
 ## 1 What is Sunspots-systems
-A system that helps optimize the users solar panels towards lower energy costs. When operational *Sunspots-systems* outputs recommendations on when to:
-- use electricity 
-- store electricity 
-- sell electricity
+A system that helps optimize a user's solar panels to achieve lower energy costs. When operational, Sunspots-systems outputs recommendations on when to:
 
-These recommendations are given as a value between *0* and *1*. Based on these values the user can  determine the most optimal course of action for his/ hers needs.
+* Use electricity
+* Store electricity
+* Sell electricity
 
-For *Sunspots-systems* to work as intended for this purpose the system is depentend on input. These inputs comes in the form of **weather, solar and electricity spotprice data**. 
+These recommendations are provided as a value between 0 and 1. Based on these values, the user can determine the most optimal course of action for their specific needs.
+
+For Sunspots-systems to work as intended, the system is dependent on external inputs. These inputs come in the form of weather forecasts, solar production estimates, and electricity spot-price data.
 
 ### 1.1 System design
-*Sunspots-systems* is a distributed system formed around the idea that each part of the system serves one purpose and one purpose only. Data flows through the system one way only and none if the components know of each other, instead they all either read from or write to a common database. The daemon relies heavily on the kernel for all the heavy lifting. Together they form a system of parts that work together that work towards a common goal. The system is general enough that it could be fitted to solve any similar task if the right modules were written. 
+Sunspots-systems is a distributed system built around the philosophy that each component serves one purpose and one purpose only. Data flows through the system in one direction; none of the components are aware of each other, instead interacting solely by reading from or writing to a common database. 
 
-## Starting and maintaining the system
+The daemon relies heavily on the kernel for heavy lifting. Together, they form a modular ecosystem working toward a common goal. The design is general enough that it could be adapted to solve any similar task if the appropriate modules were written.
+
+## 2 Starting and maintaining the system
+Sunspots-systems uses a daemon process to start and maintain the modules specified in the configuration file. The responsibility of the daemon is to perform regular health checks of the running programs that comprise the system. This is achieved through system calls to the operating system kernel. Specifically, `inotify`, `signalfd`, and `timerfd` are registered as `epoll` events.
+
+Health checks depend on the timer type configured for the module and come in three different flavors: 
+1. **Heartbeats**: RTSIG from the module to the daemon.
+2. **Relative time**: e.g., run every 100 seconds.
+3. **Absolute time**: e.g., run at 12:00. 
+
+A module with a relative timer can also be configured to run at system boot.
+
+The user can update the configuration file during runtime, which triggers a "hot reload." During this process, the daemon parses the new information and executes the changes immediately.
+
+The daemon process follows standard conventions for detaching from the shell to ensure it cannot be interrupted. The process runs under the system's `init` process and must be terminated by signaling its PID.
+
+### Daemon design choices
+The module is written using the opaque pattern to hide implementation details within the C files. Only public APIs are exposed in the header files; memory allocation and deallocation are handled by the module itself rather than the caller. No global optimization has been performed on the memory layout due to the non-urgent nature of the system; the code utilizes arrays of structs to prioritize ease of use and readability.
 
 ## Fetching data
 
