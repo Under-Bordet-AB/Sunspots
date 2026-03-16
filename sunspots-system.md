@@ -65,3 +65,13 @@ The module is written using the opaque pattern to hide implementation details wi
 ## Serving results to clients
 
 ## Visualizing results for the end user
+The *Sunspots-system* includes a terminal-based client that allows users to view solar optimization recommendations. The client is implemented in C++ with its own TCP/HTTP functionality using POSIX sockets.
+
+Configuration (host, port, and API path) is specified in [src/client/config.hpp](src/client/config.hpp), defaulting to `localhost:10480/endpoints/result.json`.
+
+The client presents an interactive menu with three options:
+1. **Live Status** - Displays current quarter values for all four metrics (buy_electricity, charge_battery, sell_excess, direct_use), auto-refreshing every second
+2. **Graph** - Renders a color-coded graph plotting 96 quarters (24 hours) ahead
+3. **Exit**
+
+When the user selects a viewing option, the client makes an HTTP GET request to fetch the latest data, stores it in `cachedResult`, then displays it according to the selected mode. The client calculates which quarter to display based on the current time and the data's timestamp.
