@@ -77,25 +77,30 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
         double sell_excess = 0.0;
         double buy_electricity = 0.0;
 
-        // High price: prioritize direct usage and selling over charging
-        if (price_kwh >= high_price_threshold) {
-            direct_use = 0.7 * pv_cap_norm;
-            sell_excess = 0.3 * pv_cap_norm;
-            charge_battery = 0.0;
-            buy_electricity = (pv_cap_norm < 0.10) ? 0.15 : 0.0;
-        // Low price: prioritize charging for later
-        } else if (price_kwh <= low_price_threshold) {
-            direct_use = 0.6 * pv_cap_norm;
-            charge_battery = 0.4 * pv_cap_norm;
-            sell_excess = 0.0;
-            buy_electricity = (pv_cap_norm < 0.20) ? 0.35 : 0.0;
-        // Mid price: keep a balanced strategy
-        } else {
-            direct_use = 0.8 * pv_cap_norm;
-            charge_battery = 0.2 * pv_cap_norm;
-            sell_excess = 0.0;
-            buy_electricity = (pv_cap_norm < 0.10) ? 0.10 : 0.0;
-        }
+        // // High price: prioritize direct usage and selling over charging
+        // if (price_kwh >= high_price_threshold) {
+        //     direct_use = 0.7 * pv_cap_norm;
+        //     sell_excess = 0.3 * pv_cap_norm;
+        //     charge_battery = 0.0;
+        //     buy_electricity = (pv_cap_norm < 0.10) ? 0.15 : 0.0;
+        // // Low price: prioritize charging for later
+        // } else if (price_kwh <= low_price_threshold) {
+        //     direct_use = 0.6 * pv_cap_norm;
+        //     charge_battery = 0.4 * pv_cap_norm;
+        //     sell_excess = 0.0;
+        //     buy_electricity = (pv_cap_norm < 0.20) ? 0.35 : 0.0;
+        // // Mid price: keep a balanced strategy
+        // } else {
+        //     direct_use = 0.8 * pv_cap_norm;
+        //     charge_battery = 0.2 * pv_cap_norm;
+        //     sell_excess = 0.0;
+        //     buy_electricity = (pv_cap_norm < 0.10) ? 0.10 : 0.0;
+        // }
+
+        direct_use = pv_cap_norm * 2;
+        sell_excess = price_kwh;
+        charge_battery = 0.5 - direct_use;
+        buy_electricity = 1.0 - price_kwh;
 
         // Store clamped outputs in result buffers
         result_out->buy_electricity[time_slot] = clamp01(buy_electricity);
