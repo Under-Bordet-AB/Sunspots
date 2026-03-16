@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "file_helpers.h"
 #include "http_constants.h"
 
