@@ -1,10 +1,10 @@
 #include "compute_heuristic.h"
+#include <stddef.h>
 
 #define NOCT_C 45.0 // Nominal Operating Cell Temperature (C)
 #define CELL_REF_TEMP_C 25.0 // Cell reference temperature (C)
 #define IRRADIANCE_REF_WM2 1000.0 // Reference irradiance (W/m^2) (for normalization)
 #define TEMP_COEFF_PER_C -0.004 // Power temperature coefficient (-0.4% power per +1C above 25C)
-#define PERFORMANCE_RATIO 0.85 // System performance ratio
 
 static double clamp01(double value) {
     if (value < 0.0) {
@@ -16,7 +16,32 @@ static double clamp01(double value) {
     return value;
 }
 
-int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
+static void normalize_array(double* arr, size_t n) {
+    if (arr == NULL || n == 0) {
+        return;
+    }
+
+    double min = arr[0];
+    double max = arr[0];
+    for (size_t i = 1; i < n; i++) {
+        if (arr[i] < min) min = arr[i];
+        if (arr[i] > max) max = arr[i];
+    }
+
+    double range = max - min;
+    if (range == 0.0) {
+        for (size_t i = 0; i < n; i++) {
+            arr[i] = 0.0;
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        arr[i] = (arr[i] - min) / range;
+    }
+}
+
+int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
     if (!data_in || !result_out) {
         return -1;
     }
@@ -26,25 +51,10 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
         return -1;
     }
 
-    // Find the lowest and highest price out of all slots
-    double min_price = data_in->price_kwh[0];
-    double max_price = data_in->price_kwh[0];
+    // Normalize price array
+    normalize_array(data_in->price_kwh, slots);
 
-    for (int time_slot = 1; time_slot < slots; time_slot++) {
-        double price = data_in->price_kwh[time_slot];
-        if (price < min_price) {
-            min_price = price;
-        }
-        if (price > max_price) {
-            max_price = price;
-        }
-    }
-
-    // Split current horizon prices into low/mid/high bands for simple rule decisions
-    double price_span = max_price - min_price;
-    double low_price_threshold = min_price + (0.33 * price_span);
-    double high_price_threshold = min_price + (0.66 * price_span);
-
+    double pv_cap_norm[slots];
     for (int time_slot = 0; time_slot < slots; time_slot++) {
         // Read weather + price signal for this slot
         double irradiance_wm2 = data_in->irradiance[time_slot];
@@ -69,37 +79,25 @@ int compute_heuristic(const compute_data_t* data_in, result_t* result_out) {
         }
 
         // Final normalized PV availability [0,1] after weather + system losses
-        double pv_cap_norm = clamp01((effective_irradiance_wm2 / IRRADIANCE_REF_WM2) * PERFORMANCE_RATIO * temp_derate);
+        pv_cap_norm[time_slot] = clamp01((effective_irradiance_wm2 / IRRADIANCE_REF_WM2) * temp_derate);
+    }
 
+    // Normalize photovoltic array
+    normalize_array(pv_cap_norm, slots);
+
+    for (int time_slot = 0; time_slot < slots; time_slot++) {
         // Output controls for this slot (normalized 0..1)
+        double price_kwh = data_in->price_kwh[time_slot];
+        double pv = pv_cap_norm[time_slot];
+
         double direct_use = 0.0;
         double charge_battery = 0.0;
         double sell_excess = 0.0;
         double buy_electricity = 0.0;
 
-        // // High price: prioritize direct usage and selling over charging
-        // if (price_kwh >= high_price_threshold) {
-        //     direct_use = 0.7 * pv_cap_norm;
-        //     sell_excess = 0.3 * pv_cap_norm;
-        //     charge_battery = 0.0;
-        //     buy_electricity = (pv_cap_norm < 0.10) ? 0.15 : 0.0;
-        // // Low price: prioritize charging for later
-        // } else if (price_kwh <= low_price_threshold) {
-        //     direct_use = 0.6 * pv_cap_norm;
-        //     charge_battery = 0.4 * pv_cap_norm;
-        //     sell_excess = 0.0;
-        //     buy_electricity = (pv_cap_norm < 0.20) ? 0.35 : 0.0;
-        // // Mid price: keep a balanced strategy
-        // } else {
-        //     direct_use = 0.8 * pv_cap_norm;
-        //     charge_battery = 0.2 * pv_cap_norm;
-        //     sell_excess = 0.0;
-        //     buy_electricity = (pv_cap_norm < 0.10) ? 0.10 : 0.0;
-        // }
-
-        direct_use = pv_cap_norm * 2;
-        sell_excess = price_kwh;
-        charge_battery = 0.5 - direct_use;
+        direct_use = pv;
+        charge_battery = 1.0 - direct_use;
+        sell_excess = 0.5 * price_kwh;
         buy_electricity = 1.0 - price_kwh;
 
         // Store clamped outputs in result buffers
