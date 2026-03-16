@@ -1,3 +1,8 @@
+/**
+ * @file http_response.cpp
+ * @brief HTTP response parser implementation
+ */
+
 #include "http_response.hpp"
 
 HttpResponse HttpResponse::parse(const std::string& raw)
@@ -8,7 +13,7 @@ HttpResponse HttpResponse::parse(const std::string& raw)
     if (statusEnd == std::string::npos)
         return HttpResponse::error("Bad response: no status line");
 
-    // Parse status code
+    // Extract status code from "HTTP/1.1 200 OK\r\n"
     std::string statusLine = raw.substr(0, statusEnd);
     size_t codeStart = statusLine.find(' ');
     if (codeStart == std::string::npos)
