@@ -2,7 +2,7 @@
 
 namespace Config
 {
-    constexpr int MAX_TIMEOUT_ATTEMPTS = 100;
-
-    constexpr const char* PATH_SHOW_RESULT = "/endpoints/result.json";
+    constexpr const char *HOST = "localhost";
+    constexpr const char *PORT = "10480";
+    constexpr const char *PATH_SHOW_RESULT = "/endpoints/result.json";
 }
