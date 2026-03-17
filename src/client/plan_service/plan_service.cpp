@@ -1,3 +1,8 @@
+/**
+ * @file plan_service.cpp
+ * @brief Solar optimization service implementation
+ */
+
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -9,6 +14,12 @@
 
 namespace
 {
+/**
+ * @brief Check if HTTP response indicates an error
+ * @param response HTTP response object
+ * @param endpoint Endpoint name for error messages
+ * @return true if response has error (and message was printed)
+ */
 bool responseSucceeded(const HttpResponse& response, const char* endpoint)
 {
     if (response.hasError())
@@ -53,7 +64,6 @@ void PlanService::displayLive()
     }
 
     printOutline();
-
     printRow("LIVE STATUS", "");
     printRow("", "");
     printRow("Buy electricity: ",   formatDouble(cachedResult.buy_electricity[index], 2));
@@ -73,18 +83,19 @@ void PlanService::displayLive()
 
 void PlanService::displayGraph()
 {
-    constexpr double y_axis = 21;
-    constexpr double x_axis = 96;
+    constexpr double y_axis = 21; // From 0.0 to 1.0, +0.05 per line
+    constexpr double x_axis = 96; // 24 hours * 4 quarters/hour
 
     std::cout << " " << std::string(104, '_') << std::endl;
     for (int i = 0; i < y_axis; i++)     // Y-Axis
     {
+        // Calculate value for this row (1.00 at top, 0.00 at bottom)
         double resultValue = std::round((1.0 - (i * 0.05)) * 20.0) / 20.0;
         std::cout << "| " << std::fixed << std::setprecision(2) << resultValue << " - ";
 
         for (int j = 0; j < x_axis; j++) // X-Axis
         {
-            // Determine if a dot should be drawn at this coordinate
+            // Lambda to check if we should draw at this coordinate
             auto shouldDraw = [&](const std::vector<double>& data) -> bool 
             {
                 double currentVal = roundToTenth(data[j]);
@@ -92,7 +103,7 @@ void PlanService::displayGraph()
                 if (resultValue == currentVal)
                     return true;
                 
-                // Draw connecting line
+                // Draw vertical connecting line between data points
                 if (j > 0)
                 {
                     double prevVal = roundToTenth(data[j-1]);
@@ -101,7 +112,7 @@ void PlanService::displayGraph()
                         double minVal = std::min(prevVal, currentVal);
                         double maxVal = std::max(prevVal, currentVal);
                         
-                        // Draw if we're between the two values
+                        // Draw if current row is between previous and current value
                         if (resultValue > minVal && resultValue < maxVal)
                             return true;
                     }
@@ -110,60 +121,55 @@ void PlanService::displayGraph()
                 return false;
             };
             
+            // Draw colored dots based on data type (ANSI color codes)
             if (shouldDraw(cachedResult.buy_electricity))
             {
-                std::cout << "\033[31m●\033[0m";
+                std::cout << "\033[31m●\033[0m";  // Red
             }
             else if (shouldDraw(cachedResult.direct_use))
             {
-                std::cout << "\033[32m●\033[0m";
+                std::cout << "\033[32m●\033[0m";  // Green
             }
             else if (shouldDraw(cachedResult.charge_battery))
             {
-                std::cout << "\033[33m●\033[0m";
+                std::cout << "\033[33m●\033[0m";  // Yellow
             }
             else if (shouldDraw(cachedResult.sell_excess))
             {
-                std::cout << "\033[34m●\033[0m";
-            }
-            else if (i == y_axis - 1)
-            {
-                std::cout << "-";
+                std::cout << "\033[34m●\033[0m";  // Blue
             }
             else
             {
-                std::cout << "-";
+                std::cout << "-";  // Empty space
             }
         }
 
-        resultValue -= 0.05;
         std::cout << "|" << std::endl;
     }
     
-    // Hour tick marks
+    // Draw hour tick marks on X-axis
     std::cout << "         ";
     for (int j = 0; j <= x_axis; j++)
     {
-        if (j % 4 == 0)  // Every hour (4 quarters = 1 hour)
+        if (j % 4 == 0)  // Every 4 quarters = 1 hour
             std::cout << "|";
         else
             std::cout << " ";
     }
     std::cout << std::endl;
     
-    // Time labels
+    // Draw time labels every 3 hours
     std::cout << "      ";
     for (int j = 0; j <= x_axis; j++)
     {
         if (j % 12 == 0 && j + 1 < x_axis)  // Every 3 hours
         {
-            // Calculate actual time for this quarter
             std::time_t quarterTime = dataStartTime + (j * 15 * 60);
             std::tm* tm = std::localtime(&quarterTime);
             
             std::cout << " " << std::setw(2) << std::setfill('0') << tm->tm_hour << ":" 
                       << std::setw(2) << std::setfill('0') << tm->tm_min << std::setfill(' ');
-            j += 5; // Skip positions
+            j += 5; // Skip next 5 positions to avoid label overlap
         }
         else if (j == x_axis)
         {
@@ -180,7 +186,12 @@ void PlanService::displayGraph()
         }
     }
     std::cout << std::endl;
-    std::cout << "\n        \033[31m ● Buy Electricity\033[0m        \033[32m● Direct Use\033[0m        \033[33m● Charge Battery\033[0m        \033[34m● Sell Excess\033[0m" << std::endl;
+    
+    // Draw color legend
+    std::cout << "\n        \033[31m ● Buy Electricity\033[0m        "
+              << "\033[32m● Direct Use\033[0m        "
+              << "\033[33m● Charge Battery\033[0m        "
+              << "\033[34m● Sell Excess\033[0m" << std::endl;
     std::cout << "Back < " << std::endl;
 }
 
@@ -213,7 +224,7 @@ Result PlanService::parseResponse(const std::string &buffer)
     cJSON *sel = cJSON_GetObjectItemCaseSensitive(resultObj, "sell_excess");
     cJSON *tim = cJSON_GetObjectItemCaseSensitive(resultObj, "timestamp");
 
-
+    // Validate all arrays exist
     if (!cJSON_IsArray(buy) ||
         !cJSON_IsArray(dir) ||
         !cJSON_IsArray(cha) ||
@@ -223,7 +234,7 @@ Result PlanService::parseResponse(const std::string &buffer)
         return Result{};
     }
     
-    // Handle timestamp as either a number or an array
+    // Parse timestamp (can be either number or array)
     std::time_t ts = 0;
     if (cJSON_IsNumber(tim))
     {
@@ -238,6 +249,7 @@ Result PlanService::parseResponse(const std::string &buffer)
         }
     }
 
+    // Lambda to fill vector from cJSON array
     auto fillVector = [](cJSON* array, std::vector<double> &vec)
     {
         cJSON *item = nullptr;
@@ -254,6 +266,7 @@ Result PlanService::parseResponse(const std::string &buffer)
         }
     };
 
+    // Pre-allocate for 96 quarters (24 hours)
     result.buy_electricity.reserve(96);
     result.direct_use.reserve(96);
     result.charge_battery.reserve(96);
@@ -265,7 +278,7 @@ Result PlanService::parseResponse(const std::string &buffer)
     fillVector(sel, result.sell_excess);
 
     result.timestamp = formatUnixTime(ts);
-    dataStartTime = ts;  // Store the data start time for quarter offset calculation
+    dataStartTime = ts;  // Cache for quarter offset calculations
     
     cJSON_Delete(root);
     return result;
@@ -274,24 +287,16 @@ Result PlanService::parseResponse(const std::string &buffer)
 int PlanService::getCurrentQuarterIndex()
 {
     std::time_t now = std::time(nullptr);
-    std::tm* tm = std::localtime(&now);
-
-    int currentHour = tm->tm_hour;
-    int currentMinute = tm->tm_min;
-    int currentQuarter = currentHour * 4 + (currentMinute / 15);
-
-    // Parse the data start timestamp to get its quarter
-    std::tm* data_tm = std::localtime(&dataStartTime);
-    int dataHour = data_tm->tm_hour;
-    int dataMinute = data_tm->tm_min;
-    int dataQuarter = dataHour * 4 + (dataMinute / 15);
-
-    // Return the offset from data start
-    int offset = currentQuarter - dataQuarter;
     
-    // Handle day wraparound
-    if (offset < 0)
-        offset += 96;
+    // Calculate seconds elapsed since data start
+    std::time_t elapsed = now - dataStartTime;
+    
+    // Convert to quarters (15 minutes = 900 seconds)
+    int offset = static_cast<int>(elapsed / 900);
+    
+    // Clamp to valid range
+    if (offset < 0) offset = 0;
+    if (offset >= 96) offset = 95;
     
     return offset;
 }

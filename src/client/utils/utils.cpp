@@ -1,3 +1,8 @@
+/**
+ * @file utils.cpp
+ * @brief Utility function implementations
+ */
+
 #include <ctime>
 #include <cmath>
 #include <sstream>
@@ -5,6 +10,7 @@
 
 #include "utils.hpp"
 
+/** @brief Standard display width for formatted output */
 const int WIDTH = 46;
 
 void printRow(const std::string& key, const std::string& value)

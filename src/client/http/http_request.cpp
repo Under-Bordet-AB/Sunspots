@@ -1,3 +1,8 @@
+/**
+ * @file http_request.cpp
+ * @brief HTTP request builder implementation
+ */
+
 #include "http_request.hpp"
 
 HttpRequest::HttpRequest(HttpMethod method, const std::string& host, const std::string& path)

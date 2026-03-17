@@ -1,3 +1,11 @@
+/**
+ * @file main.cpp
+ * @brief Entry point for Sunspots terminal client
+ * 
+ * Initializes the HTTP client, plan service, and interactive menu system
+ * for viewing solar optimization recommendations.
+ */
+
 #include <iostream>
 
 #include "http/http_client.hpp"
@@ -7,13 +15,8 @@
 
 int main()
 {
-    // ========== Initialize server ========== //
     HttpClient client(Config::HOST, Config::PORT);
-
-    // ======= Initialize plan service ======= //
     PlanService service(client);
-
-    // ============= Start menu ============== //
     Menu menu;
     menu.show(service);
 

@@ -1,5 +1,19 @@
+/**
+ * @file http_status.hpp
+ * @brief HTTP status code enumeration
+ * 
+ * Defines all standard HTTP status codes as a strongly-typed enum.
+ */
+
 #pragma once
 
+/**
+ * @enum StatusCode
+ * @brief HTTP status codes (RFC 7231)
+ * 
+ * Comprehensive enumeration of standard HTTP response status codes
+ * organized by category (1xx-5xx).
+ */
 enum class StatusCode
 {
     // 1xx Informational
