@@ -3,8 +3,11 @@
 
 #define NOCT_C 45.0 // Nominal Operating Cell Temperature (C)
 #define CELL_REF_TEMP_C 25.0 // Cell reference temperature (C)
-#define IRRADIANCE_REF_WM2 1000.0 // Reference irradiance (W/m^2) (for normalization)
+#define IRRADIANCE_REF_WM2 400.0 // Reference irradiance (W/m^2) (for normalization)
 #define TEMP_COEFF_PER_C -0.004 // Power temperature coefficient (-0.4% power per +1C above 25C)
+
+#define PRICE_HIGH 2.0 // Example high price for normalization
+#define PRICE_LOW 0.1 // Example low price for normalization
 
 static double clamp01(double value) {
     if (value < 0.0) {
@@ -41,6 +44,13 @@ static void normalize_array(double* arr, size_t n) {
     }
 }
 
+static double normalize_range(double value, double low, double high) {
+    if (high <= low) {
+        return 0.0;
+    }
+    return clamp01((value - low) / (high - low));
+}
+
 int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
     if (!data_in || !result_out) {
         return -1;
@@ -52,7 +62,7 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
     }
 
     // Normalize price array
-    normalize_array(data_in->price_kwh, slots);
+    // normalize_array(data_in->price_kwh, slots);
 
     double pv_cap_norm[slots];
     for (int time_slot = 0; time_slot < slots; time_slot++) {
@@ -83,7 +93,7 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
     }
 
     // Normalize photovoltic array
-    normalize_array(pv_cap_norm, slots);
+    // normalize_array(pv_cap_norm, slots);
 
     for (int time_slot = 0; time_slot < slots; time_slot++) {
         // Output controls for this slot (normalized 0..1)
@@ -95,10 +105,25 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
         double sell_excess = 0.0;
         double buy_electricity = 0.0;
 
-        direct_use = pv;
-        charge_battery = 1.0 - direct_use;
-        sell_excess = 0.5 * price_kwh;
-        buy_electricity = 1.0 - price_kwh;
+        // direct_use = pv;
+        // charge_battery = 1.0 - direct_use;
+        // sell_excess = 0.5 * price_kwh;
+        // buy_electricity = 1.0 - price_kwh;
+
+        double price_signal = normalize_range(price_kwh, PRICE_LOW, PRICE_HIGH);
+        double cheapness = 1.0 - price_signal;
+        double expensiveness = price_signal;
+
+        double solar_budget = pv;
+        double grid_budget = 1.0 - solar_budget;
+
+        direct_use = solar_budget * (0.5 + 0.5 * expensiveness);
+
+        double solar_left = solar_budget - direct_use;
+        charge_battery = solar_left * cheapness;
+        sell_excess = solar_left * expensiveness;
+
+        buy_electricity = grid_budget * cheapness;
 
         // Store clamped outputs in result buffers
         result_out->buy_electricity[time_slot] = clamp01(buy_electricity);
