@@ -45,7 +45,7 @@ Health checks depend on the timer type configured for the module and come in thr
 
 A module with a relative timer can also be configured to run at system boot.
 
-The user can update the configuration file during runtime, which triggers a "hot reload." During this process, the daemon parses the new information and executes the changes immediately.
+The user can update the configuration file during runtime, which triggers a "hot reload." During this process, the daemon parses the new information and executes the changes immediately. Every module can have a unique config set in the configuration file. That config will be passed through to the module via the shell environment.
 
 The daemon process follows standard conventions for detaching from the shell to ensure it cannot be interrupted. The process runs under the system's `init` process and must be terminated by signaling its PID.
 
