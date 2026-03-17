@@ -42,7 +42,7 @@ int load_data(compute_data_t* out);
 
 // Compute
 void init_result_data(result_t* result);
-int compute(const compute_data_t* data, result_t* out_result);
+int compute(compute_data_t* data, result_t* out_result);
 
 // Save result
 int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len);
@@ -449,7 +449,7 @@ void init_result_data(result_t* result) {
     }
 }
 
-int compute(const compute_data_t* data, result_t* out_result) {
+int compute(compute_data_t* data, result_t* out_result) {
     if (!data || !out_result) return -1;
 
     init_result_data(out_result);

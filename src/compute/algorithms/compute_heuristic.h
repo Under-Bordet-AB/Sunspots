@@ -3,6 +3,6 @@
 
 #include "../compute_models.h"
 
-int compute_heuristic(const compute_data_t* data_in, result_t* result_out);
+int compute_heuristic(compute_data_t* data_in, result_t* result_out);
 
 #endif
