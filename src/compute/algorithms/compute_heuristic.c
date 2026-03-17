@@ -19,31 +19,6 @@ static double clamp01(double value) {
     return value;
 }
 
-static void normalize_array(double* arr, size_t n) {
-    if (arr == NULL || n == 0) {
-        return;
-    }
-
-    double min = arr[0];
-    double max = arr[0];
-    for (size_t i = 1; i < n; i++) {
-        if (arr[i] < min) min = arr[i];
-        if (arr[i] > max) max = arr[i];
-    }
-
-    double range = max - min;
-    if (range == 0.0) {
-        for (size_t i = 0; i < n; i++) {
-            arr[i] = 0.0;
-        }
-        return;
-    }
-
-    for (size_t i = 0; i < n; i++) {
-        arr[i] = (arr[i] - min) / range;
-    }
-}
-
 static double normalize_range(double value, double low, double high) {
     if (high <= low) {
         return 0.0;
@@ -60,9 +35,6 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
     if (slots <= 0 || slots > SERIES_LEN) {
         return -1;
     }
-
-    // Normalize price array
-    // normalize_array(data_in->price_kwh, slots);
 
     double pv_cap_norm[slots];
     for (int time_slot = 0; time_slot < slots; time_slot++) {
@@ -92,9 +64,6 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
         pv_cap_norm[time_slot] = clamp01((effective_irradiance_wm2 / IRRADIANCE_REF_WM2) * temp_derate);
     }
 
-    // Normalize photovoltic array
-    // normalize_array(pv_cap_norm, slots);
-
     for (int time_slot = 0; time_slot < slots; time_slot++) {
         // Output controls for this slot (normalized 0..1)
         double price_kwh = data_in->price_kwh[time_slot];
@@ -104,11 +73,6 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
         double charge_battery = 0.0;
         double sell_excess = 0.0;
         double buy_electricity = 0.0;
-
-        // direct_use = pv;
-        // charge_battery = 1.0 - direct_use;
-        // sell_excess = 0.5 * price_kwh;
-        // buy_electricity = 1.0 - price_kwh;
 
         double price_signal = normalize_range(price_kwh, PRICE_LOW, PRICE_HIGH);
         double cheapness = 1.0 - price_signal;
