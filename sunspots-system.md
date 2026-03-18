@@ -53,6 +53,11 @@ The daemon process follows standard conventions for detaching from the shell to 
 The module is written using the opaque pattern to hide implementation details within the C files. Only public APIs are exposed in the header files; memory allocation and deallocation are handled by the module itself rather than the caller. No global optimization has been performed on the memory layout due to the non-urgent nature of the system; the code utilizes arrays of structs to prioritize ease of use and readability.
 
 ## Fetching data
+Sunspots-systems fetches upstream data through small source-specific modules that the daemon starts on a schedule. In the current setup, one module retrieves weather forecasts from Open-Meteo using the configured latitude and longitude, while another retrieves electricity spot prices from Elprisetjustnu using the configured Swedish price area.
+
+Each fetcher follows the same general pattern: read runtime settings from the environment, build the correct API URL, perform the HTTP request, parse the returned JSON, and hand the payload over to a transform step. The transformed data is then written into the shared database through the SDK as canonical time-series values, which allows downstream modules to consume one internal format regardless of the original external API.
+
+One technical design choice is that fetching, transformation, and persistence are kept as separate responsibilities. This keeps the source-specific code relatively small and makes it easier to replace an upstream API without changing the compute layer. Another is that fetchers write into the common database rather than talking directly to other modules, which preserves the system's one-way data flow and avoids tight coupling between components.
 
 ## Normalizing data
 
@@ -61,6 +66,11 @@ The module is written using the opaque pattern to hide implementation details wi
 ## Retrieving stored data
 
 ## Computing data and storing results
+The compute stage reads the canonical weather and price series from the database and turns them into recommendations for the next 24 hours, divided into 96 quarters. Before calculating, the compute manager waits for fresh observed weather data so it does not produce a new plan from stale inputs. It then loads irradiance, cloud cover, temperature, and spot-price values, aligns them into fixed 15-minute slots, and computes the usable horizon from the data that is actually available.
+
+The calculation itself is separated from orchestration. The compute manager selects an algorithm from configuration, currently either a simple heuristic model or a linear-programming-based model, and both produce four normalized control values between 0 and 1: buying electricity, direct use, battery charging, and selling excess energy. This separation makes it possible to experiment with planning strategies without rewriting the surrounding module logic.
+
+Once a result has been produced, the module writes JSON files to the `endpoints` directory. `forecast.json` contains the aligned input forecast data, while `result.json` contains the recommendation series that the frontend and client can serve directly. Storing the output as ready-to-serve JSON is a pragmatic choice: it keeps the serving layer simple and decouples user-facing access from the internal database schema.
 
 ## Serving results to clients
 
