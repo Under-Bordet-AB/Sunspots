@@ -55,6 +55,9 @@ The module is written using the opaque pattern to hide implementation details wi
 ## Fetching data
 
 ## Normalizing data
+This subsystem parses external JSON data using the cJSON library and converts it into a consistent internal format. It validates required fields, supports both ISO8601 and Unix timestamps, and normalizes values such as temperature into standard units. Where applicable, optional fields are handled gracefully using presence flags, allowing partial data to be processed without failure.
+
+The design is straightforward and explicit, with clear validation and error handling and minimal abstraction beyond a few helper macros. This keeps the code predictable and easy to follow. It is, however, tightly tied to the structure of the upstream JSON, so changes to the API may require updates to the parsing logic.
 
 ## Storing data
 
