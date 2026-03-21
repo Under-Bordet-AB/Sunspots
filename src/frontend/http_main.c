@@ -42,7 +42,7 @@ http_server* http_init()
         return NULL;
     }
 
-    if (listen(server_fd, 16) < 0) {
+    if (listen(server_fd, LISTEN_QUEUE) < 0) {
         perror("listen");
         close(server_fd);
         return NULL;
