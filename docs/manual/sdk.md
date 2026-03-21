@@ -1,23 +1,6 @@
-# SDK Guided Tour
+# Sunspots SDK
 
-This is a guided tour of the Sunspots SDK as it exists today.
-
-It explains:
-
-- where SDK config comes from
-- how the database is chosen
-- what gets written into SQLite
-- how reads decide between observations, forecasts, and interpolation
-- how logging works
-- what module authors should assume when they use the SDK
-
-This is intentionally more than a usage cheat sheet. The goal is to make the runtime model obvious.
-
-## What The SDK Is
-
-The SDK is the canonical persistence and logging layer shared by Sunspots modules.
-
-A module does not talk to SQLite directly. It talks to the SDK.
+The SDK is the canonical persistence and logging layer shared by the modules.
 
 The SDK is responsible for:
 
@@ -28,136 +11,39 @@ The SDK is responsible for:
 - interpolating where the canonical policy allows it
 - writing structured logs
 
-The SDK is not responsible for:
-
-- parsing provider payloads
-- deciding when an external source should be fetched
-- source-specific unit interpretation
-
-Those are fetch/transform/backfill concerns.
-
 ## Mental Model
-
-Think of the SDK as a per-process canonical time-series service with one SQLite file behind it.
 
 ```mermaid
 flowchart LR
-    A[Module Process] --> B[ss_sdk_record_make_*]
-    B --> C[Validation and slot alignment]
-    C --> D[SQLite records table]
-    D --> E[ss_sdk_db_get_canonical]
-    E --> F[Selection rules]
-    F --> G[Interpolation rules]
-    G --> H[Caller receives samples]
+    A[Module] --> B[SDK API]
+    B --> C[Canonical SQLite store]
+    C --> D[Read selection + interpolation]
+    D --> E[Samples]
 ```
 
-Every module process gets:
+## Global Config
 
-- one SDK runtime
-- one lazily opened SQLite handle
-- one location-scoped DB file
+The SDK reads shared runtime config from the `SUNSPOTS_SYSTEM` environment variable. That shared config originates from the system config file, but by the time a module runs, the daemon has exported it as environment data. This is how all modules can use the same database location and log mirror file.
 
-The SDK state is process-local. One module process cannot shut down another process's SDK state.
+## Opening And Closing The DB
 
-## Where Config Comes From
+The goal is to keep the public API simple for module authors: they should be able to call the SDK functions they need without creating, passing around, or closing a database handle themselves.
 
-The SDK reads shared runtime config from `SUNSPOTS_SYSTEM`, not from module-local `SUNSPOTS_CONFIG`.
+This is why the SDK opens the DB lazily. The database is not opened when the process starts. Instead, the first SDK read or write call opens it automatically.
 
-The important paths are:
+Internally, the SDK keeps the SQLite handle in process-local library state. On later read and write calls, it checks that internal state and reuses the already opened handle instead of opening a new database connection each time. The handle stays open for the lifetime of the process.
 
-- `system.location.id`
-- `system.location.latitude`
-- `system.location.longitude`
-- `system.location.name`
-- `system.location.elprisomrade`
-- `system.sdk.db_dir`
-- `system.sdk.log_level`
-- `system.sdk.log_mirror_enabled`
-- `system.sdk.log_mirror_path`
-- `system.sdk.log_mirror_max_bytes`
-
-At runtime, the daemon exports the top-level `system` block as `SUNSPOTS_SYSTEM` when it spawns a module.
-
-### Example
-
-```json
-{
-  "system": {
-    "location": {
-      "id": "stockholm-home",
-      "name": "Stockholm",
-      "latitude": 59.3293,
-      "longitude": 18.0686,
-      "elprisomrade": "SE3"
-    },
-    "sdk": {
-      "db_dir": "db",
-      "log_level": "info",
-      "log_mirror_enabled": true,
-      "log_mirror_path": "logs/sdk.log",
-      "log_mirror_max_bytes": "5242880"
-    }
-  }
-}
-```
-
-## How The Database Is Chosen
-
-The DB identity comes from `system.location.id`.
-
-The filename is:
-
-```text
-<db_dir>/<location_id>.db
-```
-
-Example:
-
-```text
-db/stockholm-home.db
-```
-
-Latitude and longitude are still stored as location metadata, but they are not the DB key anymore.
-
-That matters because:
-
-- the SDK no longer imposes a rounding policy on location identity
-- two nearby houses can have different DBs if they have different `location.id`
-- the DB name follows the config authority, not a derived coordinate precision
-
-```mermaid
-flowchart TD
-    A[SUNSPOTS_SYSTEM.location.id] --> B[Build DB path]
-    B --> C[db/stockholm-home.db]
-    A2[SUNSPOTS_SYSTEM.location.latitude/longitude] --> D[Location metadata tables]
-    D --> C
-```
-
-## When The DB Opens
-
-The SDK opens the DB lazily.
-
-That means the DB is not opened when the process starts. It opens on the first real read, write, or log path that needs SDK runtime.
-
-On open, the SDK:
-
-- resolves the DB path
-- creates parent directories if needed
-- opens SQLite
-- applies SQLite pragmas
-- ensures the schema exists
-- syncs location metadata
-
-Important SQLite settings:
-
-- `journal_mode=WAL`
-- `synchronous=NORMAL`
-- `busy_timeout=5000`
-- `wal_autocheckpoint=1000`
+Shutdown is also automatic. The SDK registers an `atexit` cleanup handler, so when the process exits normally, the SDK closes the database and tears down its internal runtime state without the module needing to do that explicitly.
 
 ## The Storage Model
 
-Everything is stored as canonical records.
+Everything is stored as canonical records, with one row per canonical slot value.
+
+This model is what allows the SDK to store both observations and forecasts, including multiple forecast releases for the same slot when they have different `ingested_utc` values.
+
+This storage model is also a deliberate database design choice. A very wide table with one column per metric would be harder to evolve, harder to validate cleanly, and inefficient for the kind of sparse time-series data the SDK stores. By storing canonical values as rows instead, the SDK can rely on normal SQL mechanisms such as indexes and query planning rather than baking a rigid storage layout into the schema.
+
+That does mean retrieval sometimes does more work at read time, but that is an acceptable tradeoff here. We only read and write once per 15 minute slot during normal operations. The SDK does not optimize for the simplest possible raw storage lookup at any cost. It optimizes for correctness, extensibility, and one consistent canonical contract, while still letting SQLite do the normal database optimization work underneath.
 
 A record contains:
 
@@ -187,11 +73,11 @@ This is useful for weather because the same canonical can exist as both:
 - observed truth
 - forecast release data
 
-But it is not appropriate for every canonical. For example, electricity prices should be written as final observed values once published.
+But it is not appropriate for every canonical. For example, electricity prices should generally be written as final observed values once published. This is a caller policy today rather than a canonical-specific rule enforced by the SDK factories.
 
 ## Writing Data
 
-Most callers should use the factory functions:
+Callers should use the factory functions:
 
 - `ss_sdk_record_make_f64`
 - `ss_sdk_record_make_i64`
@@ -202,6 +88,8 @@ These factories validate:
 - canonical exists
 - value type matches the canonical
 - timestamp is aligned to the slot model
+
+More validation could be added here in the future, but this is the current state.
 
 Then callers write using:
 
@@ -253,6 +141,8 @@ That means:
 - exact duplicate observation rows dedupe cleanly
 - forecast releases can coexist when they have different ingest/release timestamps
 
+This is important because it preserves forecast history instead of overwriting it. That means we can later reconstruct what the forecast looked like at a specific point in time for each slot. This makes backtesting possible: we can compare the forecast versions that were actually available at the time against the observations that later became true, and measure how accurate the forecasts were.
+
 ## Reading Data
 
 The main read entry point is:
@@ -302,18 +192,29 @@ For each requested slot, it applies selection rules based on:
 
 ```mermaid
 flowchart TD
-    A[Requested slot] --> B{Past/current slot?}
-    B -- yes --> C[Prefer observation]
-    C --> D{No observation?}
-    D -- yes --> E[Try forecast]
-    E --> F{Still missing?}
-    F -- yes --> G[Try interpolation if allowed]
-    B -- no --> H[Prefer forecast]
-    H --> I{No forecast?}
-    I -- yes --> J[Step metrics may fall back to observation]
-    J --> K{Still missing?}
-    K -- yes --> L[Try interpolation if allowed]
+    A[Requested slot] --> B{Past/current or future?}
+    B --> C[Choose observation or forecast priority]
+    C --> D{Exact value found?}
+    D -- yes --> E[Return sample]
+    D -- no --> F[Try interpolation if allowed]
+    F --> G[Return sample or partial-data]
 ```
+
+For past and current slots:
+
+- prefer observation
+- if no observation exists, try forecast
+- if neither exists, try interpolation if that canonical allows it
+
+For future slots:
+
+- prefer forecast
+- for step-policy canonicals, an exact observation row may still be used
+- if no exact value exists, try interpolation if that canonical allows it
+
+This public read API is currently optimized for making downstream consumers such as the calculator easy to implement. The caller asks for one canonical series, and the SDK returns the best usable values according to the shared selection policy.
+
+That also means the API is not currently designed for forecast-history analysis as a first-class use case. Past forecast rows can exist in storage, but the public read API does not let the caller explicitly request "forecast only" data for past slots when an observation also exists. If we want to support that kind of backtesting or forecast-version analysis directly, the SDK API will need to be extended with a more explicit query mode.
 
 ## Interpolation
 
@@ -327,7 +228,7 @@ Three broad policies exist:
 
 Typical use:
 
-- weather metrics: linear
+- many continuous weather metrics: linear
 - spot prices: step
 - discrete symbols / booleans: none
 
@@ -337,6 +238,10 @@ Important limit:
 
 - if the gap is too large, the SDK does not fabricate a value
 - the read returns partial-data status instead
+
+The interpolation limit is a hard cap of 6 hours. If filling a gap would require interpolation beyond that limit, the SDK does not fabricate a value and the read returns partial-data instead.
+
+In practice, linear interpolation is used for selected `f64` canonicals, while step interpolation uses the latest earlier value within the allowed gap. Future-slot fallback to exact observation rows is only allowed for step-policy metrics such as spot price.
 
 This is why raw storage can be hourly while reads still produce quarter-hour samples. The SDK can interpolate on the read path when the canonical policy says that is valid.
 
@@ -351,7 +256,7 @@ The SDK provides structured logging helpers:
 
 Logs go through the SDK logging layer, which writes to:
 
-- syslog / journald
+- the system `syslog()` interface
 - optional mirror file
 
 Mirror settings come from `system.sdk` or the equivalent exported env vars.
@@ -368,7 +273,7 @@ logs/sdk.log
 flowchart LR
     A[Module code] --> B[SS_LOG_* macro]
     B --> C[SDK log formatter]
-    C --> D[syslog/journald]
+    C --> D[syslog]
     C --> E[optional mirror file]
 ```
 
@@ -393,11 +298,11 @@ The SDK uses internal `atexit` cleanup. Normal module code does not need to mana
 If you are writing a module on top of the SDK:
 
 1. Get shared runtime config from `SUNSPOTS_SYSTEM`, not from ad hoc env vars.
-2. Use the record factory functions. Do not hand-build canonical records unless you really have to.
+2. Use the record factory functions. Do not hand-build canonical records. If functionality is missing we extend the SDK, we dont "handroll" records.
 3. Treat `PARTIAL_DATA` and `CLAMPED_*` as meaningful results, not as random failures.
 4. Write final authoritative data as `observation`.
 5. Only use `forecast` when the source truly has release semantics.
-6. Let the SDK handle interpolation. Do not pre-interpolate provider payloads into fake canonical samples unless that is explicitly intended.
+6. Let the SDK handle interpolation. Do not pre-interpolate provider payloads into fake canonical samples.
 
 ## Short Usage Examples
 
@@ -411,6 +316,7 @@ st = ss_sdk_record_make_f64(
     &rec,
     SS_METRIC_WEATHER_TEMPERATURE_AIR_2M_C,
     7.5,
+    /* Prefer the API timestamp when available. */
     (int64_t)time(NULL),
     SS_SDK_DATA_OBSERVATION
 );

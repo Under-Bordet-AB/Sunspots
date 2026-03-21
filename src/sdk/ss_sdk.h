@@ -49,44 +49,65 @@ typedef enum {
     SS_SDK_LOG_ERROR
 } ss_sdk_log_level;
 
-// Canonical record persisted by SDK DB backend.
+/**
+ * @brief Canonical record persisted by the SDK DB backend.
+ *
+ * This is the public write payload used by `ss_sdk_db_write_record()` and
+ * `ss_sdk_db_write_records()`.
+ */
 typedef struct ss_sdk_record {
-    ss_metric_id metric; // Canonical metric identifier from SDK catalog.
-    ss_sdk_value_type value_type; // Value type expected by metric metadata.
-    ss_sdk_value value; // Actual value payload.
-    int64_t ts_start_utc; // 15-minute slot start timestamp (UTC epoch seconds).
-    int64_t ts_end_utc; // 15-minute slot end timestamp (UTC epoch seconds).
-    ss_sdk_data_kind data_kind; // Observation/forecast marker.
-    int64_t ingested_utc; // Optional ingest/release timestamp override (UTC epoch seconds). 0 => SDK uses current time.
+    ss_metric_id metric; /**< Canonical metric identifier from the SDK catalog. */
+    ss_sdk_value_type value_type; /**< Value type expected by the metric metadata. */
+    ss_sdk_value value; /**< Actual value payload. */
+    int64_t ts_start_utc; /**< 15-minute slot start timestamp in UTC epoch seconds. */
+    int64_t ts_end_utc; /**< 15-minute slot end timestamp in UTC epoch seconds. */
+    ss_sdk_data_kind data_kind; /**< Observation or forecast marker. */
+    int64_t ingested_utc; /**< Optional ingest/release timestamp override in UTC epoch seconds. `0` lets the SDK use its default behavior. */
 } ss_sdk_record;
 
+/**
+ * @brief Bitfield describing how a returned sample was produced.
+ */
 typedef uint8_t ss_sdk_sample_flags;
 
+/**
+ * @brief Sample flags returned on `ss_sdk_sample.flags`.
+ */
 enum {
-    SS_SDK_SAMPLE_OBSERVED = 1U << 0,
-    SS_SDK_SAMPLE_FORECAST = 1U << 1,
-    SS_SDK_SAMPLE_INTERPOLATED = 1U << 2
+    SS_SDK_SAMPLE_OBSERVED = 1U << 0, /**< Sample came from an observation row. */
+    SS_SDK_SAMPLE_FORECAST = 1U << 1, /**< Sample came from a forecast row. */
+    SS_SDK_SAMPLE_INTERPOLATED = 1U << 2 /**< Sample was synthesized by interpolation. */
 };
 
+/**
+ * @brief One selected sample returned by the SDK read API.
+ */
 typedef struct {
-    int64_t ts_utc;
-    ss_metric_id canonical;
-    ss_sdk_value_type value_type;
-    ss_sdk_value value;
-    ss_sdk_sample_flags flags;
+    int64_t ts_utc; /**< 15-minute slot timestamp in UTC epoch seconds. */
+    ss_metric_id canonical; /**< Canonical metric identifier. */
+    ss_sdk_value_type value_type; /**< Value type of `value`. */
+    ss_sdk_value value; /**< Returned value payload. */
+    ss_sdk_sample_flags flags; /**< Selection/interpolation metadata for this sample. */
 } ss_sdk_sample;
 
+/**
+ * @brief Owned output buffer returned by `ss_sdk_db_get_canonical()`.
+ *
+ * Release it with `ss_sdk_db_free_samples()`.
+ */
 typedef struct {
-    ss_sdk_sample *samples;
-    size_t count;
+    ss_sdk_sample *samples; /**< SDK-allocated sample array, or `NULL`. */
+    size_t count; /**< Number of valid entries in `samples`. */
 } ss_sdk_samples_out;
 
-// Optional structured logging context for advanced log calls.
+/**
+ * @brief Optional structured context for advanced log calls.
+ */
 typedef struct ss_sdk_log_fields {
-    const char *module; // Logical module name (example: "fetch.openmeteo").
-    const char *source_api; // Optional source API identifier.
-    ss_metric_id metric; // Optional metric associated with log event.
-    int64_t ts_utc; // Optional event timestamp (UTC epoch seconds).
+    const char *module; /**< Logical module name, for example `"fetch.openmeteo"`. */
+    const char *source_api; /**< Optional source API identifier. */
+    ss_metric_id metric; /**< Optional metric associated with the log event. */
+    int64_t ts_utc; /**< Optional event timestamp in UTC epoch seconds. */
 } ss_sdk_log_fields;
 
 /**
@@ -125,6 +146,13 @@ ss_sdk_status ss_sdk_db_write_records(
  * - Validates data_kind.
  * - Normalizes `ts_utc` down to nearest 15-minute UTC slot.
  * - Sets `ts_end_utc = ts_start_utc + 900`.
+ *
+ * @param out Output record.
+ * @param metric Canonical metric identifier.
+ * @param value f64 payload.
+ * @param ts_utc Input timestamp in UTC epoch seconds.
+ * @param data_kind Observation or forecast.
+ * @return SDK status code.
  */
 ss_sdk_status ss_sdk_record_make_f64(
     ss_sdk_record *out,
@@ -135,6 +163,13 @@ ss_sdk_status ss_sdk_record_make_f64(
 
 /**
  * @brief Factory: build a canonical record for an i64 metric.
+ *
+ * @param out Output record.
+ * @param metric Canonical metric identifier.
+ * @param value i64 payload.
+ * @param ts_utc Input timestamp in UTC epoch seconds.
+ * @param data_kind Observation or forecast.
+ * @return SDK status code.
  */
 ss_sdk_status ss_sdk_record_make_i64(
     ss_sdk_record *out,
@@ -145,6 +180,13 @@ ss_sdk_status ss_sdk_record_make_i64(
 
 /**
  * @brief Factory: build a canonical record for a bool metric.
+ *
+ * @param out Output record.
+ * @param metric Canonical metric identifier.
+ * @param value bool payload.
+ * @param ts_utc Input timestamp in UTC epoch seconds.
+ * @param data_kind Observation or forecast.
+ * @return SDK status code.
  */
 ss_sdk_status ss_sdk_record_make_bool(
     ss_sdk_record *out,
@@ -182,10 +224,6 @@ ss_sdk_status ss_sdk_db_get_canonical(
  */
 void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
 
-
-
-
-
 /**
  * @brief Log helper macro (debug level) with source location.
  */
@@ -197,17 +235,20 @@ void ss_sdk_db_free_samples(ss_sdk_samples_out *out);
 #endif
 #endif
 
+/**
+ * @brief Write a debug log event with auto-captured source location.
+ */
 #define SS_LOG_DEBUG(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_DEBUG, (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
- * @brief Log helper macro (info level) with source location.
+ * @brief Write an info log event with auto-captured source location.
  */
 #define SS_LOG_INFO(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_INFO,  (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
- * @brief Log helper macro (warning level) with source location.
+ * @brief Write a warning log event with auto-captured source location.
  */
 #define SS_LOG_WARN(event, message)  ss_sdk_log_write_auto(SS_SDK_LOG_WARN,  (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 /**
- * @brief Log helper macro (error level) with source location.
+ * @brief Write an error log event with auto-captured source location.
  */
 #define SS_LOG_ERROR(event, message) ss_sdk_log_write_auto(SS_SDK_LOG_ERROR, (event), (message), SS_SDK_LOG_FILE_TOKEN, __LINE__, __func__)
 

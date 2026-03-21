@@ -49,6 +49,8 @@ The user can update the configuration file during runtime, which triggers a "hot
 
 The daemon process follows standard conventions for detaching from the shell to ensure it cannot be interrupted. The process runs under the system's `init` process and must be terminated by signaling its PID.
 
+For a deeper explanation of daemon behavior and configuration flow, see [docs/manual/daemon_manual.md](docs/manual/daemon_manual.md).
+
 ### Daemon design choices
 The module is written using the opaque pattern to hide implementation details within the C files. Only public APIs are exposed in the header files; memory allocation and deallocation are handled by the module itself rather than the caller. No global optimization has been performed on the memory layout due to the non-urgent nature of the system; the code utilizes arrays of structs to prioritize ease of use and readability.
 
@@ -59,14 +61,28 @@ Each fetcher follows the same general pattern: read runtime settings from the en
 
 One technical design choice is that fetching, transformation, and persistence are kept as separate responsibilities. This keeps the source-specific code relatively small and makes it easier to replace an upstream API without changing the compute layer. Another is that fetchers write into the common database rather than talking directly to other modules, which preserves the system's one-way data flow and avoids tight coupling between components.
 
+For a deeper explanation of the fetch layer, see [docs/manual/fetch.md](docs/manual/fetch.md).
+
 ## Normalizing data
 This subsystem parses external JSON data using the cJSON library and converts it into a consistent internal format. It validates required fields, supports both ISO8601 and Unix timestamps, and normalizes values such as temperature into standard units. Where applicable, optional fields are handled gracefully using presence flags, allowing partial data to be processed without failure.
 
 The design is straightforward and explicit, with clear validation and error handling and minimal abstraction beyond a few helper macros. This keeps the code predictable and easy to follow. It is, however, tightly tied to the structure of the upstream JSON, so changes to the API may require updates to the parsing logic.
 
+For a deeper explanation of the transform layer and its role in the system, see [quick_explanations/transform.md](quick_explanations/transform.md).
+
 ## Storing data
+Sunspots-systems stores shared runtime data through the SDK, which acts as the system's canonical storage layer. The SDK writes time-series values into SQLite as canonical records, where each row represents one canonical value for one 15-minute slot together with its `data_kind` and `ingested_utc`. This makes it possible to store both observations and forecast releases, including multiple forecast versions for the same slot.
+
+The public SDK API is intentionally narrow. Modules mainly create records through factory functions and then write them through the SDK write API. This keeps call sites simple and ensures that validation, timestamp alignment, and canonical typing are handled consistently in one place instead of being reimplemented by each module.
+
+For a deeper explanation of the SDK storage model, see [docs/manual/sdk.md](docs/manual/sdk.md).
 
 ## Retrieving stored data
+The same SDK is also responsible for canonical reads. A caller asks for one canonical series, and the SDK returns the best usable values for each requested 15-minute slot according to its shared selection policy. For past and current slots it prefers observations, while future slots prefer forecasts.
+
+Where the canonical allows it, the SDK can also normalize values into the shared 15-minute slot model by interpolation. This exists mainly to make downstream consumers such as the compute stage easier to implement, since they can read one consistent quarter-hour timeline instead of each module needing its own resampling logic. The interpolation limit is a hard cap of 6 hours.
+
+For a deeper explanation of SDK read selection, interpolation, and status handling, see [docs/manual/sdk.md](docs/manual/sdk.md).
 
 ## Computing data and storing results
 The compute stage reads the canonical weather and price series from the database and turns them into recommendations for the next 24 hours, divided into 96 quarters. Before calculating, the compute manager waits for fresh observed weather data so it does not produce a new plan from stale inputs. It then loads irradiance, cloud cover, temperature, and spot-price values, aligns them into fixed 15-minute slots, and computes the usable horizon from the data that is actually available.
@@ -74,6 +90,8 @@ The compute stage reads the canonical weather and price series from the database
 The calculation itself is separated from orchestration. The compute manager selects an algorithm from configuration, currently either a simple heuristic model or a linear-programming-based model, and both produce four normalized control values between 0 and 1: buying electricity, direct use, battery charging, and selling excess energy. This separation makes it possible to experiment with planning strategies without rewriting the surrounding module logic.
 
 Once a result has been produced, the module writes JSON files to the `endpoints` directory. `forecast.json` contains the aligned input forecast data, while `result.json` contains the recommendation series that the frontend and client can serve directly. Storing the output as ready-to-serve JSON is a pragmatic choice: it keeps the serving layer simple and decouples user-facing access from the internal database schema.
+
+For a deeper explanation of the compute stage, see [docs/manual/compute.md](docs/manual/compute.md).
 
 ## Serving results to clients
 
