@@ -16,12 +16,13 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
-/* ── Log file rotation ceiling ──────────────────────────────────────────────
+/* Log file rotation ceiling
  * Controlled by the same BUF_ flags in CMakeLists (currently BUF_8 = 8 KB).
  * When a new message would push the file past this ceiling it is truncated
  * to zero before writing — the frontend always reads the whole file so this
  * acts as a clean scroll rather than a roll.
- * ─────────────────────────────────────────────────────────────────────────── */
+ */
+
 #if   defined(BUF_64)
     #define LOG_FILE_MAX 65536
 #elif defined(BUF_32)
@@ -41,10 +42,8 @@
 #define MAX_MSG_SIZE 512
 #define MAX_EVENTS   2
 
-/* ── Shared signal flag ─────────────────────────────────────────────────── */
 static volatile sig_atomic_t g_running = 1;
 
-/* ── Types ──────────────────────────────────────────────────────────────── */
 typedef struct journal_log
 {
     char   *path_to_log;
@@ -58,7 +57,6 @@ typedef struct journal_log
     int     epoll_fd;
 } journal_log_t;
 
-/* ── Forward declarations ───────────────────────────────────────────────── */
 static void signal_handler(int signum);
 static int  full_write(int fd, const void *buf, size_t len);
 static void daemon_logger_write(journal_log_t *self, const char *msg, size_t len);
@@ -68,7 +66,6 @@ static int  daemon_logger_run(journal_log_t *self);
 static int  daemon_logger_init(journal_log_t **self_ptr);
 static int  daemon_logger_deinit(journal_log_t **self_ptr);
 
-/* ── main ───────────────────────────────────────────────────────────────── */
 int main(void)
 {
     openlog("SUNSPOTS_LOGGER", LOG_PID, LOG_DAEMON);
@@ -98,14 +95,12 @@ int main(void)
     return EXIT_SUCCESS;
 }
 
-/* ── signal_handler ─────────────────────────────────────────────────────── */
 static void signal_handler(int signum)
 {
     (void)signum;
     g_running = 0;
 }
 
-/* ── daemon_logger_set_config ───────────────────────────────────────────── */
 static int daemon_logger_set_config(journal_log_t *self)
 {
     char *sys_env = getenv("SUNSPOTS_SYSTEM");
@@ -122,7 +117,6 @@ static int daemon_logger_set_config(journal_log_t *self)
         return -1;
     }
 
-    /* SUNSPOTS_SYSTEM is the unwrapped value-object: read socket_path directly */
     cJSON *sock = cJSON_GetObjectItemCaseSensitive(root, "socket_path");
     if (cJSON_IsString(sock))
     {
@@ -144,7 +138,63 @@ static int daemon_logger_set_config(journal_log_t *self)
     return (self->path_to_log && self->socket_path && self->hb_interval > 0) ? 0 : -1;
 }
 
-/* ── daemon_logger_init ─────────────────────────────────────────────────── */
+static int daemon_logger_socket_init(journal_log_t *self)
+{
+    self->socket_fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (self->socket_fd < 0) return -1;
+
+    unlink(self->socket_path);
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, self->socket_path, sizeof(addr.sun_path) - 1);
+
+    if (bind(self->socket_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) return -1;
+
+    chmod(self->socket_path, 0666);
+    return 0;
+}
+
+static void daemon_logger_write(journal_log_t *self, const char *msg, size_t len)
+{
+    if (!self || !msg || len == 0) return;
+
+    struct stat st;
+    if (fstat(self->log_file_fd, &st) == 0
+        && (size_t)st.st_size + len + 1 > LOG_FILE_MAX)
+    {
+        if (ftruncate(self->log_file_fd, 0) < 0)
+        {
+            syslog(LOG_WARNING, "Failed to truncate log file: %m");
+        }
+    }
+
+    if (full_write(self->log_file_fd, msg, len) < 0)
+    {
+        syslog(LOG_WARNING, "Failed to write message to log file: %m");
+        return;
+    }
+    full_write(self->log_file_fd, "\n", 1);
+}
+
+static int full_write(int fd, const void *buf, size_t len)
+{
+    const char *p = buf;
+    while (len > 0)
+    {
+        ssize_t n = write(fd, p, len);
+        if (n < 0)
+        {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        p   += n;
+        len -= (size_t)n;
+    }
+    return 0;
+}
+
 static int daemon_logger_init(journal_log_t **self_ptr)
 {
     if (!self_ptr) return -1;
@@ -231,26 +281,6 @@ static int daemon_logger_init(journal_log_t **self_ptr)
     return 0;
 }
 
-/* ── daemon_logger_socket_init ──────────────────────────────────────────── */
-static int daemon_logger_socket_init(journal_log_t *self)
-{
-    self->socket_fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (self->socket_fd < 0) return -1;
-
-    unlink(self->socket_path);
-
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, self->socket_path, sizeof(addr.sun_path) - 1);
-
-    if (bind(self->socket_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) return -1;
-
-    chmod(self->socket_path, 0666);
-    return 0;
-}
-
-/* ── daemon_logger_run ──────────────────────────────────────────────────── */
 static int daemon_logger_run(journal_log_t *self)
 {
     struct epoll_event events[MAX_EVENTS];
@@ -294,48 +324,6 @@ static int daemon_logger_run(journal_log_t *self)
     return 0;
 }
 
-/* ── daemon_logger_write ────────────────────────────────────────────────── */
-static void daemon_logger_write(journal_log_t *self, const char *msg, size_t len)
-{
-    if (!self || !msg || len == 0) return;
-
-    struct stat st;
-    if (fstat(self->log_file_fd, &st) == 0
-        && (size_t)st.st_size + len + 1 > LOG_FILE_MAX)
-    {
-        if (ftruncate(self->log_file_fd, 0) < 0)
-        {
-            syslog(LOG_WARNING, "Failed to truncate log file: %m");
-        }
-    }
-
-    if (full_write(self->log_file_fd, msg, len) < 0)
-    {
-        syslog(LOG_WARNING, "Failed to write message to log file: %m");
-        return;
-    }
-    full_write(self->log_file_fd, "\n", 1);
-}
-
-/* ── full_write ─────────────────────────────────────────────────────────── */
-static int full_write(int fd, const void *buf, size_t len)
-{
-    const char *p = buf;
-    while (len > 0)
-    {
-        ssize_t n = write(fd, p, len);
-        if (n < 0)
-        {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        p   += n;
-        len -= (size_t)n;
-    }
-    return 0;
-}
-
-/* ── daemon_logger_deinit ───────────────────────────────────────────────── */
 static int daemon_logger_deinit(journal_log_t **self_ptr)
 {
     if (!self_ptr || !*self_ptr) return -1;
