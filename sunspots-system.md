@@ -75,6 +75,8 @@ Sunspots-systems stores shared runtime data through the SDK, which acts as the s
 
 The public SDK API is intentionally narrow. Modules mainly create records through factory functions and then write them through the SDK write API. This keeps call sites simple and ensures that validation, timestamp alignment, and canonical typing are handled consistently in one place instead of being reimplemented by each module.
 
+Concurrency is handled at two levels: SQLite coordinates access between different processes sharing the same database file, and the SDK uses an internal mutex to protect its process-local database handle.
+
 For a deeper explanation of the SDK storage model, see [docs/manual/sdk.md](docs/manual/sdk.md).
 
 ## Retrieving stored data

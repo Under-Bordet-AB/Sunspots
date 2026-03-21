@@ -33,6 +33,8 @@ This is why the SDK opens the DB lazily. The database is not opened when the pro
 
 Internally, the SDK keeps the SQLite handle in process-local library state. On later read and write calls, it checks that internal state and reuses the already opened handle instead of opening a new database connection each time. The handle stays open for the lifetime of the process.
 
+Concurrency is handled at two levels: SQLite coordinates access between different processes sharing the same database file, and the SDK uses an internal mutex to protect its process-local database handle.
+
 Shutdown is also automatic. The SDK registers an `atexit` cleanup handler, so when the process exits normally, the SDK closes the database and tears down its internal runtime state without the module needing to do that explicitly.
 
 ## The Storage Model
