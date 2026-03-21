@@ -29,10 +29,10 @@ A system that helps optimize a user's solar panels to achieve lower energy costs
 
 These recommendations are provided as a value between 0 and 1. Based on these values, the user can determine the most optimal course of action for their specific needs.
 
-For Sunspots-systems to work as intended, the system is dependent on external inputs. These inputs come in the form of weather forecasts, solar production estimates, and electricity spot-price data.
+For Sunspots-systems to work as intended, the system is dependent on external inputs. These inputs come in the form of weather forecasts, solar radiatuin estimates, and electricity spot-price data.
 
 ### 1.1 System design
-Sunspots-systems is a distributed system built around the philosophy that each component serves one purpose and one purpose only. Data flows through the system in one direction; none of the components are aware of each other, instead interacting solely by reading from or writing to a common database. 
+Sunspots-systems is a distributed system built around the philosophy that each component serves one purpose and one purpose only. Data flows through the system in one direction; none of the components are aware of each other, interacting only by reading from or writing to a common database. 
 
 The daemon relies heavily on the kernel for heavy lifting. Together, they form a modular ecosystem working toward a common goal. The design is general enough that it could be adapted to solve any similar task if the appropriate modules were written.
 
