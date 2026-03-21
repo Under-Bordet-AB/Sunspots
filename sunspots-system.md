@@ -25,6 +25,7 @@ A system that helps optimize a user's solar panels to achieve lower energy costs
 * Use electricity
 * Store electricity
 * Sell electricity
+* Buy electricity
 
 These recommendations are provided as a value between 0 and 1. Based on these values, the user can determine the most optimal course of action for their specific needs.
 
