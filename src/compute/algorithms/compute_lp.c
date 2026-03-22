@@ -2,7 +2,6 @@
 
 #include <math.h>
 #include <stdlib.h>
-#include <syslog.h>
 
 // Column index mapping for each slot decision variable
 #define BUY_COL(t) (1 + (t))
@@ -82,11 +81,6 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
     }
 
     int matrix_index = 1;
-
-    double highest_pv_cap_norm = 0.0;
-    double lowest_pv_cap_norm = 1.0;
-    double highest_price_signal = 0.0;
-    double lowest_price_signal = 1.0;
 
     for (int time_slot = 0; time_slot < slots; time_slot++) {
         // Row indices for this slot
@@ -171,17 +165,7 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
         col_idx[matrix_index] = SELL_COL(slots, time_slot);
         value[matrix_index] = 1.0;
         matrix_index++;
-
-        if (pv_cap_norm > highest_pv_cap_norm) highest_pv_cap_norm = pv_cap_norm;
-        if (pv_cap_norm < lowest_pv_cap_norm) lowest_pv_cap_norm = pv_cap_norm;
-        if (price_signal > highest_price_signal) highest_price_signal = price_signal;
-        if (price_signal < lowest_price_signal) lowest_price_signal = price_signal;
     }
-
-    syslog(LOG_INFO, "Highest pv_cap_norm: %.3f", highest_pv_cap_norm);
-    syslog(LOG_INFO, "Lowest pv_cap_norm: %.3f", lowest_pv_cap_norm);
-    syslog(LOG_INFO, "Highest price_signal: %.3f", highest_price_signal);
-    syslog(LOG_INFO, "Lowest price_signal: %.3f", lowest_price_signal);
 
     // Load all constraint coefficients in one call
     glp_load_matrix(problem, matrix_index - 1, row_idx, col_idx, value);
