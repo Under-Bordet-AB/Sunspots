@@ -6,8 +6,10 @@
 #define IRRADIANCE_REF_WM2 400.0 // Reference irradiance (W/m^2) (for normalization)
 #define TEMP_COEFF_PER_C -0.004 // Power temperature coefficient (-0.4% power per +1C above 25C)
 
-#define PRICE_HIGH 2.0 // Example high price for normalization
-#define PRICE_LOW 0.1 // Example low price for normalization
+//#define PRICE_HIGH 2.0 // Example high price for normalization
+//#define PRICE_LOW 0.1 // Example low price for normalization
+#define PRICE_HIGH 0.9 // Example high price for normalization
+#define PRICE_LOW 0.0 // Example low price for normalization
 
 static double clamp01(double value) {
     if (value < 0.0) {
@@ -42,7 +44,6 @@ int compute_heuristic(compute_data_t* data_in, result_t* result_out) {
         double irradiance_wm2 = data_in->irradiance[time_slot];
         double cloudiness_percent = data_in->cloudiness[time_slot];
         double ambient_temp_c = data_in->temperature[time_slot];
-        double price_kwh = data_in->price_kwh[time_slot];
 
         // Normalize cloudiness variable
         double cloudiness_factor = clamp01(1.0 - (cloudiness_percent / 100.0));
