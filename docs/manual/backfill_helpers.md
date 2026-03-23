@@ -1,25 +1,17 @@
-# Backfill Guided Tour
+# Backfillers
 
-This manual explains the backfill subsystem as it exists today.
+This manual explains the backfill helpers.
 
 It covers both current workers:
 
 - `BackfillOpenMeteo`
 - `BackfillElprisjustnu`
 
-The goal is to explain how these workers really behave:
-
-- how the daemon starts them
-- where they get config
-- what they write into the SDK
-- why weather backfill is slower than price backfill
-- what "done" actually means for each worker
-
 ## What Backfill Is
 
 Backfill is a daemon-managed ingest and repair subsystem under `src/backfill`.
 
-It exists to do the jobs that one-shot live fetchers are bad at:
+It exists to do the jobs that one-shot live fetchers dont:
 
 - filling historical gaps
 - rebuilding canonical SDK coverage from a configured start date
