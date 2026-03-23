@@ -9,7 +9,6 @@
 
 #include "../fetch_utils.h"
 
-#include "../../libs/curly.h"
 #include "../../libs/json/cJSON.h"
 
 #include "../../sdk/ss_sdk.h"
@@ -34,14 +33,14 @@ int main() {
 
     openlog("SUNSPOTS_FETCH_ELPRISJUSTNU", LOG_PID, LOG_DAEMON);
 
-    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Starting...");
+    syslog(LOG_INFO, "Starting...");
     
     int rc = EXIT_FAILURE;
 
     if (fetch_env_vars() < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Failed to set environment variables, using default=%s", g_spotprice_area);
+        syslog(LOG_WARNING, "Failed to set environment variables, using default=%s", g_spotprice_area);
     } else {
-        syslog(LOG_INFO, "Fetch API - Elprisjustnu - Fetching spot-price for area=%s", g_spotprice_area);
+        syslog(LOG_INFO, "Fetching spot-price for area=%s", g_spotprice_area);
     }
 
     time_t now = time(NULL);
@@ -49,7 +48,7 @@ int main() {
     struct tm* base_ptr = localtime(&now);
 
     if (!base_ptr) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - localtime failed.");
+        syslog(LOG_WARNING, "localtime failed.");
         goto done;
     }
 
@@ -60,7 +59,7 @@ int main() {
         day_tm.tm_mday += day_offset;
 
         if (mktime(&day_tm) == (time_t)-1) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - mktime failed for day_offset=%d.", day_offset);
+            syslog(LOG_WARNING, "mktime failed for day_offset=%d.", day_offset);
             goto done;
         }
 
@@ -92,26 +91,26 @@ static int fetch_and_store_for_day(const struct tm* day, int day_offset) {
     );
 
     if (fetch_from_url(url, &buffer, 30) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't fetch from API for day_offset=%d.", day_offset);
+        syslog(LOG_WARNING, "Couldn't fetch from API for day_offset=%d.", day_offset);
         goto done;
     }
 
     if (!buffer) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Buffer is NULL for day_offset=%d.", day_offset);
+        syslog(LOG_WARNING, "Buffer is NULL for day_offset=%d.", day_offset);
         goto done;
     }
 
     if (normalize_data(buffer, &price_data) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't normalize data for day_offset=%d.", day_offset);
+        syslog(LOG_WARNING, "Couldn't normalize data for day_offset=%d.", day_offset);
         goto done;
     }
 
     if (save_to_database(price_data) < 0) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Couldn't save data to database for day_offset=%d.", day_offset);
+        syslog(LOG_WARNING, "Couldn't save data to database for day_offset=%d.", day_offset);
         goto done;
     }
 
-    syslog(LOG_INFO, "Fetch API - Elprisjustnu - Data successfully normalized and saved for day_offset=%d.", day_offset);
+    syslog(LOG_INFO, "Data successfully normalized and saved for day_offset=%d.", day_offset);
     rc = 0;
 
 done:
@@ -130,13 +129,13 @@ int fetch_env_vars() {
     const char* blob_system = getenv("SUNSPOTS_SYSTEM");
 
     if (blob_system == NULL || blob_system[0] == '\0') {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - SUNSPOTS_SYSTEM missing.");
+        syslog(LOG_WARNING, "SUNSPOTS_SYSTEM missing.");
         return -1;
     }
 
     cJSON* root = cJSON_Parse(blob_system);
     if (!root) {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Invalid SUNSPOTS_SYSTEM JSON.");
+        syslog(LOG_WARNING, "Invalid SUNSPOTS_SYSTEM JSON.");
         return -1;
     }
 
@@ -153,14 +152,14 @@ int fetch_env_vars() {
         if (n > 0 && n < sizeof(g_spotprice_area)) {
             strncpy(g_spotprice_area, area_obj->valuestring, sizeof(g_spotprice_area) - 1);
             g_spotprice_area[sizeof(g_spotprice_area) - 1] = '\0';
-            syslog(LOG_INFO, "Fetch API - Elprisjustnu - Using area=%s from SUNSPOTS_SYSTEM.", g_spotprice_area);
+            syslog(LOG_INFO, "Using area=%s from SUNSPOTS_SYSTEM.", g_spotprice_area);
         } else {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - Invalid elprisomrade length.");
+            syslog(LOG_WARNING, "Invalid elprisomrade length.");
             cJSON_Delete(root);
             return -1;
         }
     } else {
-        syslog(LOG_WARNING, "Fetch API - Elprisjustnu - elprisomrade missing.");
+        syslog(LOG_WARNING, "elprisomrade missing.");
         cJSON_Delete(root);
         return -1;
     }
@@ -226,17 +225,15 @@ int save_to_database(price_data_t* price_data) {
             SS_SDK_DATA_FORECAST);
 
         if (status != SS_SDK_OK) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - record_make failed at i=%d status=%d", i, (int)status);
+            syslog(LOG_WARNING, "record_make failed at i=%d status=%d", i, (int)status);
             return -1;
         }
 
         status = ss_sdk_db_write_record(&record);
         if (status != SS_SDK_OK) {
-            syslog(LOG_WARNING, "Fetch API - Elprisjustnu - db_write failed at i=%d status=%d", i, (int)status);
+            syslog(LOG_WARNING, "db_write failed at i=%d status=%d", i, (int)status);
             return -1;
         }
-
-        printf("Price nr. %d: %.6f\n", i, price_data->price_arr_SEK_per_kWh[i]);
     }
 
     return 0;
