@@ -35,6 +35,7 @@ Optional packages for extra workflows:
 
 ```bash
 sudo apt install -y \
+  afl++ \
   sqlite3 \
   valgrind \
   clang-tidy \
@@ -51,6 +52,7 @@ One-shot full developer setup (build + tests + warnings tools):
 ```bash
 sudo apt update
 sudo apt install -y \
+  afl++ \
   build-essential \
   cmake \
   pkg-config \
@@ -93,6 +95,9 @@ make build
 make build-valgrind
 make build-tests
 make build-tests-valgrind
+make build-fuzz
+make fuzz-server
+make fuzz-sdk
 make list-modules
 make list-modules-valgrind
 make run
@@ -125,8 +130,50 @@ Notes:
 - `make run-valgrind M=<module>` performs real Valgrind execution and writes per-process logs with child tracing.
 - `make build-tests` and `make build-tests-valgrind` compile test binaries only.
 - `make run-tests` and `make run-tests-valgrind` run tests only and do not rebuild.
+- `make build-fuzz` configures and builds one AFL++ fuzz target selected by `FUZZ_TARGET=...`.
+- `make fuzz-server` runs the frontend/server AFL++ target (`http_request_fuzzer`).
+- `make fuzz-sdk` runs the SDK DB AFL++ target (`sdk_db_fuzzer`).
 - `make warnings` runs build lanes (`build`, `build-valgrind`, `tidy`) and regenerates warning/analysis reports.
 - `make e2e` and `make e2e-valgrind` are placeholders and currently report "not yet implemented".
+
+## Fuzzing
+
+This repository now uses AFL++ for fuzzing.
+
+Install AFL++ on Ubuntu/Debian:
+
+```bash
+sudo apt install -y afl++
+```
+
+Available fuzz targets:
+
+- `make fuzz-server`
+  Runs the frontend/server request pipeline fuzzer (`http_request_fuzzer`).
+- `make fuzz-sdk`
+  Runs the SDK database fuzzer (`sdk_db_fuzzer`).
+
+You can also build or run a specific harness directly:
+
+```bash
+make build-fuzz FUZZ_TARGET=http_request_fuzzer
+make run-fuzz FUZZ_TARGET=http_request_fuzzer
+
+make build-fuzz FUZZ_TARGET=sdk_db_fuzzer
+make run-fuzz FUZZ_TARGET=sdk_db_fuzzer
+```
+
+If AFL++ aborts on the host `core_pattern` check, set:
+
+```bash
+sudo sh -c 'echo core > /proc/sys/kernel/core_pattern'
+```
+
+If you only want a local bypass for testing, use:
+
+```bash
+AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 make fuzz-server
+```
 
 ## Main Outputs
 

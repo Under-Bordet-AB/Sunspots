@@ -15,6 +15,8 @@ PROJECT_CONFIG_PATH ?= config/sunspots.json
 VALGRIND_AUTOSWAP_CONFIG ?= 1
 M ?=
 BUILD_DIR ?= build/debug
+FUZZ_BUILD_ROOT ?= build/fuzz
+FUZZ_BUILD_DIR = $(FUZZ_BUILD_ROOT)/$(FUZZ_ENGINE)
 VALGRIND_BUILD_DIR ?= build/valgrind
 TIDY_BUILD_DIR ?= build/tidy
 MODULE_TARGET_HELPER ?= scripts/module_targets.sh
@@ -25,6 +27,9 @@ DEBUG_CONFIG_LOG ?= $(RAW_LOGS_DIR)/debug_configure.log
 DEBUG_BUILD_LOG ?= $(RAW_LOGS_DIR)/debug_build.log
 DEBUG_TESTS_BUILD_LOG ?= $(RAW_LOGS_DIR)/debug_build_tests.log
 DEBUG_TEST_LOG ?= $(RAW_LOGS_DIR)/debug_test.log
+FUZZ_CONFIG_LOG ?= $(RAW_LOGS_DIR)/fuzz_configure.log
+FUZZ_BUILD_LOG ?= $(RAW_LOGS_DIR)/fuzz_build.log
+FUZZ_RUN_LOG ?= $(RAW_LOGS_DIR)/fuzz_run.log
 VALGRIND_CONFIG_LOG ?= $(RAW_LOGS_DIR)/valgrind_configure.log
 VALGRIND_BUILD_LOG ?= $(RAW_LOGS_DIR)/valgrind_build.log
 VALGRIND_TESTS_BUILD_LOG ?= $(RAW_LOGS_DIR)/valgrind_build_tests.log
@@ -57,6 +62,16 @@ BACKFILL_USAGE_TRACKER ?= logs/backfill_usage_daily.log
 WARNINGS_SKIP_PREFLIGHT ?= 0
 ALLOW_DURING_ALL ?= 0
 LIZARD_PARAM_THRESHOLD ?= 6
+FUZZ_TARGET ?= http_request_fuzzer
+FUZZ_ENGINE ?= afl
+FUZZ_RUN_ARGS ?=
+FUZZ_INPUT ?= fuzz/corpus/$(FUZZ_TARGET)
+FUZZ_OUTPUT ?= fuzz/output/$(FUZZ_TARGET)
+AFL_FUZZ_ARGS ?=
+AFL_FUZZ_BIN ?= $(shell command -v afl-fuzz 2>/dev/null)
+
+FUZZ_C_COMPILER ?= $(shell command -v afl-clang-fast 2>/dev/null || command -v afl-clang-lto 2>/dev/null || command -v afl-cc 2>/dev/null)
+FUZZ_CXX_COMPILER ?= $(shell command -v afl-clang-fast++ 2>/dev/null || command -v afl-clang-lto++ 2>/dev/null || command -v afl-c++ 2>/dev/null)
 
 CMAKE_FLAGS_DEBUG := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=$(CONFIG) \
@@ -65,6 +80,18 @@ CMAKE_FLAGS_DEBUG := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DSUNSPOTS_ENABLE_SANITIZERS=ON \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
+
+CMAKE_FLAGS_FUZZ := -G "$(GENERATOR)" -S . -B "$(FUZZ_BUILD_DIR)" \
+	-DCMAKE_BUILD_TYPE=Debug \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
+	-DCMAKE_C_COMPILER=$(FUZZ_C_COMPILER) \
+	-DCMAKE_CXX_COMPILER=$(FUZZ_CXX_COMPILER) \
+	-DSUNSPOTS_ENABLE_SANITIZERS=OFF \
+	-DBUILD_TESTING=OFF \
+	-DSUNSPOTS_BUILD_BENCHMARKS=OFF \
+	-DSUNSPOTS_BUILD_FUZZERS=ON \
+	-DSUNSPOTS_FUZZ_ENGINE=$(FUZZ_ENGINE)
 
 CMAKE_FLAGS_VALGRIND := -G "$(GENERATOR)" -S . -B "$(VALGRIND_BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -101,13 +128,16 @@ C_YELLOW := \033[33m
 C_RED := \033[31m
 endif
 
-.PHONY: help all build build-valgrind build-tests build-tests-valgrind build-backfill build-backfill-monitor run run-valgrind run-tests run-tests-valgrind run-backfill-monitor list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
+.PHONY: help all build build-fuzz fuzz-server fuzz-sdk build-valgrind build-tests build-tests-valgrind build-backfill build-backfill-monitor run run-fuzz run-valgrind run-tests run-tests-valgrind run-backfill-monitor list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
 
 help:
 	@printf "\nSunspots Make Targets\n\n"
 	@printf "  %-26s %s\n" "make (default)" "Same as make build"
 	@printf "  %-26s %s\n" "make all" "Serialized full pipeline (build lanes, tests, reports)"
 	@printf "  %-26s %s\n" "make build" "Configure + build debug lane only"
+	@printf "  %-26s %s\n" "make build-fuzz" "Configure + build one AFL++ fuzz target (FUZZ_TARGET=...)"
+	@printf "  %-26s %s\n" "make fuzz-server" "Build + run the server/frontend fuzzer with AFL++"
+	@printf "  %-26s %s\n" "make fuzz-sdk" "Build + run the SDK DB fuzzer with AFL++"
 	@printf "  %-26s %s\n" "make build-valgrind" "Configure + build valgrind lane only"
 	@printf "  %-26s %s\n" "make build-tests" "Configure + build test binaries (debug lane)"
 	@printf "  %-26s %s\n" "make build-tests-valgrind" "Configure + build test binaries (valgrind lane)"
@@ -117,6 +147,7 @@ help:
 	@printf "  %-26s %s\n" "make list-modules-valgrind" "Discover runnable module targets in valgrind lane"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make run" "Run daemon (default) or module (with M=...) from debug build"
+	@printf "  %-26s %s\n" "make run-fuzz" "Run AFL++ on a fuzz target with AFL_FUZZ_ARGS/FUZZ_INPUT"
 	@printf "  %-26s %s\n" "make run-valgrind" "Valgrind run on daemon (default, expected unreliable) or module (with M=...)"
 	@printf "  %-26s %s\n" "make run-backfill-monitor" "Run live backfill DB coverage monitor"
 	@printf "  %-26s %s\n" "make run-tests" "Run tests in existing $(BUILD_DIR) (no rebuild)"
@@ -137,6 +168,8 @@ help:
 	@printf "\nOutput locations\n"
 	@printf "  logs root:       logs/make/<current-branch>/\n\n"
 	@printf "  module filter:   pass M=<module-or-target>, e.g. M=daemon or M=sunspots_fetch_openmeteo\n"
+	@printf "  fuzz target:     pass FUZZ_TARGET=<fuzzer>, default: http_request_fuzzer\n"
+	@printf "  fuzz engine:     AFL++ only\n"
 	@printf "  note: daemon-level valgrind is expected to be unreliable while daemon runs in background mode\n\n"
 
 all:
@@ -198,6 +231,28 @@ build:
 	@printf "%b[ok]%b build complete\n" "$(C_GREEN)" "$(C_RESET)"
 	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
 	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
+
+build-fuzz:
+	@mkdir -p "$(FUZZ_BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@printf "%b[1/2]%b configure fuzz build (%s, engine=%s)\n" "$(C_CYAN)" "$(C_RESET)" "$(FUZZ_TARGET)" "$(FUZZ_ENGINE)"
+	@if [ -z "$(FUZZ_C_COMPILER)" ] || [ -z "$(FUZZ_CXX_COMPILER)" ]; then \
+		printf "%b[fail]%b required fuzz compilers not found for engine=%s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_ENGINE)"; \
+		exit 1; \
+	fi
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_FUZZ) > "$(FUZZ_CONFIG_LOG)" 2>&1 || { \
+		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_CONFIG_LOG)"; \
+		tail -n 60 "$(FUZZ_CONFIG_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[2/2]%b build fuzz target %s\n" "$(C_CYAN)" "$(C_RESET)" "$(FUZZ_TARGET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(FUZZ_BUILD_DIR)" --parallel --target "$(FUZZ_TARGET)" > "$(FUZZ_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b fuzz build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_BUILD_LOG)"; \
+		tail -n 60 "$(FUZZ_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[ok]%b fuzz build complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "      configure log: %s\n" "$(FUZZ_CONFIG_LOG)"
+	@printf "      build log:     %s\n" "$(FUZZ_BUILD_LOG)"
 
 build-backfill:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
@@ -305,6 +360,38 @@ run:
 	fi; \
 	printf "%b[ok]%b run started\n" "$(C_GREEN)" "$(C_RESET)"; \
 	printf "      use 'make kill' to exit\n"
+
+run-fuzz:
+	@mkdir -p "$(RAW_LOGS_DIR)"
+	@bin_path="$(FUZZ_BUILD_DIR)/fuzz/$(FUZZ_TARGET)"; \
+	if [ ! -x "$$bin_path" ]; then \
+		printf "%b[fail]%b fuzz target '%s' not found under %s. run: make build-fuzz FUZZ_TARGET=%s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_TARGET)" "$(FUZZ_BUILD_DIR)" "$(FUZZ_TARGET)"; \
+		exit 1; \
+	fi; \
+	input_path="$(FUZZ_INPUT)"; \
+	if [ -n "$$input_path" ] && [ ! -e "$$input_path" ]; then \
+		printf "%b[fail]%b fuzz input path not found: %s\n" "$(C_RED)" "$(C_RESET)" "$$input_path"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(AFL_FUZZ_BIN)" ]; then \
+		printf "%b[fail]%b afl-fuzz not found in PATH\n" "$(C_RED)" "$(C_RESET)"; \
+		exit 1; \
+	fi; \
+	if [ ! -d "$$input_path" ]; then \
+		printf "%b[fail]%b AFL++ expects FUZZ_INPUT to be a corpus directory, got: %s\n" "$(C_RED)" "$(C_RESET)" "$$input_path"; \
+		exit 1; \
+	fi; \
+	mkdir -p "$(FUZZ_OUTPUT)"; \
+	printf "%b[run]%b %s %s -i %s -o %s -- %s @@ %s\n" "$(C_CYAN)" "$(C_RESET)" "$(AFL_FUZZ_BIN)" "$(AFL_FUZZ_ARGS)" "$$input_path" "$(FUZZ_OUTPUT)" "$$bin_path" "$(FUZZ_RUN_ARGS)"; \
+	exec env -u AFL_FUZZ_ARGS "$(AFL_FUZZ_BIN)" $(AFL_FUZZ_ARGS) -i "$$input_path" -o "$(FUZZ_OUTPUT)" -- "$$bin_path" @@ $(FUZZ_RUN_ARGS)
+
+fuzz-server:
+	@$(MAKE) --no-print-directory build-fuzz FUZZ_TARGET=http_request_fuzzer
+	@$(MAKE) --no-print-directory run-fuzz FUZZ_TARGET=http_request_fuzzer
+
+fuzz-sdk:
+	@$(MAKE) --no-print-directory build-fuzz FUZZ_TARGET=sdk_db_fuzzer
+	@$(MAKE) --no-print-directory run-fuzz FUZZ_TARGET=sdk_db_fuzzer
 
 run-backfill-monitor:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
