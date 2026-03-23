@@ -11,6 +11,7 @@
 
 #include "../sdk/ss_sdk.h"
 #include "../libs/json/cJSON.h"
+#include "../utils/json_utils.h"
 
 #include "compute_models.h"
 #include "algorithms/compute_heuristic.h"
@@ -45,8 +46,6 @@ void init_result_data(result_t* result);
 int compute(compute_data_t* data, result_t* out_result);
 
 // Save result
-int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len);
-int add_int64_series_to_json(cJSON* parent, const char* name, const int64_t* values, int valid_len);
 int save_result(const result_t* result, int horizon_len);
 
 //          MAIN           //
@@ -301,10 +300,10 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
         return -1;
     }
 
-    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, horizon_len) < 0 ||
-        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, horizon_len) < 0 ||
-        add_series_to_json(forecast_obj, "temperature", data->temperature, horizon_len) < 0 ||
-        add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, horizon_len)) {
+    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "temperature", data->temperature, SERIES_LEN, horizon_len) < 0 ||
+        add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, SERIES_LEN, horizon_len)) {
         cJSON_Delete(forecast_obj);
         cJSON_Delete(root);
         return -1;
@@ -362,17 +361,9 @@ int load_data(compute_data_t* out) {
     int64_t end_slot = (int64_t)mktime(&local_tm);
     end_slot = start_slot + ((60 * 60) * 24);
 
-    // time_t start = start_slot;
-    // time_t end = end_slot;
-
-    // log_time("start_slot", start);
-    // log_time("end_slot", end);
-
     int horizon_slots = (int)((end_slot - start_slot) / SLOT_SECONDS);
     if (horizon_slots < 0) horizon_slots = 0;
     if (horizon_slots > SERIES_LEN) horizon_slots = SERIES_LEN;
-
-    // syslog(LOG_INFO, "horizon_slots: %d", horizon_slots);
 
     ss_metric_id metrics[4] =  {
         SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
@@ -397,8 +388,6 @@ int load_data(compute_data_t* out) {
             return -1;
         }
 
-        // syslog(LOG_INFO, "Samples found: %zu", samples.count);
-
         for (size_t i = 0; i < samples.count; i++) {
             const ss_sdk_sample* s = &samples.samples[i];
 
@@ -419,8 +408,6 @@ int load_data(compute_data_t* out) {
     }
 
     out->horizon_len = count_horizon_len_from_inputs(out, horizon_slots);
-
-    // syslog(LOG_INFO, "horizon_len: %d", out->horizon_len);
 
     if (out->horizon_len <= 0) {
         syslog(LOG_ERR, "Compute Manager - No usable elpris slots.");
@@ -464,6 +451,9 @@ int compute(compute_data_t* data, result_t* out_result) {
                 return -1;
             }
             break;
+        default:
+            return -1;
+            break;
     }
     
     for (int i = 0; i < data->horizon_len; i++) {
@@ -475,64 +465,6 @@ int compute(compute_data_t* data, result_t* out_result) {
 
 //          SAVE RESULT           //
 //********************************//
-
-int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len) {
-    cJSON* array = cJSON_CreateArray();
-    if (!array) {
-        return -1;
-    }
-
-    if (valid_len < 0) valid_len = 0;
-    if (valid_len > SERIES_LEN) valid_len = SERIES_LEN;
-
-    for (int i = 0; i < SERIES_LEN; i++) {
-        cJSON* value_item;
-
-        if (i >= valid_len) {
-            value_item = cJSON_CreateNull();
-        } else {
-            value_item = cJSON_CreateNumber(values[i]);
-        }
-
-        if (!value_item) {
-            cJSON_Delete(array);
-            return -1;
-        }
-        cJSON_AddItemToArray(array, value_item);
-    }
-
-    cJSON_AddItemToObject(parent, name, array);
-    return 0;
-}
-
-int add_int64_series_to_json(cJSON* parent, const char* name, const int64_t* values, int valid_len) {
-    cJSON* array = cJSON_CreateArray();
-    if (!array) {
-        return -1;
-    }
-
-    if (valid_len < 0) valid_len = 0;
-    if (valid_len > SERIES_LEN) valid_len = SERIES_LEN;
-
-    for (int i = 0; i < SERIES_LEN; i++) {
-        cJSON* value_item;
-
-        if (i >= valid_len) {
-            value_item = cJSON_CreateNull();
-        } else {
-            value_item = cJSON_CreateNumber(values[i]);
-        }
-
-        if (!value_item) {
-            cJSON_Delete(array);
-            return -1;
-        }
-        cJSON_AddItemToArray(array, value_item);
-    }
-
-    cJSON_AddItemToObject(parent, name, array);
-    return 0;
-}
 
 int save_result(const result_t* result, int horizon_len) {
     if (!result) return -1;
@@ -552,11 +484,11 @@ int save_result(const result_t* result, int horizon_len) {
         return -1;
     }
 
-    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity, horizon_len) < 0 ||
-        add_series_to_json(result_obj, "direct_use", result->direct_use, horizon_len) < 0 ||
-        add_series_to_json(result_obj, "charge_battery", result->charge_battery, horizon_len) < 0 ||
-        add_series_to_json(result_obj, "sell_excess", result->sell_excess, horizon_len) < 0 ||
-        add_int64_series_to_json(result_obj, "timestamp", result->timestamp, horizon_len) < 0) {
+    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "direct_use", result->direct_use, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "charge_battery", result->charge_battery, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "sell_excess", result->sell_excess, SERIES_LEN, horizon_len) < 0 ||
+        add_int64_series_to_json(result_obj, "timestamp", result->timestamp, SERIES_LEN, horizon_len) < 0) {
         cJSON_Delete(result_obj);
         cJSON_Delete(root);
         return -1;
