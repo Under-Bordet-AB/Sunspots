@@ -44,7 +44,7 @@ Health checks depend on the timer type configured for the module and come in thr
 2. **Relative time**: e.g., run every 100 seconds.
 3. **Absolute time**: e.g., run at 12:00. 
 
-A module with a relative timer can also be configured to run at system boot.
+A module with a relative- or absolute timer can be configured to run at system boot.
 
 The user can update the configuration file during runtime, which triggers a "hot reload." During this process, the daemon parses the new information and executes the changes immediately. Every module can have a unique config set in the configuration file. That config will be passed through to the module via the shell environment.
 
