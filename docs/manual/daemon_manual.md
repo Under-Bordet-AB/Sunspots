@@ -41,6 +41,7 @@ The configuration file `sunspots.json` is located in the `Sunspots/config` folde
         {
             "name": "Task_Absolute_Mode",
             "bin_path": "./path/to/binary/from/root",
+            "Start_at_boot": 1, // Set only if module should fire immediately at boot of system, otherwise field not needed
             "Timer-type": 1,
             "Abs-time": "16:52"
         },
@@ -50,7 +51,6 @@ The configuration file `sunspots.json` is located in the `Sunspots/config` folde
             "Start_at_boot": 1, // Set only if module should fire immediately at boot of system, otherwise field not needed
             "Timer-type": 1,
             "Rel-time": 30,
-            "start_immediately": true
         },
         {
             "name": "Logger",
