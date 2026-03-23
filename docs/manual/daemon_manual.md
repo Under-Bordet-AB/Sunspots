@@ -6,7 +6,7 @@
 The daemon can spawn three types of processes:
 1. **Heartbeat Process**: The child process checks in with the daemon on a predetermined interval (in seconds). A successful check-in sets an `alive` flag, which the daemon verifies during its health check.
 2. **Relative Timer Process**: The child process is spawned whenever a predetermined time interval (in seconds) expires. If the previous process is still running, a second instance will start, and so on. Modules with relative timer can also set flag `"boot_from_start"` in `sunspots.json`. It does what the name suggests and then reverts back to waiting for the duration of the timer.
-3. **Absolute Timer Process**: The child process is spawned at a specific absolute time, such as `"14:50"`. After spawning the process, the daemon resets the timer. This logic accounts for leap years and daylight savings time to ensure the timer remains absolute.
+3. **Absolute Timer Process**: The child process is spawned at a specific absolute time, such as `"14:50"`. After spawning the process, the daemon resets the timer. This logic accounts for leap years and daylight savings time to ensure the timer remains absolute. Modules with absolute timer can also set flag `"boot_from_start"` in `sunspots.json`. It does what the name suggests and then reverts back to waiting for absolute time set.
 
 ### Child Processes
 All children spawned by the daemon use `Sunspots/` as their current working directory. Keep this in mind when adding your own modules to the system. This pathing is reflected in the `"bin_path"` field of the `sunspots.json` configuration file, allowing the daemon to locate the correct binaries during runtime.
@@ -93,4 +93,4 @@ After building the project the binary can be found in `Sunspots/build/debug/src/
 To build in debug mode uncomments `# target_compile_definitions(sunspots_daemon PRIVATE DEBUG)` in daemons `CMakeLists.txt` at `Sunspots/src/core/`. This skips over the detaching steps of the daemonizing process, in this mode the daemon can talk.
 
 ### Journald entries
-All `journald` entries related to this system starts with `"SUNSPOTS"`. 
+All `journald` entries related to this system starts with `"SUNSPOTS"`.
