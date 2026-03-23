@@ -35,14 +35,13 @@ int resolve_index_file(const char *dir_path, char *out_path, size_t out_size)
     for (int i = 0; i < FALLBACK_COUNT; i++) {
         char temp[PATH_MAX];
 
-        snprintf(temp, sizeof(temp), "%s/index.%s",
-                 dir_path, index_fallbacks[i]);
+        int written_size = snprintf(temp, sizeof(temp), "%s/index.%s", dir_path, index_fallbacks[i]);
 
         if (stat(temp, &st) == 0 && S_ISREG(st.st_mode)) {
             if (strlen(temp) >= out_size)
                 return -1;
 
-            strcpy(out_path, temp);
+            strncpy(out_path, temp, written_size);
             return 0;
         }
     }
@@ -63,12 +62,16 @@ http_response* process_request(http_request* req)
         return resp;
     }
 
-    str_to_lower((char*)req->path);
+    int path_len = strlen(req->path) + 1;
+    char* lower_path = malloc(path_len * sizeof(char));
+    memcpy(lower_path, req->path, path_len);
+    str_to_lower(lower_path);
     
     // Static endpoints
 
-    if(strcmp(req->path, "/health") == 0)
+    if(strcmp(lower_path, "/health") == 0)
     {
+        free(lower_path);
         http_response* resp = http_response_init(200, "{\"status\":\"ok\"}", HTTPRESPONSE_BODYLEN_AUTODETECT);
         if(!resp)
             return NULL;
@@ -76,8 +79,9 @@ http_response* process_request(http_request* req)
         return resp;
     }
 
-    if(strcmp(req->path, "/") == 0)
+    if(strcmp(lower_path, "/") == 0)
     {
+        free(lower_path);
         http_response* resp = http_response_init(200, "Welcome to Sunspots!", HTTPRESPONSE_BODYLEN_AUTODETECT);
         if(!resp)
             return NULL;
@@ -92,8 +96,9 @@ http_response* process_request(http_request* req)
         LinkedList_foreach(URL_ALIASES, node)
         {
             url_alias* alias = (url_alias*)node->item;
-            if(strcmp(req->path, alias->target_url) == 0)
+            if(strcmp(lower_path, alias->target_url) == 0)
             {
+                free(lower_path);
                 size_t file_size;
                 char* file_data = load_file(alias->target_file, &file_size);
                 if (!file_data)
@@ -118,6 +123,8 @@ http_response* process_request(http_request* req)
             }
         }
     }
+
+    free(lower_path);
 
     // Treat URL as file path
 

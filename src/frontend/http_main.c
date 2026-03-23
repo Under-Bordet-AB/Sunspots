@@ -32,7 +32,7 @@ http_server* http_init()
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
 
-    addr.sin_family = AF_UNSPEC;
+    addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(HTTP_PORT);
 

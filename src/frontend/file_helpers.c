@@ -87,12 +87,14 @@ int sanitize_path(const char* url_path, char* out_path, size_t out_size)
 
     // Build the final path
     char temp[PATH_MAX];
-    snprintf(temp, sizeof(temp), "%s%s", doc_root, url_path);
+    int written = snprintf(temp, sizeof(temp), "%s%s", doc_root, url_path);
+    if (written < 0 || written >= (int)sizeof(temp)) {
+        return -1;
+    }
 
     // Ensure we didn't overflow
-    if (strlen(temp) >= PATH_MAX)
+    if (out_size == 0)
         return -1;
-
     strncpy(out_path, temp, out_size - 1);
     out_path[out_size - 1] = '\0';
 

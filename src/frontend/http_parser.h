@@ -8,7 +8,7 @@
 #define STRICT_VALIDATION 1
 
 // Auto detect the body length by strlen
-#define HTTPRESPONSE_BODYLEN_AUTODETECT -1
+#define HTTPRESPONSE_BODYLEN_AUTODETECT (-1UL)
 
 typedef enum {
     Method_Unknown = 0,
@@ -50,7 +50,7 @@ typedef struct
 {
     int responseCode;
     const char* body;
-    int bodyLen;
+    size_t bodyLen;
     LinkedList* headers;
 } http_response;
 
@@ -99,7 +99,7 @@ If body is a null terminated string, bodyLen can be set to `HTTPRESPONSE_BODYLEN
 Input body gets copied by the function for safe ownership in the struct and the input can be safely freed by the caller if the intention is to pass it along
 Returns NULL on failure
 */
-http_response* http_response_init(int code, const char* body, int bodyLen);
+http_response* http_response_init(int code, const char* body, size_t bodyLen);
 // Add a custom response header to the http_response struct by name and value, memory is copied into the struct with strdup
 void http_response_add_header(http_response* response, const char* name, const char* value);
 /*

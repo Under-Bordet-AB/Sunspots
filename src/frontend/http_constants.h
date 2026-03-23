@@ -11,7 +11,7 @@ extern int LISTENER_COUNT;
 
 extern int LISTEN_QUEUE;
 extern int QUEUE_SIZE;
-#define SIGNAL_EXIT -1
+#define SIGNAL_EXIT (-1)
 
 #define HTTP_VERSION "HTTP/1.1" // We should support keep-alive
 #define MAX_URL_LEN 256
