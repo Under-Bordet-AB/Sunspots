@@ -11,6 +11,7 @@
 
 #include "../sdk/ss_sdk.h"
 #include "../libs/json/cJSON.h"
+#include "../utils/json_utils.h"
 
 #include "compute_models.h"
 #include "algorithms/compute_heuristic.h"
@@ -45,8 +46,6 @@ void init_result_data(result_t* result);
 int compute(compute_data_t* data, result_t* out_result);
 
 // Save result
-int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len);
-int add_int64_series_to_json(cJSON* parent, const char* name, const int64_t* values, int valid_len);
 int save_result(const result_t* result, int horizon_len);
 
 //          MAIN           //
@@ -56,42 +55,42 @@ int main() {
     atexit(cleanup);
     openlog("SUNSPOTS_COMPUTE_MANAGER", LOG_PID, LOG_DAEMON);
 
-    syslog(LOG_INFO, "Compute Manager - Starting...");
+    syslog(LOG_INFO, "Starting...");
 
     compute_data_t data;
     result_t result = {0};
 
     if (fetch_env_vars() < 0) {
-        syslog(LOG_ERR, "Compute Manager - Unable to fetch environment variables.");
+        syslog(LOG_ERR, "Unable to fetch environment variables.");
         return EXIT_FAILURE;
     }
 
     if (wait_for_new_data() < 0) {
-        syslog(LOG_ERR, "Compute Manager - No new data detected.");
+        syslog(LOG_ERR, "No new data detected.");
         return EXIT_FAILURE;
     }
 
     if (load_data(&data) < 0) {
-        syslog(LOG_ERR, "Compute Manager - Loading data failed.");
+        syslog(LOG_ERR, "Loading data failed.");
         return EXIT_FAILURE;
     }
 
     if (compute(&data, &result) < 0) {
-        syslog(LOG_ERR, "Compute Manager - Compute failed.");
+        syslog(LOG_ERR, "Compute failed.");
         return EXIT_FAILURE;
     }
 
     if (save_result(&result, data.horizon_len) < 0) {
-        syslog(LOG_ERR, "Compute Manager - Saving result failed.");
+        syslog(LOG_ERR, "Saving result failed.");
         return EXIT_FAILURE;
     }
 
-    syslog(LOG_INFO, "Compute Manager - Done.");
+    syslog(LOG_INFO, "Done.");
     return EXIT_SUCCESS;
 }
 
 void cleanup(void) {
-    syslog(LOG_INFO, "Compute Manager - Terminating.");
+    syslog(LOG_INFO, "Terminating.");
     closelog();
 }
 
@@ -99,13 +98,13 @@ int fetch_env_vars() {
     const char* blob_config = getenv("SUNSPOTS_CONFIG");
 
     if (blob_config == NULL || blob_config[0] == '\0') {
-        syslog(LOG_WARNING, "Compute Manager - SUNSPOTS_CONFIG missing.");
+        syslog(LOG_WARNING, "SUNSPOTS_CONFIG missing.");
         return -1;
     }
 
     cJSON* root = cJSON_Parse(blob_config);
     if (!root) {
-        syslog(LOG_WARNING, "Compute Manager - Invalid SUNSPOTS_CONFIG JSON.");
+        syslog(LOG_WARNING, "Invalid SUNSPOTS_CONFIG JSON.");
         return -1;
     }
 
@@ -119,19 +118,19 @@ int fetch_env_vars() {
     cJSON* exp_backoff_timeout_obj = cJSON_GetObjectItemCaseSensitive(config_obj, "exp_backoff_timeout");
 
     if (!cJSON_IsNumber(method_obj)) {
-        syslog(LOG_WARNING, "Compute Manager - Missing/invalid compute_method.");
+        syslog(LOG_WARNING, "Missing/invalid compute_method.");
         cJSON_Delete(root);
         return -1;
     }
 
     if (!cJSON_IsNumber(exp_backoff_poll_rate_obj)) {
-        syslog(LOG_WARNING, "Compute Manager - Missing/invalid exp_backoff_poll_rate.");
+        syslog(LOG_WARNING, "Missing/invalid exp_backoff_poll_rate.");
         cJSON_Delete(root);
         return -1;
     }
 
     if (!cJSON_IsNumber(exp_backoff_timeout_obj)) {
-        syslog(LOG_WARNING, "Compute Manager - Missing/invalid exp_backoff_timeout.");
+        syslog(LOG_WARNING, "Missing/invalid exp_backoff_timeout.");
         cJSON_Delete(root);
         return -1;
     }
@@ -144,7 +143,7 @@ int fetch_env_vars() {
     if (method_d != (double)(int)method_d ||
         poll_rate_d != (double)(int)poll_rate_d ||
         timeout_d != (double)(int)timeout_d) {
-        syslog(LOG_WARNING, "Compute Manager - compute_method, exp_backoff_poll_rate and exp_backoff_timeout must be integers.");
+        syslog(LOG_WARNING, "compute_method, exp_backoff_poll_rate and exp_backoff_timeout must be integers.");
         cJSON_Delete(root);
         return -1;
     }
@@ -154,25 +153,25 @@ int fetch_env_vars() {
     int timeout = (int)timeout_d;
 
     if (method < 0 || method > 1) {
-        syslog(LOG_WARNING, "Compute Manager - compute_method out of range: %d", method);
+        syslog(LOG_WARNING, "compute_method out of range: %d", method);
         cJSON_Delete(root);
         return -1;
     }
 
     if (poll_rate < 1) {
-        syslog(LOG_WARNING, "Compute Manager - poll_rate must be > 0 (got %d)", poll_rate);
+        syslog(LOG_WARNING, "poll_rate must be > 0 (got %d)", poll_rate);
         cJSON_Delete(root);
         return -1;
     }
 
     if (timeout < 300) {
-        syslog(LOG_WARNING, "Compute Manager - exp_backoff_timeout must be >= 300 (got %d)", timeout);
+        syslog(LOG_WARNING, "exp_backoff_timeout must be >= 300 (got %d)", timeout);
         cJSON_Delete(root);
         return -1;
     }
 
     if (timeout < poll_rate) {
-        syslog(LOG_WARNING, "Compute Manager - exp_backoff_timeout (%d) must be >= exp_backoff_poll_rate (%d)", timeout, poll_rate);
+        syslog(LOG_WARNING, "exp_backoff_timeout (%d) must be >= exp_backoff_poll_rate (%d)", timeout, poll_rate);
         cJSON_Delete(root);
         return -1;
     }
@@ -181,7 +180,7 @@ int fetch_env_vars() {
     g_exp_backoff_poll_rate = poll_rate;
     g_exp_backoff_timeout = timeout;
 
-    syslog(LOG_INFO, "Compute Manager - Config loaded: compute_method=%d exp_backoff_poll_rate=%d exp_backoff_timeout=%d", g_compute_method, g_exp_backoff_poll_rate, g_exp_backoff_timeout);
+    syslog(LOG_INFO, "Config loaded: compute_method=%d exp_backoff_poll_rate=%d exp_backoff_timeout=%d", g_compute_method, g_exp_backoff_poll_rate, g_exp_backoff_timeout);
 
     cJSON_Delete(root);
     return 0;
@@ -196,7 +195,7 @@ int wait_for_new_data() {
     int cycles = 0;
 
     while (cycles < max_cycles) {
-        syslog(LOG_INFO, "Compute Manager - Looking for fresh data...");
+        syslog(LOG_INFO, "Looking for fresh data...");
 
         const int64_t now = (int64_t)time(NULL);
         const int64_t window_start = now;
@@ -217,7 +216,7 @@ int wait_for_new_data() {
             ss_sdk_status status = ss_sdk_db_get_canonical(window_start, 0, metrics[m], &samples);
 
             if (status != SS_SDK_OK && status != SS_SDK_ERR_PARTIAL_DATA) {
-                syslog(LOG_ERR, "Compute Manager - ss_sdk_db_get_canonical_failed for metric=%d status=%d", (int)metrics[m], (int)status);
+                syslog(LOG_ERR, "ss_sdk_db_get_canonical_failed for metric=%d status=%d", (int)metrics[m], (int)status);
                 return -1;
             }
 
@@ -240,7 +239,7 @@ int wait_for_new_data() {
         }
 
         if (observed_metrics_found == 4) {
-            syslog(LOG_INFO, "Compute Manager - Fresh data found!");
+            syslog(LOG_INFO, "Fresh data found!");
             return 0;
         }
 
@@ -248,7 +247,7 @@ int wait_for_new_data() {
         sleep(g_exp_backoff_poll_rate);
     }
 
-    syslog(LOG_WARNING, "Compute Manager - Timeout waiting for new observed weather data.");
+    syslog(LOG_WARNING, "Timeout waiting for new observed weather data.");
     return -1;
 }
 
@@ -288,7 +287,7 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
 
     if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
         int err = errno;
-        syslog(LOG_ERR, "Compute Manager - mkdir('%s') failed %s", ENDPOINTS_DIR, strerror(err));
+        syslog(LOG_ERR, "mkdir('%s') failed %s", ENDPOINTS_DIR, strerror(err));
         return -1;
     }
 
@@ -301,10 +300,10 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
         return -1;
     }
 
-    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, horizon_len) < 0 ||
-        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, horizon_len) < 0 ||
-        add_series_to_json(forecast_obj, "temperature", data->temperature, horizon_len) < 0 ||
-        add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, horizon_len)) {
+    if (add_series_to_json(forecast_obj, "irradiance", data->irradiance, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "cloudiness", data->cloudiness, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(forecast_obj, "temperature", data->temperature, SERIES_LEN, horizon_len) < 0 ||
+        add_int64_series_to_json(forecast_obj, "timestamp", data->timestamp, SERIES_LEN, horizon_len)) {
         cJSON_Delete(forecast_obj);
         cJSON_Delete(root);
         return -1;
@@ -319,7 +318,7 @@ int save_forecast(const compute_data_t* data, int horizon_len) {
     FILE* f = fopen(ENDPOINTS_FORECAST_FILE, "w");
     if (!f) {
         int err = errno;
-        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_FORECAST_FILE, strerror(err));
+        syslog(LOG_ERR, "fopen('%s') failed: %s", ENDPOINTS_FORECAST_FILE, strerror(err));
         free(json);
         return -1;
     }
@@ -362,17 +361,9 @@ int load_data(compute_data_t* out) {
     int64_t end_slot = (int64_t)mktime(&local_tm);
     end_slot = start_slot + ((60 * 60) * 24);
 
-    // time_t start = start_slot;
-    // time_t end = end_slot;
-
-    // log_time("start_slot", start);
-    // log_time("end_slot", end);
-
     int horizon_slots = (int)((end_slot - start_slot) / SLOT_SECONDS);
     if (horizon_slots < 0) horizon_slots = 0;
     if (horizon_slots > SERIES_LEN) horizon_slots = SERIES_LEN;
-
-    // syslog(LOG_INFO, "horizon_slots: %d", horizon_slots);
 
     ss_metric_id metrics[4] =  {
         SS_METRIC_WEATHER_RADIATION_SHORTWAVE_WM2,
@@ -393,11 +384,9 @@ int load_data(compute_data_t* out) {
         ss_sdk_status status = ss_sdk_db_get_canonical(0, 0, metrics[m], &samples);
 
         if (status != SS_SDK_OK && status != SS_SDK_ERR_PARTIAL_DATA) {
-            syslog(LOG_ERR, "Compute Manager - ss_sdk_db_get_canonical failed for metric=%d status=%d", (int)metrics[m], (int)status);
+            syslog(LOG_ERR, "ss_sdk_db_get_canonical failed for metric=%d status=%d", (int)metrics[m], (int)status);
             return -1;
         }
-
-        // syslog(LOG_INFO, "Samples found: %zu", samples.count);
 
         for (size_t i = 0; i < samples.count; i++) {
             const ss_sdk_sample* s = &samples.samples[i];
@@ -420,15 +409,13 @@ int load_data(compute_data_t* out) {
 
     out->horizon_len = count_horizon_len_from_inputs(out, horizon_slots);
 
-    // syslog(LOG_INFO, "horizon_len: %d", out->horizon_len);
-
     if (out->horizon_len <= 0) {
-        syslog(LOG_ERR, "Compute Manager - No usable elpris slots.");
+        syslog(LOG_ERR, "No usable elpris slots.");
         return -1;
     }
 
     if (save_forecast(out, out->horizon_len) < 0) {
-        syslog(LOG_ERR, "Compute Manager - Failed to save forecast data to endpoints folder.");
+        syslog(LOG_ERR, "Failed to save forecast data to endpoints folder.");
         return -1;
     }
 
@@ -464,6 +451,9 @@ int compute(compute_data_t* data, result_t* out_result) {
                 return -1;
             }
             break;
+        default:
+            return -1;
+            break;
     }
     
     for (int i = 0; i < data->horizon_len; i++) {
@@ -476,70 +466,12 @@ int compute(compute_data_t* data, result_t* out_result) {
 //          SAVE RESULT           //
 //********************************//
 
-int add_series_to_json(cJSON* parent, const char* name, const double* values, int valid_len) {
-    cJSON* array = cJSON_CreateArray();
-    if (!array) {
-        return -1;
-    }
-
-    if (valid_len < 0) valid_len = 0;
-    if (valid_len > SERIES_LEN) valid_len = SERIES_LEN;
-
-    for (int i = 0; i < SERIES_LEN; i++) {
-        cJSON* value_item;
-
-        if (i >= valid_len) {
-            value_item = cJSON_CreateNull();
-        } else {
-            value_item = cJSON_CreateNumber(values[i]);
-        }
-
-        if (!value_item) {
-            cJSON_Delete(array);
-            return -1;
-        }
-        cJSON_AddItemToArray(array, value_item);
-    }
-
-    cJSON_AddItemToObject(parent, name, array);
-    return 0;
-}
-
-int add_int64_series_to_json(cJSON* parent, const char* name, const int64_t* values, int valid_len) {
-    cJSON* array = cJSON_CreateArray();
-    if (!array) {
-        return -1;
-    }
-
-    if (valid_len < 0) valid_len = 0;
-    if (valid_len > SERIES_LEN) valid_len = SERIES_LEN;
-
-    for (int i = 0; i < SERIES_LEN; i++) {
-        cJSON* value_item;
-
-        if (i >= valid_len) {
-            value_item = cJSON_CreateNull();
-        } else {
-            value_item = cJSON_CreateNumber(values[i]);
-        }
-
-        if (!value_item) {
-            cJSON_Delete(array);
-            return -1;
-        }
-        cJSON_AddItemToArray(array, value_item);
-    }
-
-    cJSON_AddItemToObject(parent, name, array);
-    return 0;
-}
-
 int save_result(const result_t* result, int horizon_len) {
     if (!result) return -1;
 
     if (mkdir(ENDPOINTS_DIR, 0755) < 0 && errno != EEXIST) {
         int err = errno;
-        syslog(LOG_ERR, "Compute Manager - mkdir('%s') failed %s", ENDPOINTS_DIR, strerror(err));
+        syslog(LOG_ERR, "mkdir('%s') failed %s", ENDPOINTS_DIR, strerror(err));
         return -1;
     }
 
@@ -552,11 +484,11 @@ int save_result(const result_t* result, int horizon_len) {
         return -1;
     }
 
-    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity, horizon_len) < 0 ||
-        add_series_to_json(result_obj, "direct_use", result->direct_use, horizon_len) < 0 ||
-        add_series_to_json(result_obj, "charge_battery", result->charge_battery, horizon_len) < 0 ||
-        add_series_to_json(result_obj, "sell_excess", result->sell_excess, horizon_len) < 0 ||
-        add_int64_series_to_json(result_obj, "timestamp", result->timestamp, horizon_len) < 0) {
+    if (add_series_to_json(result_obj, "buy_electricity", result->buy_electricity, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "direct_use", result->direct_use, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "charge_battery", result->charge_battery, SERIES_LEN, horizon_len) < 0 ||
+        add_series_to_json(result_obj, "sell_excess", result->sell_excess, SERIES_LEN, horizon_len) < 0 ||
+        add_int64_series_to_json(result_obj, "timestamp", result->timestamp, SERIES_LEN, horizon_len) < 0) {
         cJSON_Delete(result_obj);
         cJSON_Delete(root);
         return -1;
@@ -571,7 +503,7 @@ int save_result(const result_t* result, int horizon_len) {
     FILE* f = fopen(ENDPOINTS_RESULT_FILE, "w");
     if (!f) {
         int err = errno;
-        syslog(LOG_ERR, "Compute Manager - fopen('%s') failed: %s", ENDPOINTS_RESULT_FILE, strerror(err));
+        syslog(LOG_ERR, "fopen('%s') failed: %s", ENDPOINTS_RESULT_FILE, strerror(err));
         free(json);
         return -1;
     }

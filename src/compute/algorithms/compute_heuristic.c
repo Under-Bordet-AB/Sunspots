@@ -6,8 +6,6 @@
 #define IRRADIANCE_REF_WM2 400.0 // Reference irradiance (W/m^2) (for normalization)
 #define TEMP_COEFF_PER_C -0.004 // Power temperature coefficient (-0.4% power per +1C above 25C)
 
-//#define PRICE_HIGH 2.0 // Example high price for normalization
-//#define PRICE_LOW 0.1 // Example low price for normalization
 #define PRICE_HIGH 0.9 // Example high price for normalization
 #define PRICE_LOW 0.0 // Example low price for normalization
 
