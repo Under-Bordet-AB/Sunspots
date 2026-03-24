@@ -128,7 +128,7 @@ C_YELLOW := \033[33m
 C_RED := \033[31m
 endif
 
-.PHONY: help all build build-fuzz fuzz-server fuzz-sdk build-valgrind build-tests build-tests-valgrind build-backfill build-backfill-monitor run run-fuzz run-valgrind run-tests run-tests-valgrind run-backfill-monitor list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
+.PHONY: help all build build-fuzz fuzz-server fuzz-sdk build-valgrind build-tests build-tests-valgrind build-backfill build-backfill-monitor run run-client run-fuzz run-valgrind run-tests run-tests-valgrind run-backfill-monitor list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
 
 help:
 	@printf "\nSunspots Make Targets\n\n"
@@ -147,6 +147,7 @@ help:
 	@printf "  %-26s %s\n" "make list-modules-valgrind" "Discover runnable module targets in valgrind lane"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make run" "Run daemon (default) or module (with M=...) from debug build"
+	@printf "  %-26s %s\n" "make run-client" "Build and run the client from debug build"
 	@printf "  %-26s %s\n" "make run-fuzz" "Run AFL++ on a fuzz target with AFL_FUZZ_ARGS/FUZZ_INPUT"
 	@printf "  %-26s %s\n" "make run-valgrind" "Valgrind run on daemon (default, expected unreliable) or module (with M=...)"
 	@printf "  %-26s %s\n" "make run-backfill-monitor" "Run live backfill DB coverage monitor"
@@ -360,6 +361,16 @@ run:
 	fi; \
 	printf "%b[ok]%b run started\n" "$(C_GREEN)" "$(C_RESET)"; \
 	printf "      use 'make kill' to exit\n"
+
+run-client:
+	@$(MAKE) --no-print-directory build M=sunspots_client
+	@client_path=$$(find "$(BUILD_DIR)" -type f -name "sunspots_client" 2>/dev/null | sort | head -n 1); \
+	if [ ! -x "$$client_path" ]; then \
+		printf "%b[fail]%b client binary 'sunspots_client' not found under %s\n" "$(C_RED)" "$(C_RESET)" "$(BUILD_DIR)"; \
+		exit 1; \
+	fi; \
+	printf "%b[run]%b %s %s\n" "$(C_CYAN)" "$(C_RESET)" "$$client_path" "$(RUN_ARGS)"; \
+	exec "$$client_path" $(RUN_ARGS)
 
 run-fuzz:
 	@mkdir -p "$(RAW_LOGS_DIR)"
