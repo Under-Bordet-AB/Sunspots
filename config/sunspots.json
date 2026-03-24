@@ -65,9 +65,9 @@
       "Rel-time": 3600,
       "start_at_boot": 1,
       "backfill": {
-        "enabled": false,
+        "enabled": true,
         "perfmode": "slow",
-        "start_date_utc": "2026-03-01",
+        "start_date_utc": "2026-03-19",
         "chunk_days": 1,
         "retry_max_attempts": 5,
         "retry_base_backoff_ms": 1000,
@@ -87,9 +87,9 @@
       "Rel-time": 3600,
       "start_at_boot": 1,
       "backfill": {
-        "enabled": false,
+        "enabled": true,
         "perfmode": "slow",
-        "start_date_utc": "2026-03-01",
+        "start_date_utc": "2026-03-19",
         "retry_max_attempts": 5,
         "retry_base_backoff_ms": 1000,
         "request_interval_ms": 5000,
