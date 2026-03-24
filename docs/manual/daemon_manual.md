@@ -5,8 +5,8 @@
 ## Operations
 The daemon can spawn three types of processes:
 1. **Heartbeat Process**: The child process checks in with the daemon on a predetermined interval (in seconds). A successful check-in sets an `alive` flag, which the daemon verifies during its health check.
-2. **Relative Timer Process**: The child process is spawned whenever a predetermined time interval (in seconds) expires. If the previous process is still running, a second instance will start, and so on.
-3. **Absolute Timer Process**: The child process is spawned at a specific absolute time, such as `"14:50"`. After spawning the process, the daemon resets the timer. This logic accounts for leap years and daylight savings time to ensure the timer remains absolute.
+2. **Relative Timer Process**: The child process is spawned whenever a predetermined time interval (in seconds) expires. If the previous process is still running, a second instance will start, and so on. Modules with relative timer can also set flag `"boot_from_start"` in `sunspots.json`. It does what the name suggests and then reverts back to waiting for the duration of the timer.
+3. **Absolute Timer Process**: The child process is spawned at a specific absolute time, such as `"14:50"`. After spawning the process, the daemon resets the timer. This logic accounts for leap years and daylight savings time to ensure the timer remains absolute. Modules with absolute timer can also set flag `"boot_from_start"` in `sunspots.json`. It does what the name suggests and then reverts back to waiting for absolute time set.
 
 ### Child Processes
 All children spawned by the daemon use `Sunspots/` as their current working directory. Keep this in mind when adding your own modules to the system. This pathing is reflected in the `"bin_path"` field of the `sunspots.json` configuration file, allowing the daemon to locate the correct binaries during runtime.
@@ -41,14 +41,16 @@ The configuration file `sunspots.json` is located in the `Sunspots/config` folde
         {
             "name": "Task_Absolute_Mode",
             "bin_path": "./path/to/binary/from/root",
+            "Start_at_boot": 1, // Set only if module should fire immediately at boot of system, otherwise field not needed
             "Timer-type": 1,
             "Abs-time": "16:52"
         },
         {
             "name": "Task_Relative_Mode",
             "bin_path": "./path/to/binary/from/root",
+            "Start_at_boot": 1, // Set only if module should fire immediately at boot of system, otherwise field not needed
             "Timer-type": 1,
-            "Rel-time": 30
+            "Rel-time": 30,
         },
         {
             "name": "Logger",
@@ -73,12 +75,16 @@ The configuration file `sunspots.json` is located in the `Sunspots/config` folde
         }
     ]
 }
+```
 #### Timer Types
 The "Timer-type" field is set to either 0 or 1:
 - Type 0 (Heartbeat Mode): Requires a heartbeat_interval to be defined.
 - Type 1 (Timer Mode): Used for either Absolute or Relative timing. If "Abs-time" is provided, the process runs at a specific time (24h format, HH:mm). If "Rel-time" is provided, the process runs at a repeating interval.
 
 All intervals for heartbeats and relative timers are defined in seconds.
+
+Optional field for timer modules:
+- `start_immediately`: if `true`, daemon spawns the module once during daemon startup (or reload) in addition to the configured timer schedule.
 
 ## Running and stopping
 After building the project the binary can be found in `Sunspots/build/debug/src/core`. Use `./sunspots_daemon` to run the daemon. The PID of the daemon will be written to `Sunspots/logs/sunspots.pid`, to kill the daemon use `kill $(cat sunspots.pid)` (seen from `Sunspots/logs`).
@@ -87,4 +93,4 @@ After building the project the binary can be found in `Sunspots/build/debug/src/
 To build in debug mode uncomments `# target_compile_definitions(sunspots_daemon PRIVATE DEBUG)` in daemons `CMakeLists.txt` at `Sunspots/src/core/`. This skips over the detaching steps of the daemonizing process, in this mode the daemon can talk.
 
 ### Journald entries
-All `journald` entries related to this system starts with `"SUNSPOTS"`. 
+All `journald` entries related to this system starts with `"SUNSPOTS"`.

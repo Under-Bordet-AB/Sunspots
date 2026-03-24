@@ -3,8 +3,8 @@ option(SUNSPOTS_ENABLE_CLANG_TIDY "Enable clang-tidy checks for project targets"
 option(SUNSPOTS_BUILD_BENCHMARKS "Build benchmark targets" ON)
 option(SUNSPOTS_ENABLE_VALGRIND "Enable valgrind-backed test targets when valgrind is available" ON)
 option(SUNSPOTS_BUILD_FUZZERS "Build fuzzing harness targets" OFF)
-set(SUNSPOTS_FUZZ_ENGINE "libfuzzer" CACHE STRING "Fuzzing engine to use for harness targets")
-set_property(CACHE SUNSPOTS_FUZZ_ENGINE PROPERTY STRINGS libfuzzer afl)
+set(SUNSPOTS_FUZZ_ENGINE "afl" CACHE STRING "Fuzzing engine to use for harness targets")
+set_property(CACHE SUNSPOTS_FUZZ_ENGINE PROPERTY STRINGS afl)
 
 if(SUNSPOTS_ENABLE_CLANG_TIDY)
   find_program(SUNSPOTS_CLANG_TIDY_BIN NAMES clang-tidy)

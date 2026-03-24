@@ -1,3 +1,8 @@
+/**
+ * @file http_client.cpp
+ * @brief HTTP client implementation
+ */
+
 #include "http_client.hpp"
 
 HttpClient::HttpClient(const std::string& host, const std::string& port) : host(host), port(port), fd(-1) {}
@@ -6,7 +11,11 @@ HttpClient::~HttpClient()
 {
     disconnect();
 }
-
+ 
+/**
+ * @brief Creates a TCP socket and connects to host/port in HttpClient.
+ * @return True on success, false on failure.
+ */
 bool HttpClient::connect()
 {
     if (this->fd >= 0)
@@ -17,13 +26,14 @@ bool HttpClient::connect()
     struct addrinfo hints = {};
     struct addrinfo* res = NULL;
 
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family = AF_UNSPEC;      // IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;  // TCP
     hints.ai_protocol = IPPROTO_TCP;
 
     if (getaddrinfo(host.c_str(), port.c_str(), &hints, &res) != 0)
         return false;
 
+    // Try each address until we successfully connect
     int fd = -1;
     for (addrinfo* rp = res; rp; rp = rp->ai_next)
     {
@@ -96,8 +106,19 @@ HttpResponse HttpClient::send(const HttpRequest& request)
     return HttpResponse::parse(response);
 }
 
+/**
+ * @brief recv() wrapper
+ * @return Response string
+ * @note Blocking
+ * @note Timeout if server doesn't close connection
+ */
 std::string HttpClient::receive()
 {
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     std::string response;
     char buffer[4096];
     ssize_t bytes;
@@ -106,6 +127,11 @@ std::string HttpClient::receive()
     {
         buffer[bytes] = '\0';
         response += buffer;
+    }
+
+    if (bytes < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
+    {
+        // Timeout occurred
     }
 
     return response;

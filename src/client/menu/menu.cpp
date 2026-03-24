@@ -1,71 +1,72 @@
-#include "menu.hpp"
-#include "../plan_service/plan_service.hpp"
+/**
+ * @file menu.cpp
+ * @brief Interactive menu implementation
+ */
 
 #include <iostream>
+#include <thread>
+#include <chrono>
+#include <atomic>
+
+#include "menu.hpp"
+#include "../plan_service/plan_service.hpp"
+#include "../utils/utils.hpp"
 
 Menu::Menu() {}
 
-// Loads and shows menu with interactable options
 void Menu::show(PlanService &service)
 {
-    std::vector<std::string> options = {"Now", "Day", "Week", "History", "Exit"};
+    std::vector<std::string> options = {"Live status", "Graph", "Exit"};
 
     while (true)
     {
-        int selection = createAndSelect("MAIN MENU", options);
+        int selection = createAndSelect(options);
 
         switch (selection)
         {
-            case 0:
+            case 0:  // Live status option
             {
                 // Option 1
-                // Show what to do right now
-                service.showNow();
-        
+                clearScreen();
+                if (!service.getResult()) break;
+                
+                std::atomic<bool> running(true);
+                std::thread updater([&]()
+                {
+                    while (running)
+                    {
+                        clearScreen();
+                        service.displayLive();
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
+                });
+
+                // Wait for user to press Enter to stop
                 while (Input::getArrowKey() != Input::Key::ENTER)
                 {
-                    clearScreen();
+                    // User can press any key, but only Enter exits
                 }
+
+                running = false;
+                updater.join(); 
+
                 break;
             }
-            case 1:
+            case 1:  // Graph option
             {
                 // Option 2
-                // Show next 24 hours
                 clearScreen();
-                service.showDay();
+                if (!service.getResult()) break;
+                service.displayGraph();
 
                 while (Input::getArrowKey() != Input::Key::ENTER)
                 {
-                    clearScreen();
+                    // Don't do anything
                 }
-                break;
-            }
-            case 2:
-            {
-                // Option 3
-                // Show next 7 days
-                service.showWeek();
 
-                while (Input::getArrowKey() != Input::Key::ENTER)
-                {
-                    clearScreen();
-                }
                 break;
             }
-            case 3:
-            {
-                // Option 4
-                // See history log
-                service.showHistory();
-
-                while (Input::getArrowKey() != Input::Key::ENTER)
-                {
-                    clearScreen();
-                }
-                break;
-            }
-            case 4:
+            case 2:  // Exit option
             {
                 std::cout << "Exiting program...\n";
                 exit(EXIT_SUCCESS);
@@ -75,30 +76,27 @@ void Menu::show(PlanService &service)
     }
 }
 
-// Creates, displays and selects in a dynamic interactable list
-// Returns the index in the vector that was selected
-int Menu::createAndSelect(std::string title, std::vector<std::string> options)
+int Menu::createAndSelect(std::vector<std::string> options)
 {
     size_t selected = 0;
-    std::string outline = "+----------------------+";
 
     while (true)
     {
         clearScreen();
 
-        // ============= Printing =============
-        std::cout << outline << "\n";
-        std::cout << "|\t" << title << std::endl;
+        printOutline();
+        printRow("MAIN MENU", "");
+        printRow("", "");
         for (size_t i = 0; i < options.size(); i++)
         {
             if (i == selected)
-                std::cout << "|  " << options[i] << " <\n";  // < indicator
+                printRow(options[i] + " <", "");  // Visual selection indicator
             else
-                std::cout << "| " << options[i] << "\n";
+                printRow(options[i], "");
         }
-        std::cout << outline << std::endl;
+        printOutline();
 
-        // ========== Input handling ==========
+        // Handle navigation input
         Input::Key keyPressed = Input::getArrowKey();
 
         if (keyPressed == Input::Key::UP && selected > 0)
@@ -117,5 +115,5 @@ int Menu::createAndSelect(std::string title, std::vector<std::string> options)
 
 void Menu::clearScreen()
 {
-    std::cout << "\033[2J\033[H";
+    std::cout << "\033[2J\033[H";  // ANSI escape codes: clear screen and move cursor to home
 }

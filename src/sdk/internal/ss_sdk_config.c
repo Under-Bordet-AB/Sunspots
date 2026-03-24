@@ -1,78 +1,51 @@
 #include "sdk/internal/ss_sdk_config.h"
+#include "sdk/internal/ss_sdk_config_util.h"
 
 #include <stdlib.h>
 
-#include "libs/json/cJSON.h"
-
-static void ss_sdk_config_try_set_string(const cJSON *sdk, const char *json_key, const char *env_key)
+static void ss_sdk_config_try_set_string_path(const char *source_env_key, const char *path, const char *env_key)
 {
-    const cJSON *item;
+    char value[SS_SDK_PATH_BUFFER_SIZE];
     const char *existing;
+    ss_sdk_cfg_status status;
 
     existing = getenv(env_key);
     if (existing != NULL) {
         return;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive((cJSON *)sdk, json_key);
-    if (!cJSON_IsString(item) || item->valuestring == NULL || item->valuestring[0] == '\0') {
+    status = ss_sdk_cfg_get_string_from_env_json(source_env_key, path, value, sizeof(value));
+    if (status != SS_SDK_CFG_OK) {
         return;
     }
 
-    setenv(env_key, item->valuestring, 0);
+    setenv(env_key, value, 0);
 }
 
-static void ss_sdk_config_try_set_bool(const cJSON *sdk, const char *json_key, const char *env_key)
+static void ss_sdk_config_try_set_bool_path(const char *source_env_key, const char *path, const char *env_key)
 {
-    const cJSON *item;
     const char *existing;
+    int value = 0;
+    ss_sdk_cfg_status status;
 
     existing = getenv(env_key);
     if (existing != NULL) {
         return;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive((cJSON *)sdk, json_key);
-    if (!cJSON_IsBool(item)) {
+    status = ss_sdk_cfg_get_bool_from_env_json(source_env_key, path, &value);
+    if (status != SS_SDK_CFG_OK) {
         return;
     }
 
-    setenv(env_key, cJSON_IsTrue(item) ? "1" : "0", 0);
+    setenv(env_key, value ? "1" : "0", 0);
 }
 
 void ss_sdk_config_bootstrap_env_from_blob(void)
 {
-    const char *blob;
-    cJSON *root = NULL;
-    cJSON *common = NULL;
-    cJSON *sdk = NULL;
-
-    blob = getenv("SUNSPOTS_CONFIG");
-    if (blob == NULL || blob[0] == '\0') {
-        return;
-    }
-
-    root = cJSON_Parse(blob);
-    if (root == NULL) {
-        return;
-    }
-
-    common = cJSON_GetObjectItemCaseSensitive(root, "common");
-    if (cJSON_IsObject(common)) {
-        sdk = cJSON_GetObjectItemCaseSensitive(common, "sdk");
-    }
-    if (!cJSON_IsObject(sdk)) {
-        sdk = cJSON_GetObjectItemCaseSensitive(root, "sdk");
-    }
-    if (!cJSON_IsObject(sdk)) {
-        cJSON_Delete(root);
-        return;
-    }
-
-    ss_sdk_config_try_set_string(sdk, "db_path", SS_SDK_ENV_DB_PATH);
-    ss_sdk_config_try_set_string(sdk, "log_level", SS_SDK_ENV_LOG_LEVEL);
-    ss_sdk_config_try_set_bool(sdk, "log_mirror_enabled", SS_SDK_ENV_LOG_MIRROR_ENABLED);
-    ss_sdk_config_try_set_string(sdk, "log_mirror_path", SS_SDK_ENV_LOG_MIRROR_PATH);
-
-    cJSON_Delete(root);
+    ss_sdk_config_try_set_string_path("SUNSPOTS_SYSTEM", "sdk.db_dir", SS_SDK_ENV_DB_DIR);
+    ss_sdk_config_try_set_string_path("SUNSPOTS_SYSTEM", "sdk.log_level", SS_SDK_ENV_LOG_LEVEL);
+    ss_sdk_config_try_set_bool_path("SUNSPOTS_SYSTEM", "sdk.log_mirror_enabled", SS_SDK_ENV_LOG_MIRROR_ENABLED);
+    ss_sdk_config_try_set_string_path("SUNSPOTS_SYSTEM", "sdk.log_mirror_path", SS_SDK_ENV_LOG_MIRROR_PATH);
+    ss_sdk_config_try_set_string_path("SUNSPOTS_SYSTEM", "sdk.log_mirror_max_bytes", SS_SDK_ENV_LOG_MIRROR_MAX_BYTES);
 }

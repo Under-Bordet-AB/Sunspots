@@ -6,6 +6,7 @@
 
 #include "module.h"
 #include "daemon.h"
+#include "daemon_logger.h"
 #include "../../src/libs/json/cJSON.h"
 
 #include <stdio.h>
@@ -17,11 +18,11 @@
 
 #include <syslog.h>
 #include <fcntl.h>
-#include <sys/wait.h>     
-#include <sys/resource.h> 
-#include <sys/timerfd.h>  
-#include <sys/epoll.h>    
-#include <signal.h>    
+#include <sys/wait.h>
+#include <sys/resource.h>
+#include <sys/timerfd.h>
+#include <sys/epoll.h>
+#include <signal.h>
 
 typedef enum {
     MODE_HEARTBEAT = 0,
@@ -31,17 +32,19 @@ typedef enum {
 
 struct module {
     volatile sig_atomic_t module_alive;
-    pid_t module_pid;             
-    char *module_name;      
+    pid_t module_pid;
+    char *module_name;
     char *module_binary_path;
     char *module_config;
 	char *system_config;
-    
-    timer_mode_t module_timertype; 
-    char *module_absolut_time;     
-    long module_relative_time;     
-    int module_timer_fd;           
+
+    timer_mode_t module_timertype;
+    char *module_absolut_time;
+    long module_relative_time;
+    int module_timer_fd;
     int module_heartbeat;
+	int module_start_at_boot;
+	int module_is_first_run;
 };
 
 static char *module_read_conf_file(const char *filepath);
@@ -49,7 +52,7 @@ static char *module_read_conf_file(const char *filepath);
 void module_init(module_t **self)
 {
     if (!self) exit(EXIT_FAILURE);
-    *self = NULL; 
+    *self = NULL;
 }
 
 void module_deinit(module_t **self_ptr, int count, int epoll_fd)
@@ -61,9 +64,9 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
     {
         if (table[i].module_pid > 0)
         {
-            syslog(LOG_NOTICE, "Killing process: %s PID %d", table[i].module_name, table[i].module_pid);          
+            syslog(LOG_NOTICE, "Killing process: %s PID %d", table[i].module_name, table[i].module_pid);
             kill(table[i].module_pid, SIGTERM);
-            
+
             struct rusage usage;
             int status;
             if (wait4(table[i].module_pid, &status, 0, &usage) != -1)
@@ -71,7 +74,7 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
                 syslog(LOG_INFO, "%s RAM Peak: %ld KB", table[i].module_name, usage.ru_maxrss);
             }
         }
-        
+
         if (table[i].module_timer_fd > 0)
 		{
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, table[i].module_timer_fd, NULL);
@@ -84,7 +87,7 @@ void module_deinit(module_t **self_ptr, int count, int epoll_fd)
 		free(table[i].system_config);
         free(table[i].module_absolut_time);
     }
-    
+
     free(table);
     *self_ptr = NULL;
 }
@@ -142,6 +145,14 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
 		new_table[i].system_config   = cJSON_PrintUnformatted(system);
         new_table[i].module_timer_fd = -1;
 
+		/** Set flags for start at boot */
+		cJSON *sab = cJSON_GetObjectItemCaseSensitive(mod, "start_at_boot");
+		if (cJSON_IsNumber(sab))
+		{
+			new_table[i].module_start_at_boot = sab->valueint;
+			new_table[i].module_is_first_run  = 1;
+		}
+
         cJSON *t_flag = cJSON_GetObjectItemCaseSensitive(mod, "Timer-type");
         if (cJSON_IsNumber(t_flag) && t_flag->valueint == 1)
 		{
@@ -174,13 +185,13 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
             /** Skip any module that failed path resolution above */
             if (!new_table[j].module_name || !new_table[j].module_binary_path)
 			{
-                continue;				
+                continue;
 			}
             for (int k = 0; k < old_count; k++)
 			{
                 if (!old_table[k].module_name || !old_table[k].module_binary_path)
 				{
-                    continue;					
+                    continue;
 				}
                 if (strcmp(new_table[j].module_name, old_table[k].module_name) != 0 ||
                     strcmp(new_table[j].module_binary_path, old_table[k].module_binary_path) != 0)
@@ -194,6 +205,7 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
 					new_table[j].module_pid      = old_table[k].module_pid;
 					new_table[j].module_alive    = old_table[k].module_alive;
 					new_table[j].module_timer_fd = old_table[k].module_timer_fd;
+					new_table[j].module_is_first_run = old_table[k].module_is_first_run;
 				}
 				else
 				{
@@ -207,7 +219,7 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
 					{
 						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, old_table[k].module_timer_fd, NULL);
 						close(old_table[k].module_timer_fd);
-					}					
+					}
 				}
                 /** prevent module_deinit from double-killing.  */
                 old_table[k].module_pid      = 0;
@@ -225,7 +237,7 @@ int module_load(module_t **self_ptr, int old_count, const char *config_path, con
 	{
         if (!new_table[j].module_name)
 		{
-		    continue;	
+		    continue;
 		}
         if (new_table[j].module_timertype != MODE_HEARTBEAT && new_table[j].module_timer_fd == -1)
         {
@@ -245,7 +257,7 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig)
 {
     if (!self)
 	{
-	    return;	
+	    return;
 	}
     int pipefd[2];
     if (pipe2(pipefd, O_CLOEXEC) == -1)
@@ -263,7 +275,7 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig)
     }
     if (p == 0)
     {
-        /** CHILD CONTEXT Unblock all signals the parent blocked for signalfd. */		
+        /** CHILD CONTEXT Unblock all signals the parent blocked for signalfd. */
         sigset_t child_mask;
         sigemptyset(&child_mask);
         sigaddset(&child_mask, SIGINT);
@@ -308,52 +320,55 @@ void module_spawn(module_t *self, const char *prj_root_path, int heartbeat_sig)
         self->module_pid   = p;
         self->module_alive = 1;
         syslog(LOG_INFO, "Execvp on: '%s' [PID %d]", self->module_name, p);
+		daemon_logger_send(self->module_name, "Started.");
     }
     close(pipefd[0]);
 }
 
-void module_health_check_all(module_t *array, int count, const char *prj_root_path, int heartbeat_sig)
+void module_health_check_all(module_t *self, int count, const char *prj_root_path, int heartbeat_sig)
 {
-    if (!array) return;
+    if (!self) return;
     for (int i = 0; i < count; i++)
     {
-        if (array[i].module_timertype != MODE_HEARTBEAT) continue;
-        if (array[i].module_pid <= 0)
+        if (self[i].module_timertype != MODE_HEARTBEAT) continue;
+        if (self[i].module_pid <= 0)
 		{
-            syslog(LOG_ERR, "Process '%s' terminated. Restarting.", array[i].module_name);
-            module_spawn(&array[i], prj_root_path, heartbeat_sig);
+            syslog(LOG_ERR, "Process '%s' terminated. Restarting.", self[i].module_name);
+            daemon_logger_send(self[i].module_name, "Terminated, restarting!");
+            module_spawn(&self[i], prj_root_path, heartbeat_sig);
         }
-        else if (!array[i].module_alive)
+        else if (!self[i].module_alive)
 		{
-            syslog(LOG_ERR, "Process '%s' hung (no heartbeat). Restarting.", array[i].module_name);
-            kill(array[i].module_pid, SIGKILL);
-            waitpid(array[i].module_pid, NULL, 0);
-            array[i].module_pid = 0;
-            module_spawn(&array[i], prj_root_path, heartbeat_sig);
+            syslog(LOG_ERR, "Process '%s' hung (no heartbeat). Restarting.", self[i].module_name);
+			daemon_logger_send(self[i].module_name, "Hung, restarting!");
+            kill(self[i].module_pid, SIGKILL);
+            waitpid(self[i].module_pid, NULL, 0);
+            self[i].module_pid = 0;
+            module_spawn(&self[i], prj_root_path, heartbeat_sig);
         }
         else
 		{
-            array[i].module_alive = 0;
+            self[i].module_alive = 0;
         }
     }
 }
 
-void module_handle_timer_event(module_t *array, int count, int timer_fd, const char *prj_root, int epoll_fd, int heartbeat_sig)
+void module_handle_timer_event(module_t *self, int count, int timer_fd, const char *prj_root, int epoll_fd, int heartbeat_sig)
 {
     for (int i = 0; i < count; i++)
 	{
-        if (array[i].module_timer_fd == timer_fd)
+        if (self[i].module_timer_fd == timer_fd)
 		{
             uint64_t exp;
             if (read(timer_fd, &exp, sizeof(exp)) > 0)
 			{
-                if (array[i].module_pid <= 0)
+                if (self[i].module_pid <= 0)
 				{
-                    module_spawn(&array[i], prj_root, heartbeat_sig);
+                    module_spawn(&self[i], prj_root, heartbeat_sig);
                 }
-                if (array[i].module_timertype == MODE_ABSTIME)
+                if (self[i].module_timertype == MODE_ABSTIME)
 				{
-                    module_timer_config(&array[i], epoll_fd);
+                    module_timer_config(&self[i], epoll_fd);
                 }
             }
             break;
@@ -363,39 +378,60 @@ void module_handle_timer_event(module_t *array, int count, int timer_fd, const c
 
 void module_timer_config(module_t *self, int epoll_fd)
 {
-    if (self->module_timertype == MODE_HEARTBEAT) return;    
-    int clock_type = (self->module_timertype == MODE_ABSTIME) ? CLOCK_REALTIME : CLOCK_MONOTONIC;    
+    if (self->module_timertype == MODE_HEARTBEAT) return;
+    int clock_type = (self->module_timertype == MODE_ABSTIME) ? CLOCK_REALTIME : CLOCK_MONOTONIC;
     if (self->module_timer_fd <= 0)
 	{
         self->module_timer_fd = timerfd_create(clock_type, TFD_NONBLOCK | TFD_CLOEXEC);
         struct epoll_event ev = { .events = EPOLLIN, .data.fd = self->module_timer_fd };
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, self->module_timer_fd, &ev);
-    }    
+    }
     struct itimerspec its = {0};
     int timerfd_flags = 0;
     if (self->module_timertype == MODE_ABSTIME)
 	{
-        int hr, min;
-        sscanf(self->module_absolut_time, "%d:%d", &hr, &min);        
-        struct timespec curr;
-        clock_gettime(clock_type, &curr);        
-        struct tm tm_buf;
-        struct tm *lt = localtime_r(&curr.tv_sec, &tm_buf);
-        lt->tm_hour = hr; lt->tm_min = min; lt->tm_sec = 0; lt->tm_isdst = -1;         
-        time_t run_at = mktime(lt);
-        if (run_at <= curr.tv_sec)
+        if (self->module_start_at_boot && self->module_is_first_run)
 		{
-            lt->tm_mday += 1;
-            run_at = mktime(lt);
-        }
-        its.it_value.tv_sec = run_at;
-        timerfd_flags = TFD_TIMER_ABSTIME;
+			/** Will run in 1 sec */
+			its.it_value.tv_sec = 1;
+			self->module_is_first_run = 0;
+		}
+		else
+		{
+            int hr, min;
+            sscanf(self->module_absolut_time, "%d:%d", &hr, &min);
+            struct timespec curr;
+            clock_gettime(clock_type, &curr);
+            struct tm tm_buf;
+            struct tm *lt = localtime_r(&curr.tv_sec, &tm_buf);
+            lt->tm_hour = hr; lt->tm_min = min; lt->tm_sec = 0; lt->tm_isdst = -1;
+            time_t run_at = mktime(lt);
+
+            if (run_at <= curr.tv_sec)
+            {
+                lt->tm_mday += 1;
+                run_at = mktime(lt);
+            }
+            its.it_value.tv_sec = run_at;
+            timerfd_flags = TFD_TIMER_ABSTIME;
+		}
     }
 	else
 	{
-        its.it_value.tv_sec = self->module_relative_time;
+		if (self->module_start_at_boot && self->module_is_first_run)
+		{
+			/** Will run in 1 sec */
+			its.it_value.tv_sec = 1;
+			self->module_is_first_run = 0;
+		}
+		else
+		{
+			/** Use rel-time value and don't fire at boot */
+		    its.it_value.tv_sec = self->module_relative_time;
+		}
+		/** Interval is always real value from self */
         its.it_interval.tv_sec = self->module_relative_time;
-    }    
+    }
     timerfd_settime(self->module_timer_fd, timerfd_flags, &its, NULL);
 }
 const char *module_get_system_config(module_t *self)
@@ -418,12 +454,12 @@ void module_set_alive(module_t *self, int value)
 	if (self) self->module_alive = value;
 }
 
-module_t *module_find_by_pid(module_t *array, int count, pid_t pid)
+module_t *module_find_by_pid(module_t *self, int count, pid_t pid)
 {
-    if (!array) return NULL;
+    if (!self) return NULL;
     for (int i = 0; i < count; i++)
 	{
-        if (array[i].module_pid == pid) return &array[i];
+        if (self[i].module_pid == pid) return &self[i];
     }
     return NULL;
 }
@@ -431,12 +467,12 @@ module_t *module_find_by_pid(module_t *array, int count, pid_t pid)
 static char *module_read_conf_file(const char *filepath)
 {
     FILE *fptr = fopen(filepath, "rb");
-    if (!fptr) return NULL;     
+    if (!fptr) return NULL;
     fseek(fptr, 0, SEEK_END);
     size_t len = ftell(fptr);
     rewind(fptr);
     char *buf = malloc(len + 1);
-    if (!buf) { fclose(fptr); return NULL; }   
+    if (!buf) { fclose(fptr); return NULL; }
     size_t rb = fread(buf, 1, len, fptr);
     buf[(rb < len) ? rb : len] = '\0';
     fclose(fptr);

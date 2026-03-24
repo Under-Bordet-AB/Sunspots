@@ -1,4 +1,5 @@
 add_library(sunspots_compute STATIC
+  algorithms/compute_heuristic.c
   algorithms/compute_lp.c
 )
 target_include_directories(sunspots_compute

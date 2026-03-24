@@ -4,6 +4,10 @@
 #include "sdk/ss_sdk.h"
 
 ss_sdk_status ss_sdk_internal_db_write_record(const ss_sdk_record *record);
+ss_sdk_status ss_sdk_internal_db_write_records(
+    const ss_sdk_record *records,
+    size_t count,
+    size_t *out_written);
 
 ss_sdk_status ss_sdk_internal_db_get_canonical(
     ss_metric_id canonical,
@@ -15,6 +19,13 @@ ss_sdk_status ss_sdk_internal_db_get_canonical_forward(
     ss_metric_id canonical,
     int64_t start_utc,
     ss_sdk_samples_out *out);
+
+ss_sdk_status ss_sdk_internal_db_clamp_end_utc(
+    ss_metric_id canonical,
+    int64_t start_utc,
+    int64_t requested_end_utc,
+    int64_t *out_end_utc,
+    int *out_was_clamped);
 
 void ss_sdk_internal_db_free_samples(ss_sdk_samples_out *out);
 

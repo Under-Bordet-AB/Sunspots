@@ -1,8 +1,8 @@
 /**
- * @file sunspots_log.h
+ * @file daemon_logger.h
  * @brief Fire-and-forget log sender over a Unix domain socket.
- *        Include this header in any module that needs to log.
- *        The socket path must match the "socket_path" in the config.
+ * * Include this header in any module that needs to log to the centralized
+ * SUNSPOTS journal/logger daemon.
  */
 
 #ifndef DAEMON_LOGGER_H
@@ -18,6 +18,17 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+/**
+ * @brief Formats and sends a log message to the daemon logger socket.
+ * * @details This function is designed to be a fire-and-forget logging mechanism.
+ * It parses the "SUNSPOTS_SYSTEM" environment variable on its first run to cache
+ * the socket path. It constructs a datagram containing a timestamp, the sending
+ * module's name, and the message, and sends it via an AF_UNIX socket.
+ * * @note This function handles its own socket creation and teardown per call to
+ * ensure non-blocking, isolated execution in child processes.
+ * * @param sending_module A string representing the name of the module generating the log.
+ * @param msg The message string to be logged. If NULL, the function does nothing.
+ */
 static inline void daemon_logger_send(const char *sending_module, const char *msg)
 {
 	if (!msg) return;
@@ -52,7 +63,7 @@ static inline void daemon_logger_send(const char *sending_module, const char *ms
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_path, sizeof(socket_path) -1);
+    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 	
     /** Get the current time for timestamp */
 	struct timeval tv;
@@ -60,7 +71,7 @@ static inline void daemon_logger_send(const char *sending_module, const char *ms
 	struct tm *now = localtime(&tv.tv_sec);
 	
     /** Send message to file via socket */
-	len = snprintf(buf, sizeof(buf), "%02d:%02d:%02d | %s »» %s", now->tm_hour,
+	len = snprintf(buf, sizeof(buf), "%02d:%02d:%02d | %s -> %s", now->tm_hour,
 				   now->tm_min,
 				   now->tm_sec,
 				   sending_module,

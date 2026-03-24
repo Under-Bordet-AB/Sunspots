@@ -10,8 +10,13 @@ GENERATOR ?= Unix Makefiles
 CONFIG ?= Debug
 RUN_ARGS ?=
 DAEMON_BIN ?= sunspots_daemon
+VALGRIND_DAEMON_BIN ?= $(DAEMON_BIN)
+PROJECT_CONFIG_PATH ?= config/sunspots.json
+VALGRIND_AUTOSWAP_CONFIG ?= 1
 M ?=
 BUILD_DIR ?= build/debug
+FUZZ_BUILD_ROOT ?= build/fuzz
+FUZZ_BUILD_DIR = $(FUZZ_BUILD_ROOT)/$(FUZZ_ENGINE)
 VALGRIND_BUILD_DIR ?= build/valgrind
 TIDY_BUILD_DIR ?= build/tidy
 MODULE_TARGET_HELPER ?= scripts/module_targets.sh
@@ -22,11 +27,15 @@ DEBUG_CONFIG_LOG ?= $(RAW_LOGS_DIR)/debug_configure.log
 DEBUG_BUILD_LOG ?= $(RAW_LOGS_DIR)/debug_build.log
 DEBUG_TESTS_BUILD_LOG ?= $(RAW_LOGS_DIR)/debug_build_tests.log
 DEBUG_TEST_LOG ?= $(RAW_LOGS_DIR)/debug_test.log
+FUZZ_CONFIG_LOG ?= $(RAW_LOGS_DIR)/fuzz_configure.log
+FUZZ_BUILD_LOG ?= $(RAW_LOGS_DIR)/fuzz_build.log
+FUZZ_RUN_LOG ?= $(RAW_LOGS_DIR)/fuzz_run.log
 VALGRIND_CONFIG_LOG ?= $(RAW_LOGS_DIR)/valgrind_configure.log
 VALGRIND_BUILD_LOG ?= $(RAW_LOGS_DIR)/valgrind_build.log
 VALGRIND_TESTS_BUILD_LOG ?= $(RAW_LOGS_DIR)/valgrind_build_tests.log
 VALGRIND_TEST_LOG ?= $(RAW_LOGS_DIR)/valgrind_test.log
-VALGRIND_WRAPPER_LOG ?= $(RAW_LOGS_DIR)/run_valgrind_$(DAEMON_BIN).log
+VALGRIND_WRAPPER_LOG ?= $(RAW_LOGS_DIR)/run_valgrind_$(VALGRIND_DAEMON_BIN).log
+VALGRIND_RUN_REPORT ?= $(RAW_LOGS_DIR)/valgrind_run_report.txt
 TIDY_CONFIG_LOG ?= $(RAW_LOGS_DIR)/tidy_configure.log
 TIDY_BUILD_LOG ?= $(RAW_LOGS_DIR)/tidy_build.log
 CPPCHECK_LOG ?= $(RAW_LOGS_DIR)/cppcheck.log
@@ -49,27 +58,59 @@ WARNINGS_RAW_LOG ?= $(RAW_LOGS_DIR)/warnings_raw.log
 LIZARD_RAW_LOG ?= $(RAW_LOGS_DIR)/lizard_raw.log
 ALL_LOCK_FILE ?= $(RAW_LOGS_DIR)/.make_all.lock
 WARNINGS_LOCK_FILE ?= $(RAW_LOGS_DIR)/.make_warnings.lock
+BACKFILL_USAGE_TRACKER ?= logs/backfill_usage_daily.log
 WARNINGS_SKIP_PREFLIGHT ?= 0
 ALLOW_DURING_ALL ?= 0
+LIZARD_PARAM_THRESHOLD ?= 6
+FUZZ_TARGET ?= http_request_fuzzer
+FUZZ_ENGINE ?= afl
+FUZZ_RUN_ARGS ?=
+FUZZ_INPUT ?= fuzz/corpus/$(FUZZ_TARGET)
+FUZZ_OUTPUT ?= fuzz/output/$(FUZZ_TARGET)
+AFL_FUZZ_ARGS ?=
+AFL_FUZZ_BIN ?= $(shell command -v afl-fuzz 2>/dev/null)
+
+FUZZ_C_COMPILER ?= $(shell command -v afl-clang-fast 2>/dev/null || command -v afl-clang-lto 2>/dev/null || command -v afl-cc 2>/dev/null)
+FUZZ_CXX_COMPILER ?= $(shell command -v afl-clang-fast++ 2>/dev/null || command -v afl-clang-lto++ 2>/dev/null || command -v afl-c++ 2>/dev/null)
 
 CMAKE_FLAGS_DEBUG := -G "$(GENERATOR)" -S . -B "$(BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=$(CONFIG) \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
 	-DSUNSPOTS_ENABLE_SANITIZERS=ON \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
+CMAKE_FLAGS_FUZZ := -G "$(GENERATOR)" -S . -B "$(FUZZ_BUILD_DIR)" \
+	-DCMAKE_BUILD_TYPE=Debug \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
+	-DCMAKE_C_COMPILER=$(FUZZ_C_COMPILER) \
+	-DCMAKE_CXX_COMPILER=$(FUZZ_CXX_COMPILER) \
+	-DSUNSPOTS_ENABLE_SANITIZERS=OFF \
+	-DBUILD_TESTING=OFF \
+	-DSUNSPOTS_BUILD_BENCHMARKS=OFF \
+	-DSUNSPOTS_BUILD_FUZZERS=ON \
+	-DSUNSPOTS_FUZZ_ENGINE=$(FUZZ_ENGINE)
+
 CMAKE_FLAGS_VALGRIND := -G "$(GENERATOR)" -S . -B "$(VALGRIND_BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
 	-DSUNSPOTS_ENABLE_SANITIZERS=OFF \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
 
 CMAKE_FLAGS_TIDY := -G "$(GENERATOR)" -S . -B "$(TIDY_BUILD_DIR)" \
 	-DCMAKE_BUILD_TYPE=Debug \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
+	-DCMAKE_COLOR_DIAGNOSTICS=OFF \
 	-DSUNSPOTS_ENABLE_SANITIZERS=OFF \
 	-DSUNSPOTS_ENABLE_CLANG_TIDY=ON \
 	-DBUILD_TESTING=ON \
 	-DSUNSPOTS_BUILD_BENCHMARKS=ON
+
+LOG_NO_COLOR_ENV := env NO_COLOR=1 CLICOLOR=0 CLICOLOR_FORCE=0 GCC_COLORS= TERM=dumb GTEST_COLOR=no
 
 ifeq ($(NO_COLOR),1)
 C_RESET :=
@@ -87,21 +128,29 @@ C_YELLOW := \033[33m
 C_RED := \033[31m
 endif
 
-.PHONY: help all build build-valgrind build-tests build-tests-valgrind run run-valgrind run-tests run-tests-valgrind list-modules list-modules-valgrind tidy cppcheck lizard warnings e2e e2e-valgrind clean deepclean
+.PHONY: help all build build-fuzz fuzz-server fuzz-sdk build-valgrind build-tests build-tests-valgrind build-backfill build-backfill-monitor run run-client run-fuzz run-valgrind run-tests run-tests-valgrind run-backfill-monitor list-modules list-modules-valgrind tidy cppcheck lizard warnings kill kill-all kill-sunspots e2e e2e-valgrind clean deepclean
 
 help:
 	@printf "\nSunspots Make Targets\n\n"
 	@printf "  %-26s %s\n" "make (default)" "Same as make build"
 	@printf "  %-26s %s\n" "make all" "Serialized full pipeline (build lanes, tests, reports)"
 	@printf "  %-26s %s\n" "make build" "Configure + build debug lane only"
+	@printf "  %-26s %s\n" "make build-fuzz" "Configure + build one AFL++ fuzz target (FUZZ_TARGET=...)"
+	@printf "  %-26s %s\n" "make fuzz-server" "Build + run the server/frontend fuzzer with AFL++"
+	@printf "  %-26s %s\n" "make fuzz-sdk" "Build + run the SDK DB fuzzer with AFL++"
 	@printf "  %-26s %s\n" "make build-valgrind" "Configure + build valgrind lane only"
 	@printf "  %-26s %s\n" "make build-tests" "Configure + build test binaries (debug lane)"
 	@printf "  %-26s %s\n" "make build-tests-valgrind" "Configure + build test binaries (valgrind lane)"
+	@printf "  %-26s %s\n" "make build-backfill" "Build backfill worker binaries in debug lane"
+	@printf "  %-26s %s\n" "make build-backfill-monitor" "Build shared SDK bridge needed by backfill DB monitor"
 	@printf "  %-26s %s\n" "make list-modules" "Discover runnable module targets in debug lane"
 	@printf "  %-26s %s\n" "make list-modules-valgrind" "Discover runnable module targets in valgrind lane"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make run" "Run daemon (default) or module (with M=...) from debug build"
-	@printf "  %-26s %s\n" "make run-valgrind" "Valgrind run on daemon (default) or module (with M=...)"
+	@printf "  %-26s %s\n" "make run-client" "Build and run the client from debug build"
+	@printf "  %-26s %s\n" "make run-fuzz" "Run AFL++ on a fuzz target with AFL_FUZZ_ARGS/FUZZ_INPUT"
+	@printf "  %-26s %s\n" "make run-valgrind" "Valgrind run on daemon (default, expected unreliable) or module (with M=...)"
+	@printf "  %-26s %s\n" "make run-backfill-monitor" "Run live backfill DB coverage monitor"
 	@printf "  %-26s %s\n" "make run-tests" "Run tests in existing $(BUILD_DIR) (no rebuild)"
 	@printf "  %-26s %s\n" "make run-tests-valgrind" "Run valgrind tests in existing $(VALGRIND_BUILD_DIR) (no rebuild)"
 	@printf "\n"
@@ -109,6 +158,8 @@ help:
 	@printf "  %-26s %s\n" "make cppcheck" "Run cppcheck on src/ and tests/"
 	@printf "  %-26s %s\n" "make lizard" "Run lizard complexity checks on src/ and tests/"
 	@printf "  %-26s %s\n" "make warnings" "Build all lanes + refresh warning/analysis reports"
+	@printf "  %-26s %s\n" "make kill" "Kill all running Sunspots processes"
+	@printf "  %-26s %s\n" "make kill-all" "Graceful shutdown (5s) then force-kill daemon descendants"
 	@printf "\n"
 	@printf "  %-26s %s\n" "make e2e" "Placeholder: not implemented yet"
 	@printf "  %-26s %s\n" "make e2e-valgrind" "Placeholder: not implemented yet"
@@ -118,7 +169,9 @@ help:
 	@printf "\nOutput locations\n"
 	@printf "  logs root:       logs/make/<current-branch>/\n\n"
 	@printf "  module filter:   pass M=<module-or-target>, e.g. M=daemon or M=sunspots_fetch_openmeteo\n"
-	@printf "  note: daemon-level valgrind is not reliable until daemon supports foreground mode\n\n"
+	@printf "  fuzz target:     pass FUZZ_TARGET=<fuzzer>, default: http_request_fuzzer\n"
+	@printf "  fuzz engine:     AFL++ only\n"
+	@printf "  note: daemon-level valgrind is expected to be unreliable while daemon runs in background mode\n\n"
 
 all:
 	@set -e; \
@@ -153,7 +206,7 @@ all:
 build:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure debug build\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
 		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
 		exit 1; \
@@ -162,14 +215,14 @@ build:
 	if [ -n "$$requested_modules" ] && [ "$$requested_modules" != "all" ]; then \
 		targets=$$($(MODULE_TARGET_HELPER) resolve "$(BUILD_DIR)" "$$requested_modules" | tr '\n' ' '); \
 		printf "%b[2/2]%b build debug targets (M=%s)\n" "$(C_CYAN)" "$(C_RESET)" "$$requested_modules"; \
-		$(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
 			tail -n 40 "$(DEBUG_BUILD_LOG)"; \
 			exit 1; \
 		}; \
 	else \
 		printf "%b[2/2]%b build debug targets\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) --build "$(BUILD_DIR)" --parallel > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
 			tail -n 40 "$(DEBUG_BUILD_LOG)"; \
 			exit 1; \
@@ -180,10 +233,70 @@ build:
 	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
 	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
 
+build-fuzz:
+	@mkdir -p "$(FUZZ_BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@printf "%b[1/2]%b configure fuzz build (%s, engine=%s)\n" "$(C_CYAN)" "$(C_RESET)" "$(FUZZ_TARGET)" "$(FUZZ_ENGINE)"
+	@if [ -z "$(FUZZ_C_COMPILER)" ] || [ -z "$(FUZZ_CXX_COMPILER)" ]; then \
+		printf "%b[fail]%b required fuzz compilers not found for engine=%s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_ENGINE)"; \
+		exit 1; \
+	fi
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_FUZZ) > "$(FUZZ_CONFIG_LOG)" 2>&1 || { \
+		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_CONFIG_LOG)"; \
+		tail -n 60 "$(FUZZ_CONFIG_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[2/2]%b build fuzz target %s\n" "$(C_CYAN)" "$(C_RESET)" "$(FUZZ_TARGET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(FUZZ_BUILD_DIR)" --parallel --target "$(FUZZ_TARGET)" > "$(FUZZ_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b fuzz build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_BUILD_LOG)"; \
+		tail -n 60 "$(FUZZ_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[ok]%b fuzz build complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "      configure log: %s\n" "$(FUZZ_CONFIG_LOG)"
+	@printf "      build log:     %s\n" "$(FUZZ_BUILD_LOG)"
+
+build-backfill:
+	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@printf "%b[1/2]%b configure debug build\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
+		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[2/2]%b build backfill targets\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target \
+		sunspots_backfill_openmeteo \
+		sunspots_backfill_elprisetjustnu > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
+		tail -n 40 "$(DEBUG_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[ok]%b backfill build complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
+	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
+
+build-backfill-monitor:
+	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@printf "%b[1/2]%b configure debug build\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
+		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[2/2]%b build backfill monitor bridge\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target sunspots_sdk_shared > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
+		tail -n 40 "$(DEBUG_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[ok]%b backfill monitor build complete\n" "$(C_GREEN)" "$(C_RESET)"
+	@printf "      configure log: %s\n" "$(DEBUG_CONFIG_LOG)"
+	@printf "      build log:     %s\n" "$(DEBUG_BUILD_LOG)"
+
 build-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure valgrind build (sanitizers OFF)\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_CONFIG_LOG)"; \
 		tail -n 40 "$(VALGRIND_CONFIG_LOG)"; \
 		exit 1; \
@@ -192,14 +305,14 @@ build-valgrind:
 	if [ -n "$$requested_modules" ] && [ "$$requested_modules" != "all" ]; then \
 		targets=$$($(MODULE_TARGET_HELPER) resolve "$(VALGRIND_BUILD_DIR)" "$$requested_modules" | tr '\n' ' '); \
 		printf "%b[2/2]%b build valgrind targets (M=%s)\n" "$(C_CYAN)" "$(C_RESET)" "$$requested_modules"; \
-		$(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_BUILD_LOG)"; \
 			tail -n 40 "$(VALGRIND_BUILD_LOG)"; \
 			exit 1; \
 		}; \
 	else \
 		printf "%b[2/2]%b build valgrind targets\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel > "$(VALGRIND_BUILD_LOG)" 2>&1 || { \
 			printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_BUILD_LOG)"; \
 			tail -n 40 "$(VALGRIND_BUILD_LOG)"; \
 			exit 1; \
@@ -240,7 +353,75 @@ run:
 	if [ -n "$$UBSAN_OPTIONS" ]; then ubsan_opts="$$UBSAN_OPTIONS:$$ubsan_opts"; fi; \
 	printf "%b[run]%b %s %s\n" "$(C_CYAN)" "$(C_RESET)" "$$daemon_path" "$(RUN_ARGS)"; \
 	printf "      sanitizer logs: %s\n" "$(ASAN_LOG_DIR)"; \
-	env ASAN_OPTIONS="$$asan_opts" UBSAN_OPTIONS="$$ubsan_opts" "$$daemon_path" $(RUN_ARGS)
+	env ASAN_OPTIONS="$$asan_opts" UBSAN_OPTIONS="$$ubsan_opts" "$$daemon_path" $(RUN_ARGS); \
+	rc=$$?; \
+	if [ $$rc -ne 0 ]; then \
+		printf "%b[fail]%b run failed (exit=%s)\n" "$(C_RED)" "$(C_RESET)" "$$rc"; \
+		exit $$rc; \
+	fi; \
+	printf "%b[ok]%b run started\n" "$(C_GREEN)" "$(C_RESET)"; \
+	printf "      use 'make kill' to exit\n"
+
+run-client:
+	@$(MAKE) --no-print-directory build M=sunspots_client
+	@client_path=$$(find "$(BUILD_DIR)" -type f -name "sunspots_client" 2>/dev/null | sort | head -n 1); \
+	if [ ! -x "$$client_path" ]; then \
+		printf "%b[fail]%b client binary 'sunspots_client' not found under %s\n" "$(C_RED)" "$(C_RESET)" "$(BUILD_DIR)"; \
+		exit 1; \
+	fi; \
+	printf "%b[run]%b %s %s\n" "$(C_CYAN)" "$(C_RESET)" "$$client_path" "$(RUN_ARGS)"; \
+	exec "$$client_path" $(RUN_ARGS)
+
+run-fuzz:
+	@mkdir -p "$(RAW_LOGS_DIR)"
+	@bin_path="$(FUZZ_BUILD_DIR)/fuzz/$(FUZZ_TARGET)"; \
+	if [ ! -x "$$bin_path" ]; then \
+		printf "%b[fail]%b fuzz target '%s' not found under %s. run: make build-fuzz FUZZ_TARGET=%s\n" "$(C_RED)" "$(C_RESET)" "$(FUZZ_TARGET)" "$(FUZZ_BUILD_DIR)" "$(FUZZ_TARGET)"; \
+		exit 1; \
+	fi; \
+	input_path="$(FUZZ_INPUT)"; \
+	if [ -n "$$input_path" ] && [ ! -e "$$input_path" ]; then \
+		printf "%b[fail]%b fuzz input path not found: %s\n" "$(C_RED)" "$(C_RESET)" "$$input_path"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(AFL_FUZZ_BIN)" ]; then \
+		printf "%b[fail]%b afl-fuzz not found in PATH\n" "$(C_RED)" "$(C_RESET)"; \
+		exit 1; \
+	fi; \
+	if [ ! -d "$$input_path" ]; then \
+		printf "%b[fail]%b AFL++ expects FUZZ_INPUT to be a corpus directory, got: %s\n" "$(C_RED)" "$(C_RESET)" "$$input_path"; \
+		exit 1; \
+	fi; \
+	mkdir -p "$(FUZZ_OUTPUT)"; \
+	printf "%b[run]%b %s %s -i %s -o %s -- %s @@ %s\n" "$(C_CYAN)" "$(C_RESET)" "$(AFL_FUZZ_BIN)" "$(AFL_FUZZ_ARGS)" "$$input_path" "$(FUZZ_OUTPUT)" "$$bin_path" "$(FUZZ_RUN_ARGS)"; \
+	exec env -u AFL_FUZZ_ARGS "$(AFL_FUZZ_BIN)" $(AFL_FUZZ_ARGS) -i "$$input_path" -o "$(FUZZ_OUTPUT)" -- "$$bin_path" @@ $(FUZZ_RUN_ARGS)
+
+fuzz-server:
+	@$(MAKE) --no-print-directory build-fuzz FUZZ_TARGET=http_request_fuzzer
+	@$(MAKE) --no-print-directory run-fuzz FUZZ_TARGET=http_request_fuzzer
+
+fuzz-sdk:
+	@$(MAKE) --no-print-directory build-fuzz FUZZ_TARGET=sdk_db_fuzzer
+	@$(MAKE) --no-print-directory run-fuzz FUZZ_TARGET=sdk_db_fuzzer
+
+run-backfill-monitor:
+	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
+	@if [ ! -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
+		printf "%b[run]%b configure debug build for backfill monitor\n" "$(C_CYAN)" "$(C_RESET)"; \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+			printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
+			tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
+			exit 1; \
+		}; \
+	fi
+	@printf "%b[run]%b build SDK shared bridge for backfill monitor\n" "$(C_CYAN)" "$(C_RESET)"
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target sunspots_sdk_shared > "$(DEBUG_BUILD_LOG)" 2>&1 || { \
+		printf "%b[fail]%b build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_BUILD_LOG)"; \
+		tail -n 40 "$(DEBUG_BUILD_LOG)"; \
+		exit 1; \
+	}
+	@printf "%b[run]%b python3 scripts/backfill_db_monitor.py %s\n" "$(C_CYAN)" "$(C_RESET)" "$(RUN_ARGS)"
+	@python3 scripts/backfill_db_monitor.py $(RUN_ARGS)
 
 run-valgrind:
 	@if ! command -v valgrind >/dev/null 2>&1; then \
@@ -249,7 +430,18 @@ run-valgrind:
 	fi
 	@mkdir -p "$(RAW_LOGS_DIR)"
 	@module_selector="$(M)"; \
-	bin_name="$(DAEMON_BIN)"; \
+	bin_name="$(VALGRIND_DAEMON_BIN)"; \
+	cfg_path="$(CURDIR)/$(PROJECT_CONFIG_PATH)"; \
+	cfg_backup="$(RAW_LOGS_DIR)/sunspots.json.pre_valgrind.bak"; \
+	cfg_swapped=0; \
+	restore_cfg() { \
+		if [ "$$cfg_swapped" -eq 1 ] && [ -f "$$cfg_backup" ]; then \
+			cp "$$cfg_backup" "$$cfg_path"; \
+			rm -f "$$cfg_backup"; \
+			printf "      config restored: %s\n" "$$cfg_path"; \
+		fi; \
+	}; \
+	trap 'restore_cfg' EXIT INT TERM; \
 	if [ -n "$$module_selector" ] && [ "$$module_selector" != "all" ]; then \
 		resolved=$$($(MODULE_TARGET_HELPER) resolve "$(VALGRIND_BUILD_DIR)" "$$module_selector"); \
 		count=$$(printf '%s\n' "$$resolved" | sed '/^$$/d' | wc -l | tr -d ' '); \
@@ -266,31 +458,37 @@ run-valgrind:
 		printf "%b[fail]%b binary '%s' not found under %s. run: make build-valgrind M=%s\n" "$(C_RED)" "$(C_RESET)" "$$bin_name" "$(VALGRIND_BUILD_DIR)" "$$bin_name"; \
 		exit 1; \
 	fi; \
-	log_dir_abs="$(CURDIR)/$(VALGRIND_LOG_DIR)"; \
-	wrapper_log="$(VALGRIND_WRAPPER_LOG)"; \
-	if [ "$$bin_name" != "$(DAEMON_BIN)" ]; then wrapper_log="$(RAW_LOGS_DIR)/run_valgrind_$$bin_name.log"; fi; \
-	mkdir -p "$$log_dir_abs"; \
-	printf "%b[run]%b valgrind %s (trace children, %ss window)\n" "$(C_CYAN)" "$(C_RESET)" "$$daemon_path" "$(VALGRIND_RUN_SECONDS)"; \
 	if [ "$$bin_name" = "$(DAEMON_BIN)" ]; then \
-		printf "%b[note]%b daemon currently daemonizes; daemon-level valgrind output is not reliable in background mode\n" "$(C_YELLOW)" "$(C_RESET)"; \
-		if strings "$$daemon_path" 2>/dev/null | grep -Eq -- "--foreground|SUNSPOTS_FOREGROUND"; then \
-			printf "      mode: foreground capture enabled\n"; \
-			timeout --signal=SIGINT "$(VALGRIND_RUN_SECONDS)s" \
-				env $(VALGRIND_FOREGROUND_ENV) \
-				valgrind \
-					$(VALGRIND_BASE_FLAGS) \
-					$(VALGRIND_EXTRA_FLAGS) \
-					--log-file="$$log_dir_abs/%p.log" \
-					"$$daemon_path" $(VALGRIND_FOREGROUND_ARGS) $(RUN_ARGS) > "$$wrapper_log" 2>&1; \
+		printf "%b[note]%b daemon-level valgrind is expected not to work reliably (daemon background mode)\n" "$(C_YELLOW)" "$(C_RESET)"; \
+		printf "      no action taken. use 'make run-valgrind M=<module>' for reliable module-level valgrind\n"; \
+		exit 0; \
+	fi; \
+		log_dir_abs="$(CURDIR)/$(VALGRIND_LOG_DIR)"; \
+		wrapper_log="$(VALGRIND_WRAPPER_LOG)"; \
+		report_log="$(VALGRIND_RUN_REPORT)"; \
+		if [ "$$bin_name" != "$(VALGRIND_DAEMON_BIN)" ]; then wrapper_log="$(RAW_LOGS_DIR)/run_valgrind_$$bin_name.log"; fi; \
+		if [ "$$bin_name" != "$(VALGRIND_DAEMON_BIN)" ]; then report_log="$(RAW_LOGS_DIR)/valgrind_run_report_$$bin_name.txt"; fi; \
+		if [ "$(VALGRIND_AUTOSWAP_CONFIG)" = "1" ] && { [ "$$bin_name" = "$(VALGRIND_DAEMON_BIN)" ] || [ "$$bin_name" = "$(DAEMON_BIN)" ]; }; then \
+			if [ -f "$$cfg_path" ]; then \
+				cp "$$cfg_path" "$$cfg_backup"; \
+			sed 's#\./build/debug/#./build/valgrind/#g' "$$cfg_backup" > "$$cfg_path"; \
+			cfg_swapped=1; \
+			printf "      config auto-swap: %s (debug->valgrind paths)\n" "$$cfg_path"; \
 		else \
-			printf "      mode: daemon foreground flag not detected, running without foreground args\n"; \
-			timeout --signal=SIGINT "$(VALGRIND_RUN_SECONDS)s" \
-				valgrind \
-					$(VALGRIND_BASE_FLAGS) \
-					$(VALGRIND_EXTRA_FLAGS) \
-					--log-file="$$log_dir_abs/%p.log" \
-					"$$daemon_path" $(RUN_ARGS) > "$$wrapper_log" 2>&1; \
+			printf "%b[note]%b config auto-swap skipped; file not found: %s\n" "$(C_YELLOW)" "$(C_RESET)" "$$cfg_path"; \
 		fi; \
+		fi; \
+		mkdir -p "$$log_dir_abs"; \
+		rm -f "$$log_dir_abs"/*.log; \
+		printf "%b[run]%b valgrind %s (trace children, %ss window)\n" "$(C_CYAN)" "$(C_RESET)" "$$daemon_path" "$(VALGRIND_RUN_SECONDS)"; \
+	if [ "$$bin_name" = "$(VALGRIND_DAEMON_BIN)" ]; then \
+		printf "      mode: dummy foreground daemon capture\n"; \
+		timeout --signal=SIGINT "$(VALGRIND_RUN_SECONDS)s" \
+			valgrind \
+				$(VALGRIND_BASE_FLAGS) \
+				$(VALGRIND_EXTRA_FLAGS) \
+				--log-file="$$log_dir_abs/%p.log" \
+				"$$daemon_path" $(RUN_ARGS) > "$$wrapper_log" 2>&1; \
 	else \
 		printf "      mode: direct module capture\n"; \
 		timeout --signal=SIGINT "$(VALGRIND_RUN_SECONDS)s" \
@@ -308,16 +506,61 @@ run-valgrind:
 	fi; \
 	if [ $$rc -eq 124 ]; then \
 		printf "%b[ok]%b valgrind capture window elapsed after %ss\n" "$(C_GREEN)" "$(C_RESET)" "$(VALGRIND_RUN_SECONDS)"; \
-	else \
-		printf "%b[ok]%b valgrind run complete\n" "$(C_GREEN)" "$(C_RESET)"; \
-	fi; \
-	printf "      log: %s\n" "$$wrapper_log"
+		else \
+			printf "%b[ok]%b valgrind run complete\n" "$(C_GREEN)" "$(C_RESET)"; \
+		fi; \
+		total_logs=0; \
+		logs_with_errors=0; \
+		logs_with_definite_leaks=0; \
+		total_definitely_lost_bytes=0; \
+		{ \
+			printf "Sunspots Valgrind Runtime Report\n"; \
+			printf "Generated at (UTC): %s\n" "$$(date -u +"%Y-%m-%d %H:%M:%S UTC")"; \
+			printf "Command target: %s\n" "$$bin_name"; \
+			printf "Wrapper log: %s\n" "$$wrapper_log"; \
+			printf "Per-pid log dir: %s\n" "$(VALGRIND_LOG_DIR)"; \
+			printf "\nPer-process summary\n"; \
+			printf "%s\n" "--------------------------------------------------------------------------------"; \
+			if ls "$$log_dir_abs"/*.log >/dev/null 2>&1; then \
+				for f in "$$log_dir_abs"/*.log; do \
+					total_logs=$$((total_logs + 1)); \
+					pid=$$(basename "$$f" .log); \
+					cmd=$$(sed -n 's/^==.*== Command: //p' "$$f" | head -n 1); \
+					[ -n "$$cmd" ] || cmd="<unknown>"; \
+					err=$$(sed -n 's/^==.*== ERROR SUMMARY: \([0-9][0-9]*\) errors.*/\1/p' "$$f" | tail -n 1); \
+					[ -n "$$err" ] || err=0; \
+					def_lost=$$(sed -n 's/^==.*==[[:space:]]*definitely lost: \([0-9][0-9,]*\) bytes.*/\1/p' "$$f" | tail -n 1 | tr -d ','); \
+					[ -n "$$def_lost" ] || def_lost=0; \
+					poss_lost=$$(sed -n 's/^==.*==[[:space:]]*possibly lost: \([0-9][0-9,]*\) bytes.*/\1/p' "$$f" | tail -n 1 | tr -d ','); \
+					[ -n "$$poss_lost" ] || poss_lost=0; \
+					if [ "$$err" -gt 0 ]; then logs_with_errors=$$((logs_with_errors + 1)); fi; \
+					if [ "$$def_lost" -gt 0 ]; then logs_with_definite_leaks=$$((logs_with_definite_leaks + 1)); fi; \
+					total_definitely_lost_bytes=$$((total_definitely_lost_bytes + def_lost)); \
+					printf "pid=%s err=%s definitely_lost=%s possibly_lost=%s cmd=%s\n" "$$pid" "$$err" "$$def_lost" "$$poss_lost" "$$cmd"; \
+				done; \
+			else \
+				printf "No per-pid valgrind logs found.\n"; \
+			fi; \
+			printf "\nTotals\n"; \
+			printf "%s\n" "--------------------------------------------------------------------------------"; \
+			printf "process_logs=%s\n" "$$total_logs"; \
+			printf "process_logs_with_errors=%s\n" "$$logs_with_errors"; \
+			printf "process_logs_with_definite_leaks=%s\n" "$$logs_with_definite_leaks"; \
+			printf "total_definitely_lost_bytes=%s\n" "$$total_definitely_lost_bytes"; \
+		} > "$$report_log"; \
+		if [ "$$logs_with_errors" -gt 0 ] || [ "$$logs_with_definite_leaks" -gt 0 ]; then \
+			printf "%b[note]%b valgrind runtime report contains findings\n" "$(C_YELLOW)" "$(C_RESET)"; \
+		fi; \
+		restore_cfg; \
+		trap - EXIT INT TERM; \
+		printf "      log: %s\n" "$$wrapper_log"; \
+		printf "      report: %s\n" "$$report_log"
 	@printf "      per-pid logs: %s\n" "$(VALGRIND_LOG_DIR)"
 
 build-tests:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure debug test build\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
 		tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
 		exit 1; \
@@ -335,7 +578,7 @@ build-tests:
 		printf "      hint: run 'make list-modules' to inspect available module targets\n"; \
 		exit 1; \
 	fi; \
-	$(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_TESTS_BUILD_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(BUILD_DIR)" --parallel --target $$targets > "$(DEBUG_TESTS_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b test build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_TESTS_BUILD_LOG)"; \
 		tail -n 60 "$(DEBUG_TESTS_BUILD_LOG)"; \
 		exit 1; \
@@ -347,7 +590,7 @@ build-tests:
 build-tests-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure valgrind test build\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_CONFIG_LOG)"; \
 		tail -n 40 "$(VALGRIND_CONFIG_LOG)"; \
 		exit 1; \
@@ -365,7 +608,7 @@ build-tests-valgrind:
 		printf "      hint: run 'make list-modules-valgrind' to inspect available module targets\n"; \
 		exit 1; \
 	fi; \
-	$(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_TESTS_BUILD_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(VALGRIND_BUILD_DIR)" --parallel --target $$targets > "$(VALGRIND_TESTS_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b test build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_TESTS_BUILD_LOG)"; \
 		tail -n 60 "$(VALGRIND_TESTS_BUILD_LOG)"; \
 		exit 1; \
@@ -377,15 +620,19 @@ build-tests-valgrind:
 tidy:
 	@mkdir -p "$(TIDY_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@printf "%b[1/2]%b configure tidy build (clang-tidy ON)\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) $(CMAKE_FLAGS_TIDY) > "$(TIDY_CONFIG_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_TIDY) > "$(TIDY_CONFIG_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tidy configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(TIDY_CONFIG_LOG)"; \
 		tail -n 40 "$(TIDY_CONFIG_LOG)"; \
 		exit 1; \
 	}
 	@printf "%b[2/2]%b build tidy targets\n" "$(C_CYAN)" "$(C_RESET)"
-	@$(CMAKE) --build "$(TIDY_BUILD_DIR)" --parallel > "$(TIDY_BUILD_LOG)" 2>&1 || { \
+	@$(LOG_NO_COLOR_ENV) $(CMAKE) --build "$(TIDY_BUILD_DIR)" --parallel > "$(TIDY_BUILD_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tidy build failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(TIDY_BUILD_LOG)"; \
-		tail -n 60 "$(TIDY_BUILD_LOG)"; \
+		if [ -f "$(TIDY_BUILD_LOG)" ]; then \
+			tail -n 60 "$(TIDY_BUILD_LOG)"; \
+		else \
+			printf "      note: tidy build log was not created\n"; \
+		fi; \
 		exit 1; \
 	}
 	@grep -E '^[^:]+:[0-9]+(:[0-9]+)?:[[:space:]]warning:' "$(TIDY_BUILD_LOG)" | sed 's|$(CURDIR)/||g' || true
@@ -397,7 +644,7 @@ cppcheck:
 	@mkdir -p "$(dir $(CPPCHECK_LOG))"
 	@printf "%b[run]%b cppcheck (src/ tests/)\n" "$(C_CYAN)" "$(C_RESET)"
 	@if command -v cppcheck >/dev/null 2>&1; then \
-		cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
+		$(LOG_NO_COLOR_ENV) cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
 			--template='[{file}:{line}]: ({severity}) {message}' \
 			src tests 2> "$(CPPCHECK_LOG)" || true; \
 		printf "%b[ok]%b cppcheck complete\n" "$(C_GREEN)" "$(C_RESET)"; \
@@ -410,11 +657,11 @@ lizard:
 	@mkdir -p "$(dir $(LIZARD_LOG))"
 	@printf "%b[run]%b lizard (src/ tests/)\n" "$(C_CYAN)" "$(C_RESET)"
 	@if command -v lizard >/dev/null 2>&1; then \
-		lizard -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
+		$(LOG_NO_COLOR_ENV) lizard -C 10 -L 80 -a $(LIZARD_PARAM_THRESHOLD) src tests > "$(LIZARD_LOG)" 2>&1 || true; \
 		printf "%b[ok]%b lizard complete\n" "$(C_GREEN)" "$(C_RESET)"; \
 		printf "      log: %s\n" "$(LIZARD_LOG)"; \
 	elif python3 -c "import lizard" >/dev/null 2>&1; then \
-		python3 -m lizard -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
+		$(LOG_NO_COLOR_ENV) python3 -m lizard -C 10 -L 80 -a $(LIZARD_PARAM_THRESHOLD) src tests > "$(LIZARD_LOG)" 2>&1 || true; \
 		printf "%b[ok]%b lizard complete\n" "$(C_GREEN)" "$(C_RESET)"; \
 		printf "      log: %s\n" "$(LIZARD_LOG)"; \
 	else \
@@ -451,7 +698,7 @@ run-tests:
 	set -- --test-dir "$(BUILD_DIR)" --output-on-failure; \
 	if [ -n "$$ctest_regex" ]; then set -- "$$@" -R "$$ctest_regex"; fi; \
 	env ASAN_OPTIONS="$$asan_opts" UBSAN_OPTIONS="$$ubsan_opts" \
-	$(CTEST) "$$@" > "$(DEBUG_TEST_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CTEST) "$$@" > "$(DEBUG_TEST_LOG)" 2>&1 || { \
 		printf "%b[fail]%b tests failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_TEST_LOG)"; \
 		tail -n 60 "$(DEBUG_TEST_LOG)"; \
 		exit 1; \
@@ -480,7 +727,7 @@ run-tests-valgrind:
 	fi; \
 	set -- --test-dir "$(VALGRIND_BUILD_DIR)" --output-on-failure -L valgrind; \
 	if [ -n "$$ctest_regex" ]; then set -- "$$@" -R "$$ctest_regex"; fi; \
-	$(CTEST) "$$@" > "$(VALGRIND_TEST_LOG)" 2>&1 || { \
+	$(LOG_NO_COLOR_ENV) $(CTEST) "$$@" > "$(VALGRIND_TEST_LOG)" 2>&1 || { \
 		printf "%b[fail]%b valgrind tests failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_TEST_LOG)"; \
 		tail -n 80 "$(VALGRIND_TEST_LOG)"; \
 		exit 1; \
@@ -492,7 +739,7 @@ list-modules:
 	@mkdir -p "$(BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@if [ ! -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
 		printf "%b[run]%b configure debug build for module discovery\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_DEBUG) > "$(DEBUG_CONFIG_LOG)" 2>&1 || { \
 			printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(DEBUG_CONFIG_LOG)"; \
 			tail -n 40 "$(DEBUG_CONFIG_LOG)"; \
 			exit 1; \
@@ -506,7 +753,7 @@ list-modules-valgrind:
 	@mkdir -p "$(VALGRIND_BUILD_DIR)" "$(RAW_LOGS_DIR)"
 	@if [ ! -f "$(VALGRIND_BUILD_DIR)/CMakeCache.txt" ]; then \
 		printf "%b[run]%b configure valgrind build for module discovery\n" "$(C_CYAN)" "$(C_RESET)"; \
-		$(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
+		$(LOG_NO_COLOR_ENV) $(CMAKE) $(CMAKE_FLAGS_VALGRIND) > "$(VALGRIND_CONFIG_LOG)" 2>&1 || { \
 			printf "%b[fail]%b configure failed. log: %s\n" "$(C_RED)" "$(C_RESET)" "$(VALGRIND_CONFIG_LOG)"; \
 			tail -n 40 "$(VALGRIND_CONFIG_LOG)"; \
 			exit 1; \
@@ -573,14 +820,14 @@ warnings:
 					lizard_cmd="python3 -m lizard"; \
 				fi; \
 				if command -v cppcheck >/dev/null 2>&1; then \
-					cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
+					$(LOG_NO_COLOR_ENV) cppcheck --enable=warning,style,performance,portability --inline-suppr --quiet \
 						--template='[{file}:{line}]: ({severity}) {message}' \
 						src tests 2> "$(CPPCHECK_LOG)" || true; \
 					source_cppcheck_run="yes"; \
 				fi; \
 				if [ "$$tool_lizard" = "installed" ]; then \
-					$$lizard_cmd -C 10 -L 80 -a 4 src tests > "$(LIZARD_LOG)" 2>&1 || true; \
-					awk '\
+					$$lizard_cmd -C 10 -L 80 -a $(LIZARD_PARAM_THRESHOLD) src tests > "$(LIZARD_LOG)" 2>&1 || true; \
+					awk -v par_threshold="$(LIZARD_PARAM_THRESHOLD)" '\
 						/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+/ { \
 							nloc=$$1; ccn=$$2; token=$$3; param=$$4; len=$$5; loc=$$6; \
 							split(loc, a, "@"); \
@@ -590,7 +837,7 @@ warnings:
 							module="other"; \
 							if (file ~ /^src\//) { split(file, p, "/"); module=p[2]; } \
 							else if (file ~ /^tests\//) { module="tests"; } \
-							ccn_hit=(ccn>10); len_hit=(len>80); param_hit=(param>4); \
+							ccn_hit=(ccn>10); len_hit=(len>80); param_hit=(param>par_threshold); \
 							if (!(ccn_hit || len_hit || param_hit)) next; \
 							reasons=""; \
 							if (ccn_hit) reasons=reasons "CCN "; \
@@ -601,14 +848,14 @@ warnings:
 						}' "$(LIZARD_LOG)" | sort -u > "$(WARNINGS_DIR)/.lizard.parsed.tmp"; \
 					sort -t "$$(printf '\t')" -k1,1 -k2,2 -k6,6nr -k9,9nr -k8,8nr \
 						"$(WARNINGS_DIR)/.lizard.parsed.tmp" > "$(WARNINGS_DIR)/.lizard.sorted.tmp"; \
-					{ \
-						printf "+--------------------------------------------------------------------------------+\n"; \
-						printf "|                            Sunspots Lizard Report                             |\n"; \
-						printf "+--------------------------------------------------------------------------------+\n"; \
-						printf "Branch       : %s\n" "$(GIT_BRANCH)"; \
-						printf "Generated at : %s\n" "$$run_ts"; \
-						printf "Thresholds   : CCN>10, Length>80, Params>4\n"; \
-						printf "Scope        : src/ and tests/ (vendor libs excluded)\n"; \
+						{ \
+							printf "+--------------------------------------------------------------------------------+\n"; \
+							printf "|                            Sunspots Lizard Report                             |\n"; \
+							printf "+--------------------------------------------------------------------------------+\n"; \
+							printf "Branch       : %s\n" "$(GIT_BRANCH)"; \
+							printf "Generated at : %s\n" "$$run_ts"; \
+							printf "Thresholds   : CCN>10, Length>80, Params>%s\n" "$(LIZARD_PARAM_THRESHOLD)"; \
+							printf "Scope        : src/ and tests/ (vendor libs excluded)\n"; \
 						printf "Total        : %s flagged functions\n" "$$(wc -l < "$(WARNINGS_DIR)/.lizard.sorted.tmp" | tr -d ' ')"; \
 						printf "+--------------------------------------------------------------------------------+\n\n"; \
 						if [ ! -s "$(WARNINGS_DIR)/.lizard.sorted.tmp" ]; then \
@@ -915,20 +1162,108 @@ e2e:
 	@printf "      planned: full system scenario runner\n"
 	@exit 2
 
+kill: kill-all
+
+kill-all:
+	@printf "%b[run]%b graceful shutdown of Sunspots daemon tree\n" "$(C_CYAN)" "$(C_RESET)"
+	@ps_snapshot() { ps -eo pid=,ppid=,stat=,comm=; }; \
+	descendant_rows() { \
+		roots="$$1"; \
+		ps_snapshot | awk -v roots="$$roots" ' \
+			BEGIN { n = split(roots, root_arr, /[[:space:]]+/); for (i = 1; i <= n; ++i) if (root_arr[i] != "") wanted[root_arr[i]] = 1; changed = 1; } \
+			{ pid=$$1; ppid=$$2; stat=$$3; comm=$$4; rows[pid]=$$0; parent[pid]=ppid; } \
+			END { \
+				while (changed) { \
+					changed = 0; \
+					for (pid in parent) if (wanted[parent[pid]] && !wanted[pid]) { wanted[pid] = 1; changed = 1; } \
+				} \
+				for (pid in wanted) if (!(pid in rows)) delete wanted[pid]; \
+				for (pid in wanted) print rows[pid]; \
+			}'; \
+	}; \
+	print_rows() { \
+		printf "%s\n" "$$1" | awk 'NF >= 4 {printf "        pid=%s ppid=%s stat=%s name=%s\n", $$1, $$2, $$3, $$4}'; \
+	}; \
+	daemon_rows="$$(ps_snapshot | awk '$$4 ~ /^sunspots_daemon/ && $$3 !~ /Z/ {print}')"; \
+	daemon_pids="$$(printf "%s\n" "$$daemon_rows" | awk 'NF >= 1 {print $$1}' | tr '\n' ' ')"; \
+	if [ -z "$$daemon_pids" ]; then \
+		zombie_rows="$$(ps_snapshot | awk '($$4 ~ /^sunspots_/ || $$4 == "backfill") && $$3 ~ /Z/ {print}')"; \
+		zombie_count="$$(printf "%s\n" "$$zombie_rows" | awk 'NF >= 4 {c++} END {print c+0}')"; \
+		printf "      no running daemon found\n"; \
+		if [ "$$zombie_count" -gt 0 ]; then \
+			printf "      zombies detected: %s\n" "$$zombie_count"; \
+		fi; \
+		exit 0; \
+	else \
+		printf "      sending SIGTERM to daemon roots:\n"; \
+		print_rows "$$daemon_rows"; \
+		kill $$daemon_pids >/dev/null 2>&1 || true; \
+		printf "      waiting up to 5s for graceful shutdown\n"; \
+		for i in 1 2 3 4 5; do \
+			sleep 1; \
+			remaining_daemons="$$(ps_snapshot | awk '$$4 ~ /^sunspots_daemon/ && $$3 !~ /Z/ {print $$1}' | tr '\n' ' ')"; \
+			if [ -z "$$remaining_daemons" ]; then \
+				break; \
+			fi; \
+		done; \
+	fi; \
+	all_rows="$$(descendant_rows "$$daemon_pids")"; \
+	running_rows="$$(printf "%s\n" "$$all_rows" | awk 'NF >= 4 && $$4 ~ /^sunspots_/ && $$3 !~ /Z/ {print} NF >= 4 && $$4 == "backfill" && $$3 !~ /Z/ {print}')"; \
+	zombie_rows="$$(printf "%s\n" "$$all_rows" | awk 'NF >= 4 && $$4 ~ /^sunspots_/ && $$3 ~ /Z/ {print} NF >= 4 && $$4 == "backfill" && $$3 ~ /Z/ {print}')"; \
+	running_pids="$$(printf "%s\n" "$$running_rows" | awk 'NF >= 1 {print $$1}' | tr '\n' ' ')"; \
+	zombie_count="$$(printf "%s\n" "$$zombie_rows" | awk 'NF >= 4 {c++} END {print c+0}')"; \
+	if [ -n "$$running_pids" ]; then \
+		kill -9 $$running_pids >/dev/null 2>&1 || true; \
+		printf "      force-killed remaining daemon descendants:\n"; \
+		print_rows "$$running_rows"; \
+	else \
+		printf "      graceful shutdown complete; no remaining daemon descendants\n"; \
+	fi; \
+	if [ "$$zombie_count" -gt 0 ]; then \
+		printf "      zombies detected: %s\n" "$$zombie_count"; \
+	fi
+	@printf "%b[ok]%b kill-all complete\n" "$(C_GREEN)" "$(C_RESET)"
+
+kill-sunspots: kill-all
+
 e2e-valgrind:
 	@printf "%b[note]%b e2e-valgrind target is not yet implemented\n" "$(C_YELLOW)" "$(C_RESET)"
 	@printf "      planned: full system valgrind run with child tracing\n"
 	@exit 2
 
 clean:
-	@for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)"; do \
+	@set -e; \
+	tracker="$(BACKFILL_USAGE_TRACKER)"; \
+	tmp_tracker=""; \
+	if [ -n "$$tracker" ] && [ -f "$$tracker" ]; then \
+		tmp_tracker="$$(mktemp /tmp/sunspots_usage_tracker_XXXXXX)"; \
+		cp "$$tracker" "$$tmp_tracker"; \
+	fi; \
+	for d in "$(BUILD_DIR)" "$(VALGRIND_BUILD_DIR)"; do \
 		if [ -f "$$d/CMakeCache.txt" ]; then \
 			$(CMAKE) --build "$$d" --target clean --parallel >/dev/null 2>&1 || true; \
 		fi; \
-	done
-	@rm -rf "$(RAW_LOGS_DIR)"
+	done; \
+	rm -rf "$(RAW_LOGS_DIR)"; \
+	if [ -n "$$tmp_tracker" ] && [ -f "$$tmp_tracker" ]; then \
+		mkdir -p "$$(dirname "$$tracker")"; \
+		cp "$$tmp_tracker" "$$tracker"; \
+		rm -f "$$tmp_tracker"; \
+	fi
 	@printf "%b[ok]%b clean complete\n" "$(C_GREEN)" "$(C_RESET)"
 
 deepclean:
-	@rm -rf build "$(LOG_ROOT)" warnings
+	@set -e; \
+	tracker="$(BACKFILL_USAGE_TRACKER)"; \
+	tmp_tracker=""; \
+	if [ -n "$$tracker" ] && [ -f "$$tracker" ]; then \
+		tmp_tracker="$$(mktemp /tmp/sunspots_usage_tracker_XXXXXX)"; \
+		cp "$$tracker" "$$tmp_tracker"; \
+	fi; \
+	rm -rf build "$(LOG_ROOT)" warnings; \
+	if [ -n "$$tmp_tracker" ] && [ -f "$$tmp_tracker" ]; then \
+		mkdir -p "$$(dirname "$$tracker")"; \
+		cp "$$tmp_tracker" "$$tracker"; \
+		rm -f "$$tmp_tracker"; \
+	fi
 	@printf "%b[ok]%b deepclean complete\n" "$(C_GREEN)" "$(C_RESET)"

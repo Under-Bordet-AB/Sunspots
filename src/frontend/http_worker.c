@@ -70,8 +70,8 @@ void* http_worker_thread(void* arg) {
                 const char* len = http_get_header(req, "Content-Length");
                 if (len) {
                     // We received a body that we don't care about, skip it
-                    long content_length = strtoul(len, NULL, 10);
-                    skip_remaining = (size_t)content_length;
+                    size_t content_length = strtoul(len, NULL, 10);
+                    skip_remaining = content_length;
                 } else {
                     skip_remaining = 0;
                 }

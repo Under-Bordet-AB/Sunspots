@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -284,6 +285,31 @@ static int ss_env_bool_enabled(const char *value)
     return 0;
 }
 
+static size_t ss_log_mirror_max_bytes(void)
+{
+    const char *raw = getenv(SS_SDK_ENV_LOG_MIRROR_MAX_BYTES);
+    unsigned long long parsed = 0;
+    char *end_ptr = NULL;
+
+    if (raw == NULL || raw[0] == '\0') {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+
+    errno = 0;
+    parsed = strtoull(raw, &end_ptr, 10);
+    if (errno != 0 || end_ptr == raw || (end_ptr != NULL && *end_ptr != '\0')) {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+    if (parsed == 0ULL) {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+    if (parsed > (unsigned long long)SIZE_MAX) {
+        return (size_t)SS_SDK_LOG_MIRROR_DEFAULT_MAX_BYTES;
+    }
+
+    return (size_t)parsed;
+}
+
 static int ss_write_all(int fd, const char *buf, size_t len)
 {
     size_t write_offset = 0;
@@ -487,49 +513,44 @@ static int ss_get_log_path(char *out_path, size_t out_sz)
     return 0;
 }
 
-static ss_sdk_status ss_log_write_mirror_line(const char *line)
+static ss_sdk_status ss_log_mirror_lock(int fd)
 {
-    char path[SS_SDK_PATH_BUFFER_SIZE];
-    int fd;
-
-    if (ss_get_log_path(path, sizeof(path)) != 0) {
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    if (path[0] == '\0') {
-        return SS_SDK_OK;
-    }
-
-    if (ss_ensure_parent_dirs(path) != 0) {
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0664);
-    if (fd < 0) {
-        return SS_SDK_ERR_INTERNAL;
-    }
-
-    /* Serialize append writes across processes to avoid interleaved log lines. */
     if (
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
         ss_log_test_consume(&g_log_test_hooks.fail_flock) ||
 #endif
         flock(fd, LOCK_EX) != 0
     ) {
-        close(fd);
         return SS_SDK_ERR_INTERNAL;
     }
+    return SS_SDK_OK;
+}
 
-    if (ss_write_all(fd, line, strlen(line)) != 0) {
-        flock(fd, LOCK_UN);
-        close(fd);
+static void ss_log_mirror_unlock(int fd)
+{
+    (void)flock(fd, LOCK_UN);
+}
+
+static ss_sdk_status ss_log_mirror_truncate_if_needed(int fd, size_t max_bytes)
+{
+    struct stat st;
+
+    if (fstat(fd, &st) != 0) {
         return SS_SDK_ERR_INTERNAL;
     }
+    if (st.st_size >= 0 && (size_t)st.st_size >= max_bytes) {
+        if (ftruncate(fd, 0) != 0 || lseek(fd, 0, SEEK_SET) < 0) {
+            return SS_SDK_ERR_INTERNAL;
+        }
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_log_mirror_sync(int fd)
+{
     /* BUGFIX(#35): durable log write acknowledgement by default. */
 #ifdef SS_SDK_ENABLE_TEST_HOOKS
     if (ss_log_test_consume(&g_log_test_hooks.fail_fsync)) {
-        flock(fd, LOCK_UN);
-        close(fd);
         return SS_SDK_ERR_INTERNAL;
     }
 #endif
@@ -539,14 +560,59 @@ static ss_sdk_status ss_log_write_mirror_line(const char *line)
 #endif
         fsync(fd) != 0
     ) {
-        flock(fd, LOCK_UN);
-        close(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_log_write_mirror_line_opened(int fd, const char *line, size_t max_bytes)
+{
+    if (ss_log_mirror_lock(fd) != SS_SDK_OK) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (ss_log_mirror_truncate_if_needed(fd, max_bytes) != SS_SDK_OK) {
+        ss_log_mirror_unlock(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (ss_write_all(fd, line, strlen(line)) != 0) {
+        ss_log_mirror_unlock(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    if (ss_log_mirror_sync(fd) != SS_SDK_OK) {
+        ss_log_mirror_unlock(fd);
+        return SS_SDK_ERR_INTERNAL;
+    }
+    ss_log_mirror_unlock(fd);
+    return SS_SDK_OK;
+}
+
+static ss_sdk_status ss_log_write_mirror_line(const char *line)
+{
+    char path[SS_SDK_PATH_BUFFER_SIZE];
+    int fd;
+    size_t max_bytes;
+    ss_sdk_status status;
+
+    if (ss_get_log_path(path, sizeof(path)) != 0) {
         return SS_SDK_ERR_INTERNAL;
     }
 
-    flock(fd, LOCK_UN);
-    close(fd);
-    return SS_SDK_OK;
+    if (path[0] == '\0') {
+        return SS_SDK_OK;
+    }
+    max_bytes = ss_log_mirror_max_bytes();
+
+    if (ss_ensure_parent_dirs(path) != 0) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+
+    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0664);
+    if (fd < 0) {
+        return SS_SDK_ERR_INTERNAL;
+    }
+    status = ss_log_write_mirror_line_opened(fd, line, max_bytes);
+    (void)close(fd);
+    return status;
 }
 
 static void ss_log_write_syslog(ss_sdk_log_level level, const char *line)
@@ -655,25 +721,23 @@ static int ss_log_escape_base_fields(
 
 static int ss_log_escape_optional_fields(ss_log_escaped_fields *escaped, const ss_sdk_log_fields *fields)
 {
-#ifdef SS_SDK_ENABLE_TEST_HOOKS
-    int force_fail = ss_log_test_consume(&g_log_test_hooks.fail_escape_optional);
-#else
-    int force_fail = 0;
-#endif
-
     if (fields == NULL) {
-        if (force_fail) {
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+        if (ss_log_test_consume(&g_log_test_hooks.fail_escape_optional)) {
             return -1;
         }
+#endif
         return 0;
     }
 
     escaped->module = ss_escape_text(fields->module == NULL ? "" : fields->module);
     escaped->source_api = ss_escape_text(fields->source_api == NULL ? "" : fields->source_api);
-    if (force_fail) {
+#ifdef SS_SDK_ENABLE_TEST_HOOKS
+    if (ss_log_test_consume(&g_log_test_hooks.fail_escape_optional)) {
         free(escaped->source_api);
         escaped->source_api = NULL;
     }
+#endif
     if (escaped->module == NULL || escaped->source_api == NULL) {
         return -1;
     }
@@ -681,11 +745,12 @@ static int ss_log_escape_optional_fields(ss_log_escaped_fields *escaped, const s
     return 0;
 }
 
-static int ss_log_format_line(
+static int ss_log_format_line_alloc(
     char **out_line,
     const char *ts,
     const char *level_text,
     int line,
+    long pid,
     const ss_sdk_log_fields *fields,
     const ss_log_escaped_fields *escaped)
 {
@@ -706,10 +771,11 @@ static int ss_log_format_line(
         format_length = snprintf(
             NULL,
             0,
-            "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
+            "%s %s %s pid=%ld file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
             ts,
             level_text,
             event_text,
+            pid,
             escaped->file,
             line,
             escaped->func,
@@ -722,10 +788,11 @@ static int ss_log_format_line(
         format_length = snprintf(
             NULL,
             0,
-            "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",
+            "%s %s %s pid=%ld file=%s line=%d func=%s msg=\"%s\"\n",
             ts,
             level_text,
             event_text,
+            pid,
             escaped->file,
             line,
             escaped->func,
@@ -752,41 +819,109 @@ static int ss_log_format_line(
     if (*out_line == NULL) {
         return -1;
     }
+    return format_length;
+}
 
+static void ss_log_format_line_write_base(
+    char *out_line,
+    size_t out_len,
+    const char *ts,
+    const char *level_text,
+    const char *event_text,
+    const ss_log_escaped_fields *escaped,
+    int line,
+    long pid)
+{
+    (void)snprintf(
+        out_line,
+        out_len,
+        "%s %s %s pid=%ld file=%s line=%d func=%s msg=\"%s\"\n",
+        ts,
+        level_text,
+        event_text,
+        pid,
+        escaped->file,
+        line,
+        escaped->func,
+        escaped->message);
+}
+
+static void ss_log_format_line_write_with_fields(
+    char *out_line,
+    size_t out_len,
+    const char *ts,
+    const char *level_text,
+    const char *event_text,
+    const ss_sdk_log_fields *fields,
+    const ss_log_escaped_fields *escaped,
+    int line,
+    long pid)
+{
+    (void)snprintf(
+        out_line,
+        out_len,
+        "%s %s %s pid=%ld file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
+        ts,
+        level_text,
+        event_text,
+        pid,
+        escaped->file,
+        line,
+        escaped->func,
+        escaped->module,
+        escaped->source_api,
+        fields->metric,
+        (long long)fields->ts_utc,
+        escaped->message);
+}
+
+static int ss_log_format_line(
+    char **out_line,
+    const char *ts,
+    const char *level_text,
+    int line,
+    long pid,
+    const ss_sdk_log_fields *fields,
+    const ss_log_escaped_fields *escaped)
+{
+    int format_length;
+    const char *event_text = "-";
+
+    format_length = ss_log_format_line_alloc(out_line, ts, level_text, line, pid, fields, escaped);
+    if (format_length < 0) {
+        return -1;
+    }
+
+    if (escaped->event != NULL && escaped->event[0] != '\0') {
+        event_text = escaped->event;
+    }
     if (fields != NULL) {
-        (void)snprintf(
+        ss_log_format_line_write_with_fields(
             *out_line,
             (size_t)format_length + 1U,
-            "%s %s %s file=%s line=%d func=%s module=%s source_api=%s metric=%d ts_utc=%lld msg=\"%s\"\n",
             ts,
             level_text,
             event_text,
-            escaped->file,
+            fields,
+            escaped,
             line,
-            escaped->func,
-            escaped->module,
-            escaped->source_api,
-            fields->metric,
-            (long long)fields->ts_utc,
-            escaped->message);
+            pid);
     } else {
-        (void)snprintf(
+        ss_log_format_line_write_base(
             *out_line,
             (size_t)format_length + 1U,
-            "%s %s %s file=%s line=%d func=%s msg=\"%s\"\n",
             ts,
             level_text,
             event_text,
-            escaped->file,
+            escaped,
             line,
-            escaped->func,
-            escaped->message);
+            pid);
     }
 
     return 0;
 }
 
-static ss_sdk_status ss_log_write_common(
+static void ss_log_write_common(
     ss_sdk_log_level level,
     const char *event,
     const char *message,
@@ -799,42 +934,42 @@ static ss_sdk_status ss_log_write_common(
     const char *level_text;
     ss_log_escaped_fields escaped;
     char *line_buf = NULL;
-    ss_sdk_status write_status;
+    long pid = (long)getpid();
 
     if (message == NULL || file == NULL || func == NULL) {
-        return SS_SDK_ERR_INVALID_ARG;
+        return;
     }
     if ((int)level < ss_log_min_level()) {
-        return SS_SDK_OK;
+        return;
     }
 
     level_text = ss_level_to_string(level);
     if (level_text == NULL) {
-        return SS_SDK_ERR_INVALID_ARG;
+        return;
     }
 
     if (ss_log_format_utc_timestamp(ts) != 0) {
-        return SS_SDK_ERR_INTERNAL;
+        return;
     }
     memset(&escaped, 0, sizeof(escaped));
     if (ss_log_escape_base_fields(&escaped, event, message, file, func) != 0 ||
         ss_log_escape_optional_fields(&escaped, fields) != 0 ||
-        ss_log_format_line(&line_buf, ts, level_text, line, fields, &escaped) != 0) {
+        ss_log_format_line(&line_buf, ts, level_text, line, pid, fields, &escaped) != 0) {
         ss_log_escaped_fields_free(&escaped);
         free(line_buf);
-        return SS_SDK_ERR_INTERNAL;
+        return;
     }
 
     ss_log_write_syslog(level, line_buf);
-    write_status = ss_log_write_mirror_line(line_buf);
+    (void)ss_log_write_mirror_line(line_buf);
 
     ss_log_escaped_fields_free(&escaped);
     free(line_buf);
 
-    return write_status;
+    return;
 }
 
-ss_sdk_status ss_sdk_internal_log_write_auto(
+void ss_sdk_internal_log_write_auto(
     ss_sdk_log_level level,
     const char *event,
     const char *message,
@@ -842,10 +977,10 @@ ss_sdk_status ss_sdk_internal_log_write_auto(
     int line,
     const char *func)
 {
-    return ss_log_write_common(level, event, message, NULL, file, line, func);
+    ss_log_write_common(level, event, message, NULL, file, line, func);
 }
 
-ss_sdk_status ss_sdk_internal_log_write_fields(
+void ss_sdk_internal_log_write_fields(
     ss_sdk_log_level level,
     const char *event,
     const char *message,
@@ -854,7 +989,7 @@ ss_sdk_status ss_sdk_internal_log_write_fields(
     int line,
     const char *func)
 {
-    return ss_log_write_common(level, event, message, fields, file, line, func);
+    ss_log_write_common(level, event, message, fields, file, line, func);
 }
 
 void ss_sdk_internal_log_shutdown(void)

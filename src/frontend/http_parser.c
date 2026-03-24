@@ -135,7 +135,7 @@ http_request* http_parse_request(const char* message) {
         if (!end) {
             // No separator found, read to end of message and do not loop again
             finalLoop = 1;
-            end = message + strlen(message);
+            end = message + (int)strlen(message);
         }
         // Check length with pointer math
         int length = end - start;
@@ -243,7 +243,7 @@ http_request* http_parse_request(const char* message) {
             request->query = LinkedList_create();
             if(request->query == NULL)
             {
-                free(method); free(protocol);
+                free(method); free(path); free(protocol);
                 free(current_line);
                 http_request_dispose(&request);
                 return NULL;
@@ -356,6 +356,8 @@ void http_request_dispose(http_request** request_var)
             free((void*)request->path);
         if(request->headers != NULL)
             LinkedList_dispose(&request->headers, http_header_free);
+        if(request->query != NULL)
+            LinkedList_dispose(&request->query, http_query_free);
         free(request);
         *request_var = NULL;
     }
@@ -371,7 +373,17 @@ void http_header_free(void* header_var) {
     }
 }
 
-http_response* http_response_init(int code, const char* body, int bodyLen) {
+void http_query_free(void* query_var) {
+    if(query_var)
+    {
+        http_query_param* hdr = (http_query_param*)query_var;
+        free((void*)hdr->Name);
+        free((void*)hdr->Value);
+        free(hdr);
+    }
+}
+
+http_response* http_response_init(int code, const char* body, size_t bodyLen) {
     if(!body)
         return NULL;
 
@@ -438,10 +450,13 @@ const char* http_response_stringify(http_response* response, size_t* outSize) {
     const char* message = CommonResponseMessages(response->responseCode);
     // Count size of everything before allocating
     // 5 = 2 spaces + response code (3 digits) + null term
-    int messageSize = 5 + strlen(HTTP_VERSION) + strlen(message);
+    size_t messageSize = 5 + strlen(HTTP_VERSION) + strlen(message);
     if (response->headers != NULL) {
         char temp[16];
-        snprintf(temp, 16, "%i", response->bodyLen);
+        int written = snprintf(temp, 16, "%zu", response->bodyLen);
+        if (written < 0 || written >= (int)sizeof(temp)) {
+            return NULL;
+        }
         http_response_add_header(response, "Content-Length", (const char*)temp);
         LinkedList_foreach(response->headers, node) {
             http_header* hdr = (http_header*)node->item;
@@ -451,6 +466,10 @@ const char* http_response_stringify(http_response* response, size_t* outSize) {
     messageSize += 4 + response->bodyLen + 1; // 4 = \r\n\r\n
     // printf("We have to allocate %i bytes.\n",messageSize);
     char* status = malloc(messageSize);
+    if(status == NULL)
+    {
+        return NULL;
+    }
     // write first line
     int curPos = snprintf(status, messageSize, "%s %d %s", HTTP_VERSION, response->responseCode, message);
     // write headers
@@ -465,9 +484,11 @@ const char* http_response_stringify(http_response* response, size_t* outSize) {
     const uint8_t separator[] = {'\r', '\n', '\r', '\n'};
     memcpy(&status[curPos], separator, sizeof(separator));
     curPos += sizeof(separator);
-    if(response->body != NULL)
+    if(response->body != NULL) {
         memcpy(&status[curPos], response->body, response->bodyLen);
-    *outSize = messageSize;
+        curPos += response->bodyLen;
+    }
+    *outSize = curPos;
     return status;
 }
 

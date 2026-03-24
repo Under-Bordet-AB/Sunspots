@@ -3,27 +3,43 @@
 #include <math.h>
 #include <stdlib.h>
 
-#define DIRECT_COL(t) (1 + (t))
-#define BUY_COL(slots, t) (1 + (slots) + (t))
+// Column index mapping for each slot decision variable
+#define BUY_COL(t) (1 + (t))
+#define DIRECT_COL(slots, t) (1 + (slots) + (t))
 #define CHARGE_COL(slots, t) (1 + 2 * (slots) + (t))
 #define SELL_COL(slots, t) (1 + 3 * (slots) + (t))
 
-#define SOLAR_ROW(t) (1 + (t))
-#define ACTIVITY_ROW(slots, t) (1 + (slots) + (t))
+// PV model constants
+#define NOCT_C 45.0
+#define CELL_REF_TEMP_C 25.0
+#define IRRADIANCE_REF_WM2 400.0 // Reference irradiance (W/m^2)
+#define TEMP_COEFF_PER_C -0.004 // Power temperature coefficient (-0.4% per +1C)
+#define SLOT_HOURS 0.25 // 15-minute slot
 
-static double clamp01(double x)
-{
-    if (x < 0.0) return 0.0;
-    if (x > 1.0) return 1.0;
-    return x;
+#define PRICE_HIGH 0.9 // Example high price for normalization
+#define PRICE_LOW 0.0 // Example low price for normalization
+
+static double clamp01(double value) {
+    if (!isfinite(value)) {
+        return 0.0;
+    }
+    if (value < 0.0) {
+        return 0.0;
+    }
+    if (value > 1.0) {
+        return 1.0;
+    }
+    return value;
 }
 
-static double normalize(double value, double min_v, double max_v)
-{
-    if (max_v <= min_v) {
-        return 0.5;
+static double normalize_range(double value, double low, double high) {
+    if (!isfinite(value) || !isfinite(low) || !isfinite(high)) {
+        return 0.0;
     }
-    return clamp01((value - min_v) / (max_v - min_v));
+    if (high <= low) {
+        return 0.0;
+    }
+    return clamp01((value - low) / (high - low));
 }
 
 int compute_lp(const compute_data_t* data_in, result_t* result_out) {
@@ -31,88 +47,31 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
         return -1;
     }
 
-    const int slots = data_in->horizon_len;
-    if (slots <= 0 || slots > SERIES_LEN) {
-        return -1;
-    }
-
-    double max_irradiance = 0.0;
-    double min_price = INFINITY;
-    double max_price = -INFINITY;
-    double sun_cap[SERIES_LEN] = {0.0};
-    double cheap_cap[SERIES_LEN] = {0.0};
-
-    for (int time_slot = 0; time_slot < slots; time_slot++) {
-        if (!isfinite(data_in->price_kwh[time_slot]) ||
-            !isfinite(data_in->irradiance[time_slot]) ||
-            !isfinite(data_in->cloudiness[time_slot])) {
-            return -1;
-        }
-
-        if (data_in->irradiance[time_slot] > max_irradiance) {
-            max_irradiance = data_in->irradiance[time_slot];
-        }
-        if (data_in->price_kwh[time_slot] < min_price) {
-            min_price = data_in->price_kwh[time_slot];
-        }
-        if (data_in->price_kwh[time_slot] > max_price) {
-            max_price = data_in->price_kwh[time_slot];
-        }
-    }
-
-    for (int time_slot = 0; time_slot < slots; time_slot++) {
-        const double irradiance = (data_in->irradiance[time_slot] < 0.0) ? 0.0 : data_in->irradiance[time_slot];
-        const double irradiance_norm = (max_irradiance > 0.0) ? clamp01(irradiance / max_irradiance) : 0.0;
-        const double cloud_norm = clamp01(data_in->cloudiness[time_slot] / 100.0);
-        const double clear_sky_score = 1.0 - cloud_norm;
-        const double sun_score = clamp01(0.75 * irradiance_norm + 0.25 * clear_sky_score);
-
-        const double price_norm = normalize(data_in->price_kwh[time_slot], min_price, max_price);
-        const double cheap_score = 1.0 - price_norm;
-
-        sun_cap[time_slot] = sun_score;
-        cheap_cap[time_slot] = cheap_score;
-    }
-
+    // Initialize GLPK problem instance
     glp_prob *problem = glp_create_prob();
     if (!problem) {
         return -1;
     }
 
-    glp_set_prob_name(problem, "sunspots_recommendation_lp");
-    glp_set_obj_dir(problem, GLP_MAX);
+    glp_set_prob_name(problem, "sunspots_recommendations");
+    glp_set_obj_dir(problem, GLP_MIN);
 
+    // Number of valid input time slots available in this compute run
+    int slots = data_in->horizon_len;
+    if (slots <= 0 || slots > SERIES_LEN) {
+        glp_delete_prob(problem);
+        return -1;
+    }
+
+    // 4 decision variables per slot, 2 constraints per slot
     glp_add_cols(problem, 4 * slots);
     glp_add_rows(problem, 2 * slots);
 
-    for (int time_slot = 0; time_slot < slots; time_slot++) {
-        const double price_norm = normalize(data_in->price_kwh[time_slot], min_price, max_price);
-        const double cheap_score = 1.0 - price_norm;
-        const double pricey_score = price_norm;
-
-        glp_set_col_bnds(problem, DIRECT_COL(time_slot), GLP_DB, 0.0, 1.0);
-        if (cheap_cap[time_slot] <= 0.0) {
-            glp_set_col_bnds(problem, BUY_COL(slots, time_slot), GLP_FX, 0.0, 0.0);
-        } else {
-            glp_set_col_bnds(problem, BUY_COL(slots, time_slot), GLP_DB, 0.0, cheap_cap[time_slot]);
-        }
-        glp_set_col_bnds(problem, CHARGE_COL(slots, time_slot), GLP_DB, -1.0, 1.0);
-        glp_set_col_bnds(problem, SELL_COL(slots, time_slot), GLP_DB, 0.0, 1.0);
-
-        glp_set_obj_coef(problem, DIRECT_COL(time_slot), 0.65 + 0.35 * cheap_score);
-        glp_set_obj_coef(problem, BUY_COL(slots, time_slot), 0.30 + 0.70 * cheap_score);
-        glp_set_obj_coef(problem, CHARGE_COL(slots, time_slot), 0.80 * (cheap_score - pricey_score));
-        glp_set_obj_coef(problem, SELL_COL(slots, time_slot), 0.20 + 0.80 * pricey_score);
-
-        glp_set_row_bnds(problem, SOLAR_ROW(time_slot), GLP_UP, 0.0, sun_cap[time_slot]);
-        glp_set_row_bnds(problem, ACTIVITY_ROW(slots, time_slot), GLP_UP, 0.0, 1.0);
-    }
-
-    const int max_non_zero = 7 * slots;
-    int *row_idx = (int *)malloc((size_t)(max_non_zero + 1) * sizeof(int));
-    int *col_idx = (int *)malloc((size_t)(max_non_zero + 1) * sizeof(int));
-    double *value = (double *)malloc((size_t)(max_non_zero + 1) * sizeof(double));
-
+    // Sparse matrix storage: 6 coefficients per slot (+1 because GLPK arrays are 1-indexed)
+    int nz = 1 + (6 * slots);
+    int* row_idx = (int*)malloc((size_t)nz * sizeof(int));
+    int* col_idx = (int*)malloc((size_t)nz * sizeof(int));
+    double* value = (double*)malloc((size_t)nz * sizeof(double));
     if (!row_idx || !col_idx || !value) {
         free(row_idx);
         free(col_idx);
@@ -121,42 +80,101 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
         return -1;
     }
 
-    int nz = 1;
+    int matrix_index = 1;
+
     for (int time_slot = 0; time_slot < slots; time_slot++) {
-        row_idx[nz] = SOLAR_ROW(time_slot);
-        col_idx[nz] = DIRECT_COL(time_slot);
-        value[nz++] = 1.0;
+        // Row indices for this slot
+        int solar_row = 1 + time_slot;
+        int activity_row = 1 + slots + time_slot;
 
-        row_idx[nz] = SOLAR_ROW(time_slot);
-        col_idx[nz] = CHARGE_COL(slots, time_slot);
-        value[nz++] = 1.0;
+        // Input signals for this slot
+        double irradiance_wm2 = data_in->irradiance[time_slot];
+        double cloudiness_percent = data_in->cloudiness[time_slot];
+        double ambient_temp_c = data_in->temperature[time_slot];
+        double price_kwh = data_in->price_kwh[time_slot];
+        double price_signal = normalize_range(price_kwh, PRICE_LOW, PRICE_HIGH);
 
-        row_idx[nz] = SOLAR_ROW(time_slot);
-        col_idx[nz] = SELL_COL(slots, time_slot);
-        value[nz++] = 1.0;
+        // Convert cloud cover to [0,1] sunlight factor
+        double cloudiness_factor = clamp01(1.0 - (cloudiness_percent / 100.0));
 
-        row_idx[nz] = ACTIVITY_ROW(slots, time_slot);
-        col_idx[nz] = DIRECT_COL(time_slot);
-        value[nz++] = 1.0;
+        // Effective irradiance after cloud attenuation
+        double effective_irradiance_wm2 = irradiance_wm2 * cloudiness_factor;
+        if (effective_irradiance_wm2 < 0.0) {
+            effective_irradiance_wm2 = 0.0;
+        }
 
-        row_idx[nz] = ACTIVITY_ROW(slots, time_slot);
-        col_idx[nz] = BUY_COL(slots, time_slot);
-        value[nz++] = 1.0;
+        // Estimate cell temperature and temperature derating
+        double cell_temp_c = ambient_temp_c + ((NOCT_C - 20.0) / 800.0) * effective_irradiance_wm2;
+        double temp_derate = 1.0 + TEMP_COEFF_PER_C * (cell_temp_c - CELL_REF_TEMP_C);
+        if (temp_derate < 0.0) {
+            temp_derate = 0.0;
+        }
 
-        row_idx[nz] = ACTIVITY_ROW(slots, time_slot);
-        col_idx[nz] = CHARGE_COL(slots, time_slot);
-        value[nz++] = 1.0;
+        // Normalized PV availability cap for this slot
+        double pv_power_per_unit = (effective_irradiance_wm2 / IRRADIANCE_REF_WM2) * temp_derate;
+        double pv_cap_norm = clamp01(pv_power_per_unit);
 
-        row_idx[nz] = ACTIVITY_ROW(slots, time_slot);
-        col_idx[nz] = SELL_COL(slots, time_slot);
-        value[nz++] = 1.0;
+        // Solar row: direct + sell <= pv_cap_norm
+        // Activity row: buy + direct + charge + sell <= 1
+        glp_set_row_bnds(problem, solar_row, GLP_UP, 0.0, pv_cap_norm);
+        glp_set_row_bnds(problem, activity_row, GLP_UP, 0.0, 1.0);
+
+        double cheapness = 1.0 - price_signal;
+
+        double buy_ub = clamp01(0.8 * (1.0 - pv_cap_norm) + 0.001);
+        double sell_ub = clamp01(pv_cap_norm * (0.5 + 0.8 * price_signal)) + 0.001;
+
+        glp_set_col_bnds(problem, BUY_COL(time_slot), GLP_DB, 0.0, buy_ub);
+        glp_set_col_bnds(problem, DIRECT_COL(slots, time_slot), GLP_DB, 0.0, clamp01(pv_cap_norm) + 0.001);
+        glp_set_col_bnds(problem, CHARGE_COL(slots, time_slot), GLP_DB, 0.0,
+                 clamp01(pv_cap_norm + cheapness * (1.0 - pv_cap_norm)) + 0.001);
+        glp_set_col_bnds(problem, SELL_COL(slots, time_slot), GLP_DB, 0.0, sell_ub);
+
+        glp_set_obj_coef(problem, BUY_COL(time_slot), -0.05 * cheapness);
+        glp_set_obj_coef(problem, DIRECT_COL(slots, time_slot), -1.0);
+        glp_set_obj_coef(problem, CHARGE_COL(slots, time_slot), -0.9 * cheapness);
+        glp_set_obj_coef(problem, SELL_COL(slots, time_slot), -(0.45 + 0.85 * price_signal));
+
+        // Sparse matrix coefficients for this slot's two constraints
+        row_idx[matrix_index] = solar_row;
+        col_idx[matrix_index] = DIRECT_COL(slots, time_slot);
+        value[matrix_index] = 1.0;
+        matrix_index++;
+
+        row_idx[matrix_index] = solar_row;
+        col_idx[matrix_index] = SELL_COL(slots, time_slot);
+        value[matrix_index] = 1.0;
+        matrix_index++;
+
+        row_idx[matrix_index] = activity_row;
+        col_idx[matrix_index] = BUY_COL(time_slot);
+        value[matrix_index] = 1.0;
+        matrix_index++;
+
+        row_idx[matrix_index] = activity_row;
+        col_idx[matrix_index] = DIRECT_COL(slots, time_slot);
+        value[matrix_index] = 1.0;
+        matrix_index++;
+
+        row_idx[matrix_index] = activity_row;
+        col_idx[matrix_index] = CHARGE_COL(slots, time_slot);
+        value[matrix_index] = 1.0;
+        matrix_index++;
+
+        row_idx[matrix_index] = activity_row;
+        col_idx[matrix_index] = SELL_COL(slots, time_slot);
+        value[matrix_index] = 1.0;
+        matrix_index++;
     }
 
-    glp_load_matrix(problem, nz - 1, row_idx, col_idx, value);
+    // Load all constraint coefficients in one call
+    glp_load_matrix(problem, matrix_index - 1, row_idx, col_idx, value);
+
     free(row_idx);
     free(col_idx);
     free(value);
 
+    // Solve LP with simplex
     glp_smcp simplex_params;
     glp_init_smcp(&simplex_params);
     simplex_params.msg_lev = GLP_MSG_OFF;
@@ -174,13 +192,15 @@ int compute_lp(const compute_data_t* data_in, result_t* result_out) {
         }
     }
 
+    // Store slot-wise decision outputs
     for (int time_slot = 0; time_slot < slots; time_slot++) {
-        result_out->direct_use[time_slot] = glp_get_col_prim(problem, DIRECT_COL(time_slot));
-        result_out->buy_electricity[time_slot] = glp_get_col_prim(problem, BUY_COL(slots, time_slot));
+        result_out->buy_electricity[time_slot] = glp_get_col_prim(problem, BUY_COL(time_slot));
+        result_out->direct_use[time_slot] = glp_get_col_prim(problem, DIRECT_COL(slots, time_slot));
         result_out->charge_battery[time_slot] = glp_get_col_prim(problem, CHARGE_COL(slots, time_slot));
         result_out->sell_excess[time_slot] = glp_get_col_prim(problem, SELL_COL(slots, time_slot));
     }
 
+    // Cleanup
     glp_delete_prob(problem);
 
     return 0;

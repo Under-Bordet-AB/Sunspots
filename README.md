@@ -35,6 +35,7 @@ Optional packages for extra workflows:
 
 ```bash
 sudo apt install -y \
+  afl++ \
   sqlite3 \
   valgrind \
   clang-tidy \
@@ -51,6 +52,7 @@ One-shot full developer setup (build + tests + warnings tools):
 ```bash
 sudo apt update
 sudo apt install -y \
+  afl++ \
   build-essential \
   cmake \
   pkg-config \
@@ -93,6 +95,9 @@ make build
 make build-valgrind
 make build-tests
 make build-tests-valgrind
+make build-fuzz
+make fuzz-server
+make fuzz-sdk
 make list-modules
 make list-modules-valgrind
 make run
@@ -115,17 +120,60 @@ Notes:
 - `make all` runs a serialized full pipeline (build lanes + test lanes + tidy + reports).
 - Most workflow targets accept optional `M=<module-or-target>` for module-scoped actions (examples: `M=daemon`, `M=fetch`, `M=sunspots_fetch_openmeteo`).
 - `make list-modules` and `make list-modules-valgrind` dynamically discover runnable module targets from configured build trees.
-- `make run` and `make run-valgrind` run the daemon from existing builds and do not rebuild.
-- `make run M=<module>` and `make run-valgrind M=<module>` run that module binary directly (useful when daemon backgrounding makes daemon-level Valgrind unreliable).
+- `make run` runs the normal daemon from existing debug builds and does not rebuild.
+- `make run-valgrind` targets the daemon from existing valgrind builds and does not rebuild.
+- `make run M=<module>` and `make run-valgrind M=<module>` run that module binary directly.
 - `scripts/test_make_cli_matrix.sh` runs an automated CLI matrix across make targets, per-module `M=...`, and combined `M=...` cases.
 - For a faster smoke run: `INCLUDE_RUN_TARGETS=0 INCLUDE_HEAVY=0 scripts/test_make_cli_matrix.sh`
 - `make run` and `make run-tests` export `ASAN_OPTIONS`/`UBSAN_OPTIONS` with file logging to `logs/make/<branch>/raw_logs/asan/`.
-- `make run-valgrind` writes per-process Valgrind logs with child tracing.
-- Current limitation: daemon-level Valgrind is not reliable right now because the daemon runs in background mode.
+- `make run-valgrind` (daemon default) prints an expected unreliability note and exits without starting Valgrind, because daemon background mode is currently incompatible with reliable capture.
+- `make run-valgrind M=<module>` performs real Valgrind execution and writes per-process logs with child tracing.
 - `make build-tests` and `make build-tests-valgrind` compile test binaries only.
 - `make run-tests` and `make run-tests-valgrind` run tests only and do not rebuild.
+- `make build-fuzz` configures and builds one AFL++ fuzz target selected by `FUZZ_TARGET=...`.
+- `make fuzz-server` runs the frontend/server AFL++ target (`http_request_fuzzer`).
+- `make fuzz-sdk` runs the SDK DB AFL++ target (`sdk_db_fuzzer`).
 - `make warnings` runs build lanes (`build`, `build-valgrind`, `tidy`) and regenerates warning/analysis reports.
 - `make e2e` and `make e2e-valgrind` are placeholders and currently report "not yet implemented".
+
+## Fuzzing
+
+This repository now uses AFL++ for fuzzing.
+
+Install AFL++ on Ubuntu/Debian:
+
+```bash
+sudo apt install -y afl++
+```
+
+Available fuzz targets:
+
+- `make fuzz-server`
+  Runs the frontend/server request pipeline fuzzer (`http_request_fuzzer`).
+- `make fuzz-sdk`
+  Runs the SDK database fuzzer (`sdk_db_fuzzer`).
+
+You can also build or run a specific harness directly:
+
+```bash
+make build-fuzz FUZZ_TARGET=http_request_fuzzer
+make run-fuzz FUZZ_TARGET=http_request_fuzzer
+
+make build-fuzz FUZZ_TARGET=sdk_db_fuzzer
+make run-fuzz FUZZ_TARGET=sdk_db_fuzzer
+```
+
+If AFL++ aborts on the host `core_pattern` check, set:
+
+```bash
+sudo sh -c 'echo core > /proc/sys/kernel/core_pattern'
+```
+
+If you only want a local bypass for testing, use:
+
+```bash
+AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 make fuzz-server
+```
 
 ## Main Outputs
 
@@ -156,28 +204,34 @@ Notes:
 ## Executables
 
 - `sunspots_daemon`
+- `sunspots_daemon_dummy`
 - `sunspots_frontend`
 - `sunspots_fetch_manager`
 - `sunspots_fetch_openmeteo`
 - `sunspots_fetch_elprisjustnu`
 - `sunspots_compute_manager`
+- `sunspots_backfill_openmeteo`
 
 ## SDK Runtime Config
 
-Sample runtime config keys live in `config/sunspots.json` under `common.sdk`:
+Sample runtime config keys live in `config/sunspots.json` under `system.sdk`:
 
-- `db_path`: SDK sqlite DB path (default `db/ss_sdk.db`)
+- `db_dir`: SDK sqlite DB directory (default `db`; filename is derived from location)
 - `log_level`: `debug`, `info`, `warn`/`warning`, `error`, `off`/`none` (default `debug`)
 - `log_mirror_enabled`: mirror toggle (default `true`)
 - `log_mirror_path`: mirror output path (default `logs/sdk.log`)
 
+SDK DB identity comes from `system.location.id`. The default DB filename shape is `db/<location_id>.db`.
+
 ## Documentation
 
 - SDK manual: `docs/manual/sdk.md`
+- Backfill module manual: `docs/manual/backfill_openmeteo.md`
 - Build and quality workflow: `docs/manual/build_and_quality_system.md`
 - Static analysis ratcheting: `docs/manual/static_analysis_ratcheting.md`
 - Bug tracker doc: `docs/bugs.md`
 - Design notes: `docs/designs/SDK_public_db_API.md`
+- Backfill design: `docs/designs/backfill_worker_design.md`
 
 ## Bug Reporting
 

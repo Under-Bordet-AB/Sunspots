@@ -25,6 +25,7 @@
 *.exe
 *.out
 *.app
+/backfill
 
 # Build directories
 build/
@@ -35,9 +36,14 @@ out/
 
 # Logs
 *.log
+logs/
 logs/make/
 .logs/
 warnings/
+
+# Runtime data directories
+endpoints/
+db/
 
 # Editor/IDE specific
 .vscode/
@@ -77,6 +83,7 @@ crash-*
 leak-*
 oom-*
 timeout-*
+fuzz/output/
 fuzz/corpus/**/*
 !fuzz/corpus/**/
 !fuzz/corpus/**/seed*
