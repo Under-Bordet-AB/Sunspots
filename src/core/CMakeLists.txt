@@ -20,7 +20,7 @@ endfunction()
 sunspots_add_daemon_target(sunspots_daemon)
 sunspots_add_daemon_target(sunspots_daemon_dummy)
 target_compile_definitions(sunspots_daemon_dummy PRIVATE SUNSPOTS_DAEMON_FORCE_FOREGROUND=1)
-# target_compile_definitions(sunspots_daemon PRIVATE DEBUG)
+#target_compile_definitions(sunspots_daemon PRIVATE DEBUG)
 
 add_executable(sunspots_logger
     daemon_logger.c
