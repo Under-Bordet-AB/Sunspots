@@ -11,6 +11,8 @@ extern int LISTENER_COUNT;
 
 extern int LISTEN_QUEUE;
 extern int QUEUE_SIZE;
+extern int POST_SIZE_LIMIT;
+extern int HTTP_BUFFER_SIZE;
 #define SIGNAL_EXIT (-1)
 
 #define HTTP_VERSION "HTTP/1.1" // We should support keep-alive
