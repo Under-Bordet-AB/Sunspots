@@ -45,7 +45,7 @@ typedef struct
     LinkedList* query;
     LinkedList* headers;
     const char* body;
-    ssize_t body_len;
+    size_t body_len;
 } http_request;
 
 typedef struct
